@@ -1,1 +1,1 @@
-"""Test package for ALI-JARVIS."""
+"""Test package for Sam."""

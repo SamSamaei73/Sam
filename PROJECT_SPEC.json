@@ -1,0 +1,615 @@
+{
+  "project": {
+    "name": "Sam",
+    "version": "0.1.0",
+    "type": "personal_ai_agent",
+    "owner": "Ali",
+    "description": "A personalized AI operating assistant designed to understand the user's voice and text commands, operate approved computer resources, work with software projects, interact with external services through MCP, maintain memory, and require confirmation only for genuinely sensitive actions."
+  },
+  "engineering_role": {
+    "codex": {
+      "role": "engineering_orchestrator",
+      "responsibilities": [
+        "manage implementation phases",
+        "inspect repository state",
+        "coordinate coding tasks",
+        "run tests",
+        "review diffs",
+        "maintain project documentation",
+        "ensure implementation follows this specification"
+      ]
+    },
+    "claude_code": {
+      "role": "coding_and_agent_engine",
+      "responsibilities": [
+        "software development",
+        "repository analysis",
+        "code modification",
+        "test execution",
+        "technical reasoning",
+        "future coding-agent workflows"
+      ]
+    },
+    "chatgpt": {
+      "role": "senior_ai_engineer_and_architect",
+      "responsibilities": [
+        "architecture review",
+        "security review",
+        "agent design review",
+        "permission model review",
+        "MCP integration review",
+        "voice security review",
+        "memory architecture review",
+        "implementation strategy",
+        "identify technical risks before implementation"
+      ]
+    }
+  },
+  "core_principles": [
+    "security_by_default",
+    "least_privilege",
+    "explicit_capabilities",
+    "persistent_scoped_permissions",
+    "minimal_dependencies",
+    "testability",
+    "modular_architecture",
+    "observable_execution",
+    "fail_safe_behavior",
+    "no_unnecessary_confirmation",
+    "no_unnecessary_autonomy",
+    "human_control_for_high_risk_actions"
+  ],
+  "product_goal": {
+    "primary_goal": "Build Sam, a personalized AI assistant for the user.",
+    "behavior": [
+      "understand natural language",
+      "understand voice commands",
+      "remember approved preferences and permissions",
+      "operate approved resources",
+      "work with coding projects",
+      "interact with email",
+      "interact with social media services",
+      "analyze application and business data",
+      "execute multi-step workflows",
+      "report progress",
+      "verify completed work",
+      "avoid repeatedly asking for permission for already-authorized routine operations"
+    ]
+  },
+  "important_behavior": {
+    "permission_philosophy": {
+      "rule": "Do not repeatedly ask for permission when the user has already granted a persistent scoped capability.",
+      "counter_rule": "Persistent permission does not automatically authorize high-risk or irreversible actions.",
+      "example": {
+        "workspace": {
+          "read": "allowed",
+          "write": "allowed",
+          "run_tests": "allowed",
+          "git_diff": "allowed",
+          "git_commit": "configurable",
+          "git_push": "confirmation_required",
+          "force_push": "blocked"
+        },
+        "gmail": {
+          "read": "allowed",
+          "search": "allowed",
+          "draft": "allowed",
+          "send": "confirmation_required"
+        }
+      }
+    }
+  },
+  "risk_levels": {
+    "LOW": {
+      "description": "Safe read-only or reversible operations",
+      "default_confirmation": false
+    },
+    "MEDIUM": {
+      "description": "Operations that modify local state but are normally reversible",
+      "default_confirmation": false,
+      "permission_required": true
+    },
+    "HIGH": {
+      "description": "Sensitive external or destructive operations",
+      "default_confirmation": true
+    },
+    "CRITICAL": {
+      "description": "Irreversible, financial, security-sensitive, or highly privileged operations",
+      "default_confirmation": true,
+      "additional_authentication": true
+    }
+  },
+  "architecture": {
+    "layers": [
+      "interface",
+      "agent_gateway",
+      "agent_core",
+      "planner",
+      "policy_engine",
+      "permission_engine",
+      "tool_router",
+      "tools",
+      "mcp",
+      "memory",
+      "audit",
+      "execution"
+    ],
+    "flow": [
+      "user_input",
+      "input_normalization",
+      "intent_detection",
+      "context_loading",
+      "planning",
+      "risk_assessment",
+      "permission_check",
+      "confirmation_if_required",
+      "tool_selection",
+      "execution",
+      "verification",
+      "result_generation",
+      "memory_update",
+      "audit_log"
+    ]
+  },
+  "technology": {
+    "backend": {
+      "language": "Python",
+      "version": "3.12+",
+      "framework": "FastAPI",
+      "validation": "Pydantic",
+      "configuration": "Pydantic Settings",
+      "testing": "pytest",
+      "linting": "Ruff",
+      "type_checking": "mypy",
+      "package_manager": "uv"
+    },
+    "database": {
+      "primary": "PostgreSQL",
+      "vector_extension": "pgvector",
+      "usage": [
+        "persistent memory",
+        "permissions",
+        "audit logs",
+        "user preferences",
+        "agent execution records"
+      ]
+    },
+    "cache": {
+      "technology": "Redis",
+      "future_usage": [
+        "short-lived agent state",
+        "job state",
+        "event streaming",
+        "rate limiting"
+      ]
+    },
+    "frontend": {
+      "framework": "Next.js",
+      "language": "TypeScript",
+      "ui": "React",
+      "styling": "Tailwind CSS",
+      "communication": "WebSocket"
+    }
+  },
+  "project_structure": {
+    "target": [
+      "src/sam/core",
+      "src/sam/agent",
+      "src/sam/domain",
+      "src/sam/permissions",
+      "src/sam/memory",
+      "src/sam/tools",
+      "src/sam/mcp",
+      "src/sam/voice",
+      "src/sam/computer",
+      "src/sam/coding",
+      "src/sam/knowledge",
+      "src/sam/api",
+      "src/sam/audit",
+      "tests",
+      "docs"
+    ]
+  },
+  "phases": [
+    {
+      "id": 1,
+      "name": "foundation",
+      "status": "approved",
+      "scope": [
+        "FastAPI",
+        "configuration",
+        "logging",
+        "health endpoint",
+        "pytest",
+        "Ruff",
+        "mypy"
+      ],
+      "must_not_include": [
+        "voice",
+        "MCP",
+        "memory",
+        "computer control",
+        "autonomous agent"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "agent_core",
+      "status": "approved",
+      "scope": [
+        "Claude integration",
+        "agent abstraction",
+        "agent request model",
+        "agent response model",
+        "basic tool interface",
+        "structured execution",
+        "agent loop",
+        "error handling"
+      ],
+      "must_not_include": [
+        "MCP integrations",
+        "voice",
+        "computer control",
+        "persistent memory"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "permission_engine",
+      "status": "approved",
+      "scope": [
+        "capabilities",
+        "resource scopes",
+        "action scopes",
+        "risk classification",
+        "persistent grants",
+        "confirmation engine",
+        "permission revocation",
+        "auditability"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "memory",
+      "status": "approved",
+      "scope": [
+        "working memory",
+        "episodic memory",
+        "semantic memory",
+        "project memory",
+        "user preferences",
+        "memory retrieval",
+        "memory write policy"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "computer_control",
+      "status": "approved",
+      "scope": [
+        "filesystem",
+        "terminal",
+        "process management",
+        "Git",
+        "approved application control",
+        "execution sandboxing"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "coding_agent",
+      "status": "approved",
+      "scope": [
+        "repository inspection",
+        "Claude Code integration",
+        "Codex integration",
+        "planning",
+        "code modification",
+        "test execution",
+        "diff verification",
+        "safe git workflow"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "knowledge_layer",
+      "status": "implementation_completed_ready_for_review",
+      "scope": [
+        "document ingestion (PDF, TXT, Markdown, JSON, CSV)",
+        "parsing",
+        "deterministic chunking",
+        "source/citation tracking (page, section, offsets)",
+        "in-memory storage abstraction",
+        "in-memory lexical index",
+        "deterministic retrieval",
+        "embedding provider abstraction (unwired, fake only)",
+        "collection/namespace isolation",
+        "secret rejection at ingestion"
+      ],
+      "must_not_include": [
+        "automatic writes to Memory",
+        "PostgreSQL/pgvector/Supabase/Redis/vector database",
+        "a real embedding provider",
+        "MCP",
+        "AgentCore wiring",
+        "UI",
+        "background/autonomous ingestion"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "MCP_integrations",
+      "status": "not_started",
+      "integrations": [
+        "Gmail MCP",
+        "Meta Official MCP",
+        "Buffer MCP",
+        "Metricool MCP",
+        "RevenueCat MCP"
+      ],
+      "rule": "Every MCP integration must be reviewed for permissions, available tools, authentication, data exposure, failure modes, and confirmation requirements before activation."
+    },
+    {
+      "id": 9,
+      "name": "voice",
+      "scope": [
+        "speech_to_text",
+        "voice_command_processing",
+        "speaker_verification",
+        "challenge_response",
+        "voice_session_management"
+      ],
+      "security_rule": "Speaker recognition alone must not authorize critical irreversible actions."
+    },
+    {
+      "id": 10,
+      "name": "fish_audio",
+      "scope": [
+        "text_to_speech",
+        "Sam voice",
+        "voice response streaming",
+        "voice personality"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "desktop_ui",
+      "scope": [
+        "Sam interface",
+        "conversation",
+        "execution status",
+        "permission requests",
+        "tool activity",
+        "memory visibility",
+        "settings"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "proactive_agent",
+      "scope": [
+        "scheduled workflows",
+        "notifications",
+        "monitoring",
+        "background tasks",
+        "conditional automation"
+      ],
+      "rule": "Proactive behavior must respect the same permission engine as interactive behavior."
+    }
+  ],
+  "mcp_integrations": {
+    "gmail": {
+      "purpose": "email access and drafting",
+      "default_permissions": [
+        "read",
+        "search",
+        "draft"
+      ],
+      "confirmation_required": [
+        "send"
+      ]
+    },
+    "meta_official": {
+      "purpose": "Meta platform interaction",
+      "permissions_to_evaluate": [
+        "read",
+        "analytics",
+        "create_content",
+        "publish",
+        "delete"
+      ],
+      "rule": "Never assume an MCP capability is safe simply because the tool exists."
+    },
+    "buffer": {
+      "purpose": "social media publishing and scheduling",
+      "permissions_to_evaluate": [
+        "read",
+        "create_post",
+        "schedule",
+        "publish",
+        "delete"
+      ]
+    },
+    "metricool": {
+      "purpose": "social media analytics and management",
+      "permissions_to_evaluate": [
+        "read",
+        "analytics",
+        "create",
+        "publish",
+        "modify"
+      ]
+    },
+    "revenuecat": {
+      "purpose": "subscription and customer data",
+      "permissions_to_evaluate": [
+        "read",
+        "analytics",
+        "customer_lookup",
+        "subscription_lookup",
+        "mutation"
+      ],
+      "rule": "Customer and subscription data must be treated as sensitive."
+    }
+  },
+  "voice_system": {
+    "input": [
+      "microphone",
+      "speech_to_text",
+      "intent_processing"
+    ],
+    "authentication": {
+      "speaker_verification": true,
+      "challenge_response": true,
+      "os_auth_for_critical_actions": true
+    },
+    "rule": "Voice identity is an authentication signal, not unlimited authorization."
+  },
+  "memory_system": {
+    "types": [
+      "working",
+      "episodic",
+      "semantic",
+      "project"
+    ],
+    "must_store": [
+      "explicit user preferences",
+      "approved persistent permissions",
+      "project context when explicitly useful",
+      "important workflow decisions"
+    ],
+    "must_not_store_automatically": [
+      "unnecessary sensitive information",
+      "secrets",
+      "passwords",
+      "API keys"
+    ]
+  },
+  "audit_system": {
+    "record": [
+      "timestamp",
+      "user_request",
+      "agent_plan",
+      "tool_selected",
+      "permission_decision",
+      "execution_result",
+      "error",
+      "confirmation"
+    ],
+    "security_rule": "Never store secrets or sensitive credentials in audit logs."
+  },
+  "coding_agent_policy": {
+    "workflow": [
+      "inspect_repository",
+      "inspect_git_status",
+      "understand_relevant_files",
+      "create_plan",
+      "modify_code",
+      "run_tests",
+      "run_lint",
+      "run_typecheck",
+      "inspect_diff",
+      "verify_result",
+      "report"
+    ],
+    "rules": [
+      "do_not_hide_failures",
+      "do_not_claim_tests_passed_without_running_them",
+      "do_not_modify_unrelated_files",
+      "do_not_commit_unless_requested",
+      "do_not_force_push",
+      "do_not_delete_data_without_confirmation"
+    ]
+  },
+  "knowledge_layer_policy": {
+    "workflow": [
+      "validate_declared_type_against_content",
+      "compute_checksum",
+      "check_size_limits",
+      "parse",
+      "validate_extracted_content",
+      "reject_if_secret_detected",
+      "chunk_deterministically",
+      "persist_resource_and_chunks",
+      "index_chunks",
+      "report_ingestion_result"
+    ],
+    "rules": [
+      "knowledge_is_not_memory",
+      "never_write_to_memory_automatically",
+      "never_fabricate_page_or_section_metadata",
+      "never_store_or_index_secret_content",
+      "never_send_secret_content_to_an_embedding_provider",
+      "fail_closed_on_indexing_failure",
+      "isolate_resources_by_collection",
+      "permission_engine_is_the_only_authorization_authority"
+    ]
+  },
+  "security": {
+    "principles": [
+      "least_privilege",
+      "deny_by_default",
+      "capability_based_access",
+      "scoped_permissions",
+      "secret_isolation",
+      "audit_logging",
+      "confirmation_for_high_risk_actions",
+      "sandbox_external_execution"
+    ],
+    "never_allow_by_default": [
+      "force_push",
+      "destructive filesystem operations",
+      "financial transactions",
+      "credential extraction",
+      "security configuration changes",
+      "deleting production data"
+    ]
+  },
+  "development_rules": {
+    "before_each_phase": [
+      "inspect_current_repository",
+      "read_this_specification",
+      "understand_existing_architecture",
+      "identify_dependencies",
+      "identify_security_implications"
+    ],
+    "after_each_phase": [
+      "run_tests",
+      "run_lint",
+      "run_typecheck",
+      "inspect_git_diff",
+      "update_documentation",
+      "report_changes",
+      "stop"
+    ],
+    "important": "Never silently continue into the next phase."
+  },
+  "current_state": {
+    "phase": 7,
+    "status": "implementation_completed_ready_for_review",
+    "next_phase": 8,
+    "approval_required_before_next_phase": true
+  },
+  "definition_of_done": {
+    "code": "implemented and readable",
+    "tests": "passing",
+    "lint": "passing",
+    "typecheck": "passing",
+    "security": "reviewed",
+    "documentation": "updated",
+    "git_diff": "reviewed",
+    "scope": "no unrelated changes"
+  },
+  "codex_operating_instruction": {
+    "instruction": "Treat PROJECT_SPEC.json as the project's architectural source of truth. Do not redesign the system casually. When a requirement conflicts with the specification, stop and explain the conflict. Implement one phase at a time. After each phase, stop and produce a structured report for external senior review.",
+    "review_protocol": [
+      "implement",
+      "test",
+      "lint",
+      "typecheck",
+      "inspect_diff",
+      "report",
+      "stop"
+    ]
+  }
+}

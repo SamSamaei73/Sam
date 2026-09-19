@@ -13,6 +13,6 @@ typecheck:
 	uv run mypy src tests
 
 run:
-	uv run uvicorn jarvis.main:app --host $${API_HOST:-127.0.0.1} --port $${API_PORT:-8000}
+	uv run python -m sam.server
 
-check: lint test
+check: lint test typecheck
