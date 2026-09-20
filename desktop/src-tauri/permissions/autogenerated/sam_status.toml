@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-status"
+description = "Enables the sam_status command without any pre-configured scope."
+commands.allow = ["sam_status"]
+
+[[permission]]
+identifier = "deny-sam-status"
+description = "Denies the sam_status command without any pre-configured scope."
+commands.deny = ["sam_status"]

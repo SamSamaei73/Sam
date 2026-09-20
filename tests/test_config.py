@@ -125,3 +125,43 @@ def test_configuration_rejects_blank_provider_values() -> None:
 
     with pytest.raises(ValidationError):
         Settings.model_validate({"claude_base_url": "http://proxy.example"})
+
+
+def test_desktop_bridge_token_is_optional_secret_and_min_length() -> None:
+    """The bridge token is never printed and must resist guessing."""
+
+    assert Settings().desktop_bridge_token is None
+    with pytest.raises(ValidationError):
+        Settings(desktop_bridge_token=SecretStr("short"))
+    token = "z" * 40
+    settings = Settings(desktop_bridge_token=SecretStr(token))
+    assert token not in repr(settings)
+    assert token not in str(settings.model_dump())
+
+
+def test_desktop_voice_settings_defaults() -> None:
+    settings = Settings()
+    assert settings.fish_audio_voice_reference is None
+    assert settings.fish_audio_model == "s2.1-pro-free"
+
+
+def test_desktop_step_up_secret_is_optional_secret_and_min_length() -> None:
+    assert Settings().desktop_step_up_secret is None
+    with pytest.raises(ValidationError):
+        Settings(desktop_step_up_secret=SecretStr("too-short"))
+    secret = "s" * 24
+    settings = Settings(desktop_step_up_secret=SecretStr(secret))
+    assert secret not in repr(settings)
+
+
+def test_step_up_secret_must_differ_from_bridge_token() -> None:
+    shared = "x" * 40
+    with pytest.raises(ValidationError):
+        Settings(
+            desktop_bridge_token=SecretStr(shared),
+            desktop_step_up_secret=SecretStr(shared),
+        )
+    Settings(
+        desktop_bridge_token=SecretStr(shared),
+        desktop_step_up_secret=SecretStr("y" * 24),
+    )

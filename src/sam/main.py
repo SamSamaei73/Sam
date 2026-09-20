@@ -15,6 +15,8 @@ from sam.api.routes.agent import router as agent_router
 from sam.api.routes.health import router as health_router
 from sam.core.config import Settings, get_settings
 from sam.core.logging import configure_logging
+from sam.desktop.api import router as desktop_router
+from sam.desktop.runtime import build_desktop_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +54,16 @@ def create_app(
         agent_core = AgentCore(provider)
     application.state.provider = provider
     application.state.agent_core = agent_core
+    # The desktop bridge only exists when a bridge token is configured; without
+    # one every /desktop/v1 request fails closed with 503.
+    application.state.desktop_runtime = (
+        build_desktop_runtime(resolved_settings, agent_core)
+        if resolved_settings.desktop_bridge_token is not None
+        else None
+    )
     application.include_router(health_router)
     application.include_router(agent_router)
+    application.include_router(desktop_router)
     application.add_exception_handler(AgentError, agent_error_handler)
     return application
 

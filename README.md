@@ -122,3 +122,7 @@ PyPI registry with no path, git, or index override, and brings `httpcore2` and
 `sys_platform == 'emscripten'` and is never installed on macOS or Linux.
 Because it is declared and locked, `uv sync --frozen` reproduces the suite
 exactly; an undeclared copy in a virtual environment is not relied on.
+
+## Desktop UI (Phase 11)
+
+A Tauri + React desktop app lives in `desktop/` and talks to the backend through a narrow local bridge. The UI is not an authorization boundary; `PermissionEngine` stays the sole authority. See [docs/desktop.md](docs/desktop.md). Use `make desktop-check` and `make desktop-rust-check` (kept separate from `make check`).

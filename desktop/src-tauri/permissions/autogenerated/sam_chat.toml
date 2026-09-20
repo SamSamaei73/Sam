@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-chat"
+description = "Enables the sam_chat command without any pre-configured scope."
+commands.allow = ["sam_chat"]
+
+[[permission]]
+identifier = "deny-sam-chat"
+description = "Denies the sam_chat command without any pre-configured scope."
+commands.deny = ["sam_chat"]

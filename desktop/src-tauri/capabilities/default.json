@@ -1,0 +1,24 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Only the fixed Sam bridge commands. No shell, fs, process, clipboard, global-shortcut, window-creation, http or remote-webview permissions.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-sam-status",
+    "allow-sam-chat",
+    "allow-sam-knowledge-list",
+    "allow-sam-knowledge-query",
+    "allow-sam-knowledge-ingest",
+    "allow-sam-knowledge-remove",
+    "allow-sam-memory-search",
+    "allow-sam-tools",
+    "allow-sam-permissions",
+    "allow-sam-revoke-grant",
+    "allow-sam-activity",
+    "allow-sam-decide-confirmation",
+    "allow-sam-voice-utterance",
+    "allow-sam-speak"
+  ]
+}

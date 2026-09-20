@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-memory-search"
+description = "Enables the sam_memory_search command without any pre-configured scope."
+commands.allow = ["sam_memory_search"]
+
+[[permission]]
+identifier = "deny-sam-memory-search"
+description = "Denies the sam_memory_search command without any pre-configured scope."
+commands.deny = ["sam_memory_search"]

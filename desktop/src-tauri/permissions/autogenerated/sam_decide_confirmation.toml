@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-decide-confirmation"
+description = "Enables the sam_decide_confirmation command without any pre-configured scope."
+commands.allow = ["sam_decide_confirmation"]
+
+[[permission]]
+identifier = "deny-sam-decide-confirmation"
+description = "Denies the sam_decide_confirmation command without any pre-configured scope."
+commands.deny = ["sam_decide_confirmation"]

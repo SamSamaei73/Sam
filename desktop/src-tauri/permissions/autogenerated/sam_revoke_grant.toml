@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-revoke-grant"
+description = "Enables the sam_revoke_grant command without any pre-configured scope."
+commands.allow = ["sam_revoke_grant"]
+
+[[permission]]
+identifier = "deny-sam-revoke-grant"
+description = "Denies the sam_revoke_grant command without any pre-configured scope."
+commands.deny = ["sam_revoke_grant"]

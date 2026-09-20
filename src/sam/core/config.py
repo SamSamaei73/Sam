@@ -2,7 +2,14 @@
 
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, Field, FiniteFloat, SecretStr, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    Field,
+    FiniteFloat,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +33,18 @@ class Settings(BaseSettings):
     # reads the ambient environment itself. There is deliberately NO Fish
     # base-URL setting: the Fish endpoint is pinned in sam.tts.fish_audio.
     fish_audio_api_key: SecretStr | None = None
+    # Trusted voice configuration for the desktop bridge. A profile is only
+    # built when BOTH the key and a voice reference are configured; neither
+    # can ever be supplied by the UI, the LLM, or a request.
+    fish_audio_voice_reference: str | None = None
+    fish_audio_model: str = Field(default="s2.1-pro-free", min_length=1)
+    # Shared secret between the local backend and the desktop shell. When
+    # unset the /desktop/v1 routes refuse every request (fail closed).
+    desktop_bridge_token: SecretStr | None = None
+    # Step-up secret required to approve a CRITICAL confirmation from the
+    # desktop. Unset means CRITICAL actions cannot be approved from the UI at
+    # all (fail closed: approve out-of-band or not at all).
+    desktop_step_up_secret: SecretStr | None = None
     claude_model: str = Field(default="claude-sonnet-4-5", min_length=1)
     claude_base_url: AnyHttpUrl = Field(
         default=AnyHttpUrl("https://api.anthropic.com")
@@ -50,6 +69,42 @@ class Settings(BaseSettings):
         if value is not None and not value.get_secret_value().strip():
             raise ValueError("FISH_AUDIO_API_KEY must not be blank")
         return value
+
+    @field_validator("desktop_bridge_token")
+    @classmethod
+    def validate_desktop_bridge_token(cls, value: SecretStr | None) -> SecretStr | None:
+        """Require a token long enough to resist guessing by a local process."""
+
+        if value is not None and len(value.get_secret_value().strip()) < 32:
+            raise ValueError("DESKTOP_BRIDGE_TOKEN must be at least 32 characters")
+        return value
+
+    @field_validator("desktop_step_up_secret")
+    @classmethod
+    def validate_desktop_step_up_secret(
+        cls, value: SecretStr | None
+    ) -> SecretStr | None:
+        """A short step-up secret is no stronger than a click."""
+
+        if value is not None and len(value.get_secret_value()) < 16:
+            raise ValueError("DESKTOP_STEP_UP_SECRET must be at least 16 characters")
+        return value
+
+    @model_validator(mode="after")
+    def validate_step_up_is_distinct_from_bridge_token(self) -> "Settings":
+        """The step-up secret proves a human is present; the bridge token only
+        proves the caller is the local shell. They must never be the same."""
+
+        token, step_up = self.desktop_bridge_token, self.desktop_step_up_secret
+        if (
+            token is not None
+            and step_up is not None
+            and token.get_secret_value() == step_up.get_secret_value()
+        ):
+            raise ValueError(
+                "DESKTOP_STEP_UP_SECRET must differ from DESKTOP_BRIDGE_TOKEN"
+            )
+        return self
 
     @field_validator("claude_model")
     @classmethod

@@ -373,7 +373,7 @@
         "voice response streaming",
         "voice personality"
       ],
-      "status": "implementation_completed_ready_for_review",
+      "status": "approved",
       "scope_note": "Phase 10 implements explicit, non-streaming REST text-to-speech only: a provider-independent gateway plus Fish Audio as the first provider, against a trusted preconfigured voice profile. Not implemented: voice cloning, voice creation/enrollment, reference-audio upload, streaming/WebSocket, arbitrary Fish API operations, Fish ASR, playback, UI, automatic synthesis. Fish Audio is a synthesis provider, not an authorization or security boundary."
     },
     {
@@ -388,7 +388,8 @@
         "memory visibility",
         "settings"
       ],
-      "status": "not_started"
+      "status": "implementation_completed_ready_for_review",
+      "scope_note": "Phase 11 implements the Tauri 2 + React desktop UI and a narrow local bridge (/desktop/v1) onto the existing engines. The UI is not an authorization boundary: PermissionEngine remains the sole authority; the principal is bound server-side; the UI can only answer a backend-issued confirmation (approve/deny), view and revoke grants, and read Memory/Tools/Activity. Not implemented: computer control UI, coding-agent UI, MCP administration/registration UI, real speech-to-text, wake word/background listening, persistent conversation history, Memory or Knowledge writes from chat, remote/network access."
     },
     {
       "id": 12,
@@ -679,9 +680,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 10,
+    "phase": 11,
     "status": "implementation_completed_ready_for_review",
-    "next_phase": 11,
+    "next_phase": 12,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {
@@ -704,6 +705,44 @@
       "inspect_diff",
       "report",
       "stop"
+    ]
+  },
+  "desktop_ui_policy": {
+    "workflow": [
+      "ui_action",
+      "tauri_named_command_with_bounded_args",
+      "fixed_loopback_backend_route_with_bridge_token",
+      "server_bound_local_principal",
+      "existing_engine_operation",
+      "permission_engine_decides",
+      "safe_typed_result",
+      "untrusted_content_rendered_as_text"
+    ],
+    "rules": [
+      "desktop_ui_is_not_an_authorization_boundary",
+      "permission_engine_is_the_only_authorization_authority",
+      "ui_state_button_click_frontend_role_or_hidden_field_is_never_permission",
+      "principal_is_bound_by_the_backend_never_supplied_by_the_frontend",
+      "requests_forbid_extra_fields_no_scope_risk_principal_or_allow",
+      "no_generic_bridge_no_arbitrary_url_shell_file_or_proxy_command",
+      "backend_destination_is_fixed_loopback_bounded_sizes_finite_timeouts_no_redirects",
+      "tauri_capabilities_are_minimal_no_shell_fs_process_clipboard_global_shortcut_or_remote_webview",
+      "llm_mcp_document_and_provider_output_is_untrusted_and_rendered_as_text_only",
+      "confirmation_ui_only_approves_or_denies_a_backend_issued_challenge_and_the_operation_is_rechecked",
+      "critical_confirmations_require_backend_verified_step_up_authentication_never_a_click_or_checkbox",
+      "bootstrap_grants_are_exhaustively_enumerated_tagged_and_audited",
+      "permissions_view_is_view_and_revoke_only",
+      "tools_view_is_read_only_no_registry_administration",
+      "memory_view_is_read_only_and_distinct_from_knowledge",
+      "microphone_is_explicit_push_to_record_in_memory_bounded_never_background",
+      "microphone_recording_is_capped_at_the_phase_9_maximum_of_30_seconds",
+      "secret_transcripts_are_never_forwarded_or_shown",
+      "read_aloud_is_explicit_in_memory_with_trusted_profile_id_only",
+      "conversation_history_is_session_local_never_persisted",
+      "browser_storage_holds_only_allowlisted_non_sensitive_ui_preferences",
+      "no_automatic_memory_or_knowledge_writes_from_chat",
+      "errors_are_safe_with_reference_ids_no_tokens_paths_or_provider_bodies",
+      "ui_structure_follows_openjarvis_layout_visual_style_follows_the_project_reference_images"
     ]
   }
 }

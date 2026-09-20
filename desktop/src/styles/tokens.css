@@ -1,0 +1,67 @@
+/*
+ * Sam design tokens.
+ * Structure/UX follows the OpenJarvis app shell; the visual language (deep
+ * navy-black ground, electric-blue luminous rims, translucent indigo glass,
+ * squircle/pill geometry) follows the user-supplied reference images.
+ */
+:root {
+  color-scheme: dark;
+  --bg-0: #02030b;
+  --bg-1: #050826;
+  --bg-2: #0a1040;
+
+  /* glass surfaces */
+  --glass: rgba(14, 20, 62, 0.5);
+  --glass-strong: rgba(18, 26, 80, 0.72);
+  --glass-deep: rgba(5, 8, 32, 0.62);
+  --glass-hi: rgba(64, 92, 220, 0.18);
+
+  /* luminous borders */
+  --line: rgba(110, 150, 255, 0.18);
+  --line-strong: rgba(120, 165, 255, 0.4);
+  --rim: rgba(196, 218, 255, 0.9);
+  --rim-soft: rgba(150, 190, 255, 0.55);
+
+  /* accent (neon light blue) + glow (electric blue) */
+  --accent: #6fb4ff;
+  --accent-strong: #3f7dff;
+  --ice: #cfe2ff;
+  --glow: #2a4dff;
+  --glow-a: rgba(42, 77, 255, 0.55);
+  --accent-soft: rgba(111, 180, 255, 0.14);
+
+  --text: #e9f0ff;
+  --text-dim: #a3b3dc;
+  --text-faint: #6c7aa6;
+
+  /* status accents: small, only where state must be legible */
+  --ok: #5ee0b0;
+  --warn: #ffcc66;
+  --danger: #ff7a90;
+  --risk-low: #5ee0b0;
+  --risk-medium: #ffcc66;
+  --risk-high: #ff9d5c;
+  --risk-critical: #ff5c8a;
+
+  --r-sm: 12px;
+  --r: 18px;
+  --r-lg: 28px;
+  --r-pill: 999px;
+
+  --blur: blur(24px) saturate(150%);
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  --dur: 220ms;
+  --sidebar-w: 268px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}
+
+:root[data-reduced-motion="true"] {
+  --dur: 0ms;
+}

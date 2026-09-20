@@ -1,0 +1,83 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-0);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(63, 125, 255, 0.4);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 160, 255, 0.25) transparent;
+}
+
+/* Full-bleed HUD backdrop (OpenJarvis-style), in the reference palette. */
+.scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(1100px 620px at 50% 118%, rgba(30, 60, 255, 0.34), transparent 62%),
+    radial-gradient(700px 520px at 100% 0%, rgba(40, 80, 255, 0.16), transparent 60%),
+    radial-gradient(600px 460px at 0% 40%, rgba(70, 60, 255, 0.1), transparent 60%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1) 70%, #040a30);
+}
+
+.scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(120, 160, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 160, 255, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at 55% 35%, black 10%, transparent 75%);
+}
