@@ -14,6 +14,8 @@ Phase 7 adds Sam's Knowledge Layer: a provider-independent system in `src/sam/kn
 
 Phase 8 adds Sam's MCP Gateway & Integrations Framework: a secure, provider-independent path (`src/sam/mcp/`) from a proposed tool call to an external side effect, built and tested entirely against deterministic fakes — **no real integration is connected**. MCP is treated as an integration protocol, not a security boundary: a trusted registry (not the server), split into a read-only runtime view and a separate administrative interface that the runtime path never receives, owns each tool's permission binding, scope, credential reference, timeout, size limits and verification requirement; tool descriptions, server metadata and tool results are untrusted data; and every call passes canonical-id resolution, schema validation, deterministic scope derivation and the existing Phase 3 `PermissionEngine` (the sole authorization authority, with confirmations bound to the exact arguments) before a credential is resolved from a trusted reference and at most one bounded, timed transport call is made. Results are validated, checked for credential echo, optionally verified, audited content-free, and never written to Memory or Knowledge. AgentCore is unchanged; `MCPAgentBoundary` is the typed integration surface. See [`docs/mcp.md`](docs/mcp.md) for the trust model, lifecycle, and limitations.
 
+Phase 9 adds Sam's Secure Voice Input & Speech Understanding Foundation: a provider-independent path (`src/sam/voice/`) from one explicitly supplied, bounded audio input to a normalized transcript with provenance, built and tested entirely against deterministic fakes — **no real speech-to-text, microphone, wake word, background listening, or biometric enrollment**. Only 16-bit PCM and PCM-WAV are accepted (structurally validated, no codecs, no ffmpeg, no subprocess); every operation passes the existing Phase 3 `PermissionEngine` (a new `VOICE` resource) before any provider is called; the transcription provider is untrusted (validated results, contained errors, Sam-owned timeouts, at most one call, no retries); and an optional voice-identity result is only a transient, signed, one-time, session/utterance/audio-bound *authentication signal* — **voice identity is not authorization, and voice input never bypasses PermissionEngine, confirmation, or stronger authentication**. Raw audio and transcripts are never persisted, audited, or written to Memory or Knowledge, and a transcript that looks like it contains a secret is withheld entirely and never forwarded to AgentCore or an LLM provider. The voice layer creates no threads: provider timeouts are Sam-owned and passed to the provider, with late results discarded. AgentCore is unchanged; `VoiceAgentBoundary` forwards only the validated transcript text as ordinary user input. See [`docs/voice.md`](docs/voice.md) for the trust model and limitations.
+
 ## Requirements
 
 - Python 3.12+
@@ -79,6 +81,12 @@ Metricool/RevenueCat integration, real OAuth or credential storage, network
 or subprocess transport, MCP SDK dependency, automatic Memory/Knowledge
 writes, AgentCore rewrite, autonomous tool loop, or background polling — see
 `docs/mcp.md` for the full scope boundary.
+Phase 9 intentionally contains no real speech-to-text or cloud STT API, text-to-speech
+(Fish Audio is Phase 10), microphone or audio-device access, wake word,
+always-on/background listening, biometric enrollment or database, challenge-
+response, OS-level authentication, MCP/tool execution from voice, automatic
+Memory/Knowledge writes, or AgentCore rewrite — see `docs/voice.md` for the
+full scope boundary.
 
 ## Test-stack compatibility
 

@@ -339,7 +339,7 @@
     {
       "id": 8,
       "name": "MCP_integrations",
-      "status": "implementation_completed_ready_for_review",
+      "status": "approved",
       "integrations": [
         "Gmail MCP",
         "Meta Official MCP",
@@ -361,7 +361,8 @@
         "voice_session_management"
       ],
       "security_rule": "Speaker recognition alone must not authorize critical irreversible actions.",
-      "status": "not_started"
+      "status": "implementation_completed_ready_for_review",
+      "scope_note": "Phase 9 implements the secure voice INPUT foundation only, against deterministic fakes: explicit bounded PCM/WAV audio, validation, controlled untrusted transcription, an optional transient context-bound identity signal, sessions, and a narrow AgentCore boundary. Not implemented: real STT, microphone, wake word, background listening, biometrics/enrollment, challenge-response, OS-level authentication, TTS. Voice identity is an authentication signal, not an authorization decision."
     },
     {
       "id": 10,
@@ -371,7 +372,8 @@
         "Sam voice",
         "voice response streaming",
         "voice personality"
-      ]
+      ],
+      "status": "not_started"
     },
     {
       "id": 11,
@@ -578,6 +580,35 @@
       "no_real_integration_before_its_own_review"
     ]
   },
+  "voice_gateway_policy": {
+    "workflow": [
+      "verify_session_ownership",
+      "validate_audio_structure_and_limits",
+      "build_permission_request",
+      "permission_engine_evaluate",
+      "verify_and_consume_presented_identity_signal",
+      "reserve_utterance_slot",
+      "at_most_one_transcription_call_under_sam_owned_timeout",
+      "validate_untrusted_transcript",
+      "optional_identity_assessment_as_signal_only",
+      "emit_content_free_audit_event",
+      "return_normalized_result_with_provenance"
+    ],
+    "rules": [
+      "voice_input_is_not_authorization",
+      "voice_identity_is_an_authentication_signal_not_an_authorization_decision",
+      "transcript_is_untrusted_user_input_never_permission_or_confirmation",
+      "permission_engine_is_the_only_authorization_authority",
+      "no_codecs_no_ffmpeg_no_subprocess_pcm_and_wav_only",
+      "never_persist_raw_audio_or_biometric_material",
+      "never_put_audio_or_transcript_in_audit_or_errors",
+      "never_write_transcripts_to_memory_or_knowledge_automatically",
+      "identity_signals_are_context_bound_signed_short_lived_and_one_time",
+      "no_wake_word_no_background_listening_no_autonomous_action",
+      "provider_results_are_untrusted_and_timeouts_are_sam_owned",
+      "no_automatic_retries"
+    ]
+  },
   "security": {
     "principles": [
       "least_privilege",
@@ -618,9 +649,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 8,
+    "phase": 9,
     "status": "implementation_completed_ready_for_review",
-    "next_phase": 9,
+    "next_phase": 10,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {

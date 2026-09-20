@@ -136,6 +136,21 @@ _POLICY: dict[tuple[PermissionResource, PermissionAction], PolicyEntry] = {
     (_R.KNOWLEDGE, _A.WRITE): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.KNOWLEDGE, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
     (_R.KNOWLEDGE, _A.EXECUTE): PolicyEntry(RiskLevel.HIGH, True),
+    # --- voice (Phase 9) -------------------------------------------------
+    # sam.voice maps its three explicit operations onto these rows (never a
+    # new PermissionAction): opening an in-memory voice session is
+    # CREATE/LOW; processing one explicitly supplied utterance (validate,
+    # transcribe, optional identity signal) is READ/MEDIUM because the
+    # audio is sensitive input that a future provider may egress; closing
+    # a session is UPDATE/LOW. EXECUTE/HIGH is reserved for a future
+    # capability such as continuous listening — no VoiceOperation maps onto
+    # it in Phase 9. None of these rows is ever satisfied by a transcript or
+    # a voice-identity signal: only a PermissionEngine grant (plus any
+    # confirmation) authorizes anything — see docs/voice.md.
+    (_R.VOICE, _A.CREATE): PolicyEntry(RiskLevel.LOW, False),
+    (_R.VOICE, _A.READ): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.VOICE, _A.UPDATE): PolicyEntry(RiskLevel.LOW, False),
+    (_R.VOICE, _A.EXECUTE): PolicyEntry(RiskLevel.HIGH, True),
 }
 
 # Defense in depth: even if a table entry above were ever misconfigured to
