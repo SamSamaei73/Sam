@@ -12,6 +12,8 @@ Phase 6 adds Sam's Coding Agent foundation: a controlled engineering workflow in
 
 Phase 7 adds Sam's Knowledge Layer: a provider-independent system in `src/sam/knowledge/` for ingesting user-provided reference material (PDF, TXT, Markdown, JSON, CSV) into deterministically-chunked, source-attributed storage — separate from Personal Memory and never wired into it automatically. Every operation (ingest / get / list / retrieve / remove) passes through the existing Phase 3 Permission Engine (extended with one new `KNOWLEDGE` resource) before `KnowledgeEngine` ever calls its store, index, or parser; deleting a resource always requires confirmation. A best-effort PDF text/page extractor (standard-library-only — no external PDF dependency) preserves page boundaries and never fabricates a citation for content it did not actually find; a scanned/image-only PDF is honestly rejected rather than silently "learned" as empty. See [`docs/knowledge.md`](docs/knowledge.md) for the full architecture and security write-up. Only an in-memory store and a deterministic lexical index are implemented — no vector database, no real embedding provider (`FakeEmbeddingProvider` only), and no wiring into `AgentCore`.
 
+Phase 8 adds Sam's MCP Gateway & Integrations Framework: a secure, provider-independent path (`src/sam/mcp/`) from a proposed tool call to an external side effect, built and tested entirely against deterministic fakes — **no real integration is connected**. MCP is treated as an integration protocol, not a security boundary: a trusted registry (not the server), split into a read-only runtime view and a separate administrative interface that the runtime path never receives, owns each tool's permission binding, scope, credential reference, timeout, size limits and verification requirement; tool descriptions, server metadata and tool results are untrusted data; and every call passes canonical-id resolution, schema validation, deterministic scope derivation and the existing Phase 3 `PermissionEngine` (the sole authorization authority, with confirmations bound to the exact arguments) before a credential is resolved from a trusted reference and at most one bounded, timed transport call is made. Results are validated, checked for credential echo, optionally verified, audited content-free, and never written to Memory or Knowledge. AgentCore is unchanged; `MCPAgentBoundary` is the typed integration surface. See [`docs/mcp.md`](docs/mcp.md) for the trust model, lifecycle, and limitations.
+
 ## Requirements
 
 - Python 3.12+
@@ -72,6 +74,11 @@ Phase 7 intentionally contains no automatic writes to Memory, PostgreSQL/
 pgvector/Supabase/Redis/vector database, real embedding provider, OCR,
 MCP, AgentCore wiring, UI, or autonomous/background ingestion — see
 `docs/knowledge.md` for the full scope boundary.
+Phase 8 intentionally contains no real Gmail/Calendar/GitHub/Meta/Buffer/
+Metricool/RevenueCat integration, real OAuth or credential storage, network
+or subprocess transport, MCP SDK dependency, automatic Memory/Knowledge
+writes, AgentCore rewrite, autonomous tool loop, or background polling — see
+`docs/mcp.md` for the full scope boundary.
 
 ## Test-stack compatibility
 

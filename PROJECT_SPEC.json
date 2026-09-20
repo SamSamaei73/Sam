@@ -313,7 +313,7 @@
     {
       "id": 7,
       "name": "knowledge_layer",
-      "status": "implementation_completed_ready_for_review",
+      "status": "approved",
       "scope": [
         "document ingestion (PDF, TXT, Markdown, JSON, CSV)",
         "parsing",
@@ -339,7 +339,7 @@
     {
       "id": 8,
       "name": "MCP_integrations",
-      "status": "not_started",
+      "status": "implementation_completed_ready_for_review",
       "integrations": [
         "Gmail MCP",
         "Meta Official MCP",
@@ -347,7 +347,8 @@
         "Metricool MCP",
         "RevenueCat MCP"
       ],
-      "rule": "Every MCP integration must be reviewed for permissions, available tools, authentication, data exposure, failure modes, and confirmation requirements before activation."
+      "rule": "Every MCP integration must be reviewed for permissions, available tools, authentication, data exposure, failure modes, and confirmation requirements before activation.",
+      "scope_note": "Phase 8 implements the secure MCP gateway framework only, against deterministic fakes. No real integration (Gmail, Meta, Buffer, Metricool, RevenueCat, ...) is connected or activated; each still requires its own review before activation."
     },
     {
       "id": 9,
@@ -359,7 +360,8 @@
         "challenge_response",
         "voice_session_management"
       ],
-      "security_rule": "Speaker recognition alone must not authorize critical irreversible actions."
+      "security_rule": "Speaker recognition alone must not authorize critical irreversible actions.",
+      "status": "not_started"
     },
     {
       "id": 10,
@@ -545,6 +547,37 @@
       "permission_engine_is_the_only_authorization_authority"
     ]
   },
+  "mcp_gateway_policy": {
+    "workflow": [
+      "validate_canonical_tool_id",
+      "resolve_exactly_one_trusted_registry_entry",
+      "check_tool_enabled_as_extra_restriction_only",
+      "validate_arguments_against_trusted_schema",
+      "derive_deterministic_scope",
+      "build_permission_request",
+      "permission_engine_evaluate",
+      "confirmation_boundary",
+      "resolve_credential_reference_at_execution_boundary",
+      "at_most_one_transport_call_under_sam_owned_timeout",
+      "validate_bounded_untrusted_result",
+      "verify_where_required",
+      "emit_content_free_audit_event",
+      "return_normalized_result"
+    ],
+    "rules": [
+      "mcp_is_an_integration_protocol_not_a_security_boundary",
+      "permission_engine_is_the_only_authorization_authority",
+      "registry_not_server_owns_security_metadata",
+      "server_metadata_and_tool_descriptions_are_untrusted",
+      "tool_output_is_untrusted_and_never_authorizes_anything",
+      "discovery_never_makes_a_tool_executable",
+      "credentials_resolved_only_at_execution_boundary_from_trusted_references",
+      "never_pass_ambient_environment_to_a_server",
+      "no_automatic_retries",
+      "never_write_mcp_results_to_memory_or_knowledge_automatically",
+      "no_real_integration_before_its_own_review"
+    ]
+  },
   "security": {
     "principles": [
       "least_privilege",
@@ -585,9 +618,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 7,
+    "phase": 8,
     "status": "implementation_completed_ready_for_review",
-    "next_phase": 8,
+    "next_phase": 9,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {
