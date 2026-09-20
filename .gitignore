@@ -10,3 +10,8 @@ venv/
 *.egg-info/
 dist/
 build/
+
+# Local Obsidian vault - personal data, never commit
+Obsidian/
+# Obsidian app settings, created when any folder is opened as a vault
+.obsidian/
