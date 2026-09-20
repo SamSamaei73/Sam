@@ -15,6 +15,15 @@ const COMMANDS: &[&str] = &[
     "sam_decide_confirmation",
     "sam_voice_utterance",
     "sam_speak",
+    "sam_identity_status",
+    "sam_identity_enroll_begin",
+    "sam_identity_enroll_sample",
+    "sam_identity_enroll_complete",
+    "sam_identity_enroll_cancel",
+    "sam_identity_delete",
+    "sam_guest_challenge",
+    "sam_guest_start",
+    "sam_guest_end",
 ];
 
 fn main() {

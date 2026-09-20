@@ -21,17 +21,21 @@ from __future__ import annotations
 
 import hmac
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import RLock
+from typing import Literal
 
 from sam.agent.core import AgentCore
 from sam.core.config import Settings
+from sam.desktop.identity import DesktopVoiceIdentity
 from sam.knowledge.audit import InMemoryKnowledgeAuditSink
 from sam.knowledge.engine import KnowledgeEngine
 from sam.knowledge.index import InMemoryLexicalIndex
 from sam.knowledge.store import InMemoryKnowledgeStore
+from sam.language.hint import HintedTranscriptionProvider
+from sam.language.policy import LanguagePolicy, LanguagePreference
 from sam.mcp.registry import MCPRegistryAdmin, MCPRegistryReader
 from sam.memory.engine import MemoryEngine
 from sam.memory.store import InMemoryMemoryStore
@@ -51,10 +55,15 @@ from sam.permissions.models import (
 from sam.permissions.store import InMemoryPermissionStore
 from sam.tts.agent_boundary import TTSAgentBoundary
 from sam.tts.audit import InMemoryTTSAuditSink
-from sam.tts.credentials import TTSCredentialReference, credentials_from_settings
+from sam.tts.credentials import (
+    TTSCredentialReference,
+    credentials_from_settings,
+    gemini_credentials_from_settings,
+)
 from sam.tts.fish_audio import FISH_ALLOWED_MODELS, FISH_PROVIDER_ID, FishAudioProvider
 from sam.tts.gateway import TTSGateway
-from sam.tts.models import TrustedVoiceProfile
+from sam.tts.gemini_tts import GEMINI_PROVIDER_ID, GEMINI_TTS_MODEL, GeminiTTSProvider
+from sam.tts.models import TrustedVoiceProfile, TTSAudioFormat
 from sam.tts.profiles import TrustedVoiceProfiles
 from sam.tts.provider import SpeechSynthesisProvider
 from sam.voice.agent_boundary import VoiceAgentBoundary
@@ -62,6 +71,8 @@ from sam.voice.audit import InMemoryVoiceAuditSink
 from sam.voice.gateway import VoiceGateway
 from sam.voice.models import StartSessionRequest
 from sam.voice.transcription import TranscriptionProvider
+from sam.voice_identity.providers import SpeakerEmbeddingProvider
+from sam.voice_identity.store import VoiceProfileStore
 
 LOCAL_PRINCIPAL = Principal(kind=PrincipalKind.USER, id="local-user")
 KNOWLEDGE_COLLECTION = "default"
@@ -109,6 +120,9 @@ class DesktopRuntime:
         transcription_provider: TranscriptionProvider | None,
         speech_provider: SpeechSynthesisProvider | None,
         speech_profiles: TrustedVoiceProfiles | None,
+        extra_speech_providers: Sequence[SpeechSynthesisProvider] = (),
+        speaker_embedder: SpeakerEmbeddingProvider | None = None,
+        profile_store: VoiceProfileStore | None = None,
         clock: Callable[[], datetime] = utc_now,
     ) -> None:
         self.settings = settings
@@ -140,7 +154,8 @@ class DesktopRuntime:
             working_store=InMemoryWorkingMemoryStore(),
         )
         self.activity = ActivityLog()
-        self._step_up_failures: dict[str, int] = {}
+        self._step_up_failures: dict[str, tuple[int, datetime]] = {}
+        self.language = LanguagePolicy()
         self._step_up_lock = RLock()
 
         self.voice_boundary: VoiceAgentBoundary | None = None
@@ -156,6 +171,25 @@ class DesktopRuntime:
             )
             self.voice_boundary = VoiceAgentBoundary(self.voice_gateway, agent)
 
+        # Owner voice identity is composed only when an embedder, a secure
+        # profile store AND a transcription provider are all configured.
+        self.speech_profile_languages: dict[str, frozenset[str]] = {}
+        self.identity: DesktopVoiceIdentity | None = None
+        if (
+            speaker_embedder is not None
+            and profile_store is not None
+            and transcription_provider is not None
+        ):
+            self.identity = DesktopVoiceIdentity(
+                embedder=speaker_embedder,
+                store=profile_store,
+                transcriber=transcription_provider,
+                agent=agent,
+                threshold=settings.speaker_verification_threshold,
+                language=self.language,
+                clock=clock,
+            )
+
         self.speech_profiles = speech_profiles
         self.speech_boundary: TTSAgentBoundary | None = None
         self.speech_provider_id: str | None = None
@@ -163,39 +197,76 @@ class DesktopRuntime:
             gateway = TTSGateway(
                 permission_engine=self.permissions,
                 provider=speech_provider,
+                extra_providers=extra_speech_providers,
                 profiles=speech_profiles,
                 audit_sink=InMemoryTTSAuditSink(),
                 clock=clock,
             )
             self.speech_boundary = TTSAgentBoundary(gateway)
             self.speech_provider_id = speech_provider.provider_id
+            for profile in speech_profiles.list_profiles():
+                # Gemini is the Persian voice; Fish stays English-only. A
+                # request in a language the profile lacks is text-only.
+                self.speech_profile_languages[profile.profile_id] = (
+                    frozenset({"fa"})
+                    if profile.provider_id == GEMINI_PROVIDER_ID
+                    else frozenset({"en"})
+                )
 
         bootstrap_grants(self)
 
     # ------------------------------------------------------------ step-up
 
-    def check_step_up(self, confirmation_id: str, supplied: str | None) -> str:
-        """Verify the step-up secret for approving a CRITICAL confirmation.
+    def check_step_up(
+        self,
+        key: str,
+        supplied: str | None,
+        *,
+        cooldown: timedelta | None = None,
+    ) -> str:
+        """Verify the step-up secret (the Phase 11 authentication boundary).
 
-        Returns ``"ok"``, ``"unavailable"`` (no secret configured: CRITICAL
-        actions cannot be approved from the desktop), ``"failed"`` or
-        ``"locked"`` (too many wrong attempts; the caller must deny).
+        Returns ``"ok"``, ``"unavailable"`` (no secret configured: the action
+        cannot be approved from the desktop), ``"failed"`` or ``"locked"``.
+        A confirmation id is locked for good after too many wrong attempts;
+        a reusable action key (``cooldown`` given) unlocks after the cooldown.
         """
 
         secret = self.settings.desktop_step_up_secret
         if secret is None:
             return "unavailable"
+        now = self.clock()
         with self._step_up_lock:
-            if self._step_up_failures.get(confirmation_id, 0) >= MAX_STEP_UP_ATTEMPTS:
-                return "locked"
+            count, last = self._step_up_failures.get(key, (0, now))
+            if count >= MAX_STEP_UP_ATTEMPTS:
+                if cooldown is not None and now - last >= cooldown:
+                    count = 0
+                else:
+                    return "locked"
             expected = secret.get_secret_value().encode("utf-8")
             given = (supplied or "").encode("utf-8")
             if supplied and hmac.compare_digest(given, expected):
-                self._step_up_failures.pop(confirmation_id, None)
+                self._step_up_failures.pop(key, None)
                 return "ok"
-            count = self._step_up_failures.get(confirmation_id, 0) + 1
-            self._step_up_failures[confirmation_id] = count
+            count += 1
+            self._step_up_failures[key] = (count, now)
             return "locked" if count >= MAX_STEP_UP_ATTEMPTS else "failed"
+
+    def voice_boundary_for(
+        self, preference: LanguagePreference
+    ) -> VoiceAgentBoundary | None:
+        """A per-request owner voice boundary that applies the language policy."""
+
+        if self.voice_gateway is None:
+            return None
+
+        def language_for(text: str, tag: str | None) -> Literal["fa", "en"]:
+            decision = self.language.resolve(preference, text, stt_language=tag)
+            return decision.response_language
+
+        return VoiceAgentBoundary(
+            self.voice_gateway, self.agent, language_for=language_for
+        )
 
     # -------------------------------------------------------------- voice
 
@@ -346,6 +417,38 @@ def fish_speech_from_settings(
     return provider, TrustedVoiceProfiles([profile])
 
 
+PERSIAN_SPEECH_PROFILE = "sam_persian"
+
+
+def gemini_speech_from_settings(
+    settings: Settings,
+) -> tuple[SpeechSynthesisProvider, TrustedVoiceProfile] | None:
+    """The OPTIONAL Persian voice: built only when ``GEMINI_API_KEY`` is
+    locally configured, otherwise ``None`` (Persian stays text-only). The
+    model is a Sam constant; nothing here selects a paid tier or provider."""
+
+    if settings.gemini_api_key is None:
+        return None
+    try:
+        profile = TrustedVoiceProfile(
+            profile_id=PERSIAN_SPEECH_PROFILE,
+            provider_id=GEMINI_PROVIDER_ID,
+            provider_voice_reference=settings.gemini_tts_voice,
+            provider_model=GEMINI_TTS_MODEL,
+            output_format=TTSAudioFormat.WAV,
+        )
+    except ValueError:
+        return None
+    ref = TTSCredentialReference(
+        provider_id=GEMINI_PROVIDER_ID, credential_id="gemini-main"
+    )
+    provider = GeminiTTSProvider(
+        credentials=gemini_credentials_from_settings(settings, ref),
+        credential_reference=ref,
+    )
+    return provider, profile
+
+
 def build_desktop_runtime(
     settings: Settings,
     agent: AgentCore,
@@ -355,6 +458,9 @@ def build_desktop_runtime(
     speech_provider: SpeechSynthesisProvider | None = None,
     speech_profiles: TrustedVoiceProfiles | None = None,
     mcp_admin: MCPRegistryAdmin | None = None,
+    speaker_embedder: SpeakerEmbeddingProvider | None = None,
+    profile_store: VoiceProfileStore | None = None,
+    clock: Callable[[], datetime] = utc_now,
 ) -> DesktopRuntime:
     """Compose the runtime from trusted configuration.
 
@@ -362,10 +468,38 @@ def build_desktop_runtime(
     the runtime keeps only ``mcp_admin.reader()``. Production passes nothing,
     which yields an empty registry (no connectors are configured)."""
 
+    extra_speech_providers: list[SpeechSynthesisProvider] = []
     if speech_provider is None and speech_profiles is None:
         configured = fish_speech_from_settings(settings)
         if configured is not None:
             speech_provider, speech_profiles = configured
+        persian = gemini_speech_from_settings(settings)
+        if persian is not None:
+            gemini_provider, gemini_profile = persian
+            fish_profiles = (
+                list(speech_profiles.list_profiles()) if speech_profiles else []
+            )
+            speech_profiles = TrustedVoiceProfiles([*fish_profiles, gemini_profile])
+            if speech_provider is None:
+                speech_provider = gemini_provider
+            else:
+                extra_speech_providers.append(gemini_provider)
+    if (
+        speaker_embedder is None
+        and profile_store is None
+        and transcription_provider is None
+        and settings.voice_identity_enabled
+    ):
+        from sam.voice_local.factory import local_voice_from_settings
+
+        stack = local_voice_from_settings(settings)
+        if stack is not None:
+            speaker_embedder = stack.embedder
+            profile_store = stack.store
+            transcription_provider = stack.transcriber
+    if transcription_provider is not None:
+        # Lets the user's language preference nudge the recognizer, per request.
+        transcription_provider = HintedTranscriptionProvider(transcription_provider)
     admin = mcp_admin or MCPRegistryAdmin()
     return DesktopRuntime(
         settings=settings,
@@ -379,6 +513,10 @@ def build_desktop_runtime(
         transcription_provider=transcription_provider,
         speech_provider=speech_provider,
         speech_profiles=speech_profiles,
+        extra_speech_providers=extra_speech_providers,
+        speaker_embedder=speaker_embedder,
+        profile_store=profile_store,
+        clock=clock,
     )
 
 
@@ -390,5 +528,7 @@ __all__ = [
     "DesktopRuntime",
     "bootstrap_grants",
     "build_desktop_runtime",
+    "PERSIAN_SPEECH_PROFILE",
     "fish_speech_from_settings",
+    "gemini_speech_from_settings",
 ]

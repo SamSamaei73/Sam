@@ -16,7 +16,8 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 
 export const tauriBridge: SamBridge = {
   status: () => call("sam_status"),
-  chat: (message) => call("sam_chat", { message }),
+  chat: (message, language) =>
+    call("sam_chat", { message, language: language ?? "auto" }),
   knowledgeList: () => call("sam_knowledge_list"),
   knowledgeQuery: (query) => call("sam_knowledge_query", { query }),
   knowledgeIngest: ({ name, resourceType, contentBase64, confirmationId }) =>
@@ -38,8 +39,30 @@ export const tauriBridge: SamBridge = {
   activity: () => call("sam_activity"),
   decideConfirmation: (confirmationId, approved, stepUp) =>
     call("sam_decide_confirmation", { confirmationId, approved, stepUp: stepUp ?? null }),
-  voiceUtterance: (audioBase64, confirmationId) =>
-    call("sam_voice_utterance", { audioBase64, confirmationId: confirmationId ?? null }),
-  speak: ({ text, voiceProfile, confirmationId }) =>
-    call("sam_speak", { text, voiceProfile, confirmationId: confirmationId ?? null }),
+  voiceUtterance: (audioBase64, confirmationId, language) =>
+    call("sam_voice_utterance", {
+      audioBase64,
+      confirmationId: confirmationId ?? null,
+      language: language ?? "auto",
+    }),
+  speak: ({ text, voiceProfile, language, confirmationId }) =>
+    call("sam_speak", {
+      text,
+      voiceProfile,
+      language: language ?? null,
+      confirmationId: confirmationId ?? null,
+    }),
+  identityStatus: () => call("sam_identity_status"),
+  identityEnrollBegin: ({ stepUp, reEnroll }) =>
+    call("sam_identity_enroll_begin", { stepUp, reEnroll }),
+  identityEnrollSample: (sessionId, audioBase64) =>
+    call("sam_identity_enroll_sample", { sessionId, audioBase64 }),
+  identityEnrollComplete: (sessionId) =>
+    call("sam_identity_enroll_complete", { sessionId }),
+  identityEnrollCancel: (sessionId) => call("sam_identity_enroll_cancel", { sessionId }),
+  identityDelete: (stepUp) => call("sam_identity_delete", { stepUp }),
+  guestChallenge: () => call("sam_guest_challenge"),
+  guestStart: ({ challengeId, audioBase64, stepUp, minutes }) =>
+    call("sam_guest_start", { challengeId, audioBase64, stepUp, minutes }),
+  guestEnd: () => call("sam_guest_end"),
 };

@@ -77,10 +77,12 @@ def utc_now() -> datetime:
 
 
 class TTSAudioFormat(StrEnum):
-    """Output encoding. Phase 10 requests exactly one: MP3 (Fish's documented
-    default), validated by signature. No other format is accepted."""
+    """Output encoding, validated by signature/header. Fish returns MP3; the
+    Gemini provider returns raw PCM that Sam wraps into WAV. Nothing else is
+    accepted."""
 
     MP3 = "mp3"
+    WAV = "wav"
 
 
 class TTSStatus(StrEnum):

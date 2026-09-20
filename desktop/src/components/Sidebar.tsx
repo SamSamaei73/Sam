@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { ConnectionState } from "../state";
+import { useSam } from "../state";
 import { IconPanelLeft, IconPlus, IconSearch, SamMark } from "./Icons";
 import { IconButton, SidebarItem } from "./primitives";
 
@@ -47,6 +48,7 @@ export function Sidebar({
   onNewChat: () => void;
   onCollapse: () => void;
 }) {
+  const { t } = useSam();
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   const shown = conversations.filter((c) => c.title.toLowerCase().includes(needle));
@@ -62,7 +64,7 @@ export function Sidebar({
             <span>Sam</span>
           </div>
           <div className="sidebar-tools">
-            <IconButton label="New chat" onClick={onNewChat}>
+            <IconButton label={t("chat.newChat")} onClick={onNewChat}>
               <IconPlus />
             </IconButton>
             <IconButton label="Collapse sidebar" onClick={onCollapse}>
@@ -89,8 +91,8 @@ export function Sidebar({
           <IconSearch />
           <input
             type="text"
-            aria-label="Search chats"
-            placeholder="Search chats…"
+            aria-label={t("chat.searchLabel")}
+            placeholder={t("chat.searchChats")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />

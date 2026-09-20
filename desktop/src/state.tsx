@@ -10,9 +10,11 @@ import {
 } from "react";
 import type { SamBridge } from "./bridge/bridge";
 import { BridgeError, toBridgeError } from "./bridge/bridge";
-import type { Challenge, OperationResult, StatusResponse } from "./bridge/types";
+import type { Challenge, IdentityStatus, OperationResult, StatusResponse } from "./bridge/types";
+import { translate, type StringKey } from "./i18n/strings";
 import { ConfirmationDialog } from "./components/ConfirmationDialog";
 import { loadPrefs, savePrefs, type Prefs } from "./lib/prefs";
+import type { AudioEnvironment } from "./lib/recorder";
 
 export type ConnectionState = "starting" | "connected" | "degraded" | "unavailable";
 
@@ -28,6 +30,13 @@ interface SamContextValue {
   status: StatusResponse | null;
   connection: ConnectionState;
   refreshStatus: () => Promise<void>;
+  /** Owner voice identity + Guest Mode state (safe metadata only). */
+  identity: IdentityStatus | null;
+  refreshIdentity: () => Promise<void>;
+  /** Static, reviewed UI text in the chosen interface language. */
+  t: (key: StringKey) => string;
+  /** Test seam: the audio environment recorders use (defaults to the browser). */
+  audioEnvironment?: AudioEnvironment | null;
   prefs: Prefs;
   updatePrefs: (patch: Partial<Prefs>) => void;
   /**
@@ -60,9 +69,18 @@ interface PendingConfirmation {
 
 export const STATUS_POLL_MS = 30_000;
 
-export function SamProvider({ bridge, children }: { bridge: SamBridge; children: ReactNode }) {
+export function SamProvider({
+  bridge,
+  audioEnvironment,
+  children,
+}: {
+  bridge: SamBridge;
+  audioEnvironment?: AudioEnvironment | null;
+  children: ReactNode;
+}) {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [failed, setFailed] = useState(false);
+  const [identity, setIdentity] = useState<IdentityStatus | null>(null);
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const alive = useRef(true);
@@ -79,19 +97,41 @@ export function SamProvider({ bridge, children }: { bridge: SamBridge; children:
     }
   }, [bridge]);
 
+  const refreshIdentity = useCallback(async () => {
+    try {
+      const next = await bridge.identityStatus();
+      if (alive.current) setIdentity(next);
+    } catch {
+      if (alive.current) setIdentity(null);
+    }
+  }, [bridge]);
+
   useEffect(() => {
     alive.current = true;
     void refreshStatus();
-    const timer = window.setInterval(() => void refreshStatus(), STATUS_POLL_MS);
+    void refreshIdentity();
+    const timer = window.setInterval(() => {
+      void refreshStatus();
+      void refreshIdentity();
+    }, STATUS_POLL_MS);
     return () => {
       alive.current = false;
       window.clearInterval(timer);
     };
-  }, [refreshStatus]);
+  }, [refreshStatus, refreshIdentity]);
 
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = prefs.reducedMotion ? "true" : "false";
   }, [prefs.reducedMotion]);
+
+  // Only the *interface* language flips the whole app's direction; a Persian
+  // message inside an English UI is laid out per message instead.
+  useEffect(() => {
+    document.documentElement.lang = prefs.uiLanguage;
+    document.documentElement.dir = prefs.uiLanguage === "fa" ? "rtl" : "ltr";
+  }, [prefs.uiLanguage]);
+
+  const t = useCallback((key: StringKey) => translate(prefs.uiLanguage, key), [prefs.uiLanguage]);
 
   const updatePrefs = useCallback((patch: Partial<Prefs>) => {
     setPrefs((current) => {
@@ -150,11 +190,15 @@ export function SamProvider({ bridge, children }: { bridge: SamBridge; children:
       status,
       connection: deriveConnection(status, failed),
       refreshStatus,
+      identity,
+      refreshIdentity,
+      t,
+      audioEnvironment,
       prefs,
       updatePrefs,
       confirmable,
     }),
-    [bridge, status, failed, refreshStatus, prefs, updatePrefs, confirmable],
+    [bridge, status, failed, refreshStatus, identity, refreshIdentity, t, audioEnvironment, prefs, updatePrefs, confirmable],
   );
 
   return (

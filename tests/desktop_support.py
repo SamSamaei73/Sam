@@ -33,10 +33,16 @@ class StubAgent:
         self.reply = reply
         self.raises = raises
         self.messages: list[str] = []
+        self.languages: list[str | None] = []
 
     def execute(
-        self, request: AgentRequest, execution_id: str = "direct"
+        self,
+        request: AgentRequest,
+        execution_id: str = "direct",
+        *,
+        response_language: str | None = None,
     ) -> AgentResponse:
+        self.languages.append(response_language)
         self.messages.append(request.message)
         if self.raises is not None:
             raise self.raises
@@ -57,11 +63,18 @@ class Bridge:
         token: str | None = TOKEN,
         agent_configured: bool = True,
         mcp_admin: Any = None,
+        embedder: Any = None,
+        profile_store: Any = None,
+        step_up: str | None = None,
+        clock: Any = None,
     ) -> None:
         self.agent = agent or StubAgent()
         self.stt = stt
         self.tts = tts
-        settings = Settings(desktop_bridge_token=SecretStr(token) if token else None)
+        settings = Settings(
+            desktop_bridge_token=SecretStr(token) if token else None,
+            desktop_step_up_secret=SecretStr(step_up) if step_up else None,
+        )
         self.settings = settings
         profiles = None
         if tts is not None:
@@ -84,6 +97,9 @@ class Bridge:
             speech_provider=tts,
             speech_profiles=profiles,
             mcp_admin=mcp_admin,
+            speaker_embedder=embedder,
+            profile_store=profile_store,
+            **({"clock": clock} if clock is not None else {}),
         )
         self.app.state.desktop_runtime = self.runtime
         self.client = TestClient(

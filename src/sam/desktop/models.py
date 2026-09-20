@@ -49,8 +49,13 @@ class _Request(BaseModel):
 # ------------------------------------------------------------------ requests
 
 
+LanguageChoice = Literal["auto", "fa", "en"]
+
+
 class ChatRequest(_Request):
     message: str = Field(min_length=1, max_length=MAX_CHAT_MESSAGE_CHARS)
+    # A presentation/instruction preference only; never authority.
+    language: LanguageChoice = "auto"
 
 
 class KnowledgeQueryRequest(_Request):
@@ -92,6 +97,39 @@ class ConfirmationDecisionRequest(_Request):
 class VoiceUtteranceRequest(_Request):
     audio_base64: str = Field(min_length=1, max_length=MAX_AUDIO_BASE64_CHARS)
     confirmation_id: str | None = Field(default=None, max_length=MAX_ID_CHARS)
+    language: LanguageChoice = "auto"
+
+
+class EnrollBeginRequest(_Request):
+    """Start (or restart) owner enrollment. ``step_up`` is the backend-verified
+    Phase 11 authentication secret; a voice match can never stand in for it."""
+
+    step_up: SecretStr = Field(min_length=1, max_length=256)
+    re_enroll: bool = False
+
+
+class EnrollSampleRequest(_Request):
+    session_id: str = Field(min_length=1, max_length=MAX_ID_CHARS)
+    audio_base64: str = Field(min_length=1, max_length=MAX_AUDIO_BASE64_CHARS)
+
+
+class EnrollSessionRequest(_Request):
+    session_id: str = Field(min_length=1, max_length=MAX_ID_CHARS)
+
+
+class ProfileDeleteRequest(_Request):
+    step_up: SecretStr = Field(min_length=1, max_length=256)
+
+
+class GuestStartRequest(_Request):
+    """Start Guest Mode: the owner speaks a fresh challenge (speaker match +
+    challenge content), plus the step-up secret. Nothing here names a
+    principal, an owner flag, or a capability."""
+
+    challenge_id: str = Field(min_length=1, max_length=MAX_ID_CHARS)
+    audio_base64: str = Field(min_length=1, max_length=MAX_AUDIO_BASE64_CHARS)
+    step_up: SecretStr = Field(min_length=1, max_length=256)
+    minutes: int = Field(default=15, ge=1, le=30)
 
 
 class SpeakRequest(_Request):
@@ -100,6 +138,10 @@ class SpeakRequest(_Request):
 
     text: str = Field(min_length=1, max_length=MAX_TTS_INPUT_CHARS)
     voice_profile: str = Field(min_length=1, max_length=64)
+    # The language of the text. If given, the backend refuses a profile that
+    # cannot speak it (text-only instead) and never falls back to another
+    # profile or provider.
+    language: Literal["fa", "en"] | None = None
     confirmation_id: str | None = Field(default=None, max_length=MAX_ID_CHARS)
 
 
@@ -130,6 +172,8 @@ class OperationResult(BaseModel):
 
 class ChatResponse(OperationResult):
     reply: str | None = None
+    language: Literal["fa", "en"] | None = None
+    direction: Literal["rtl", "ltr"] | None = None
 
 
 class HealthState(BaseModel):
@@ -140,6 +184,9 @@ class HealthState(BaseModel):
 
 class SpeechProfile(BaseModel):
     profile_id: str
+    # Languages this trusted voice can speak. A response in a language no
+    # profile covers stays text-only (never silently sent to another provider).
+    languages: list[Literal["fa", "en"]] = ["en"]
 
 
 class StatusResponse(BaseModel):
@@ -155,6 +202,8 @@ class StatusResponse(BaseModel):
     speech_profiles: list[SpeechProfile]
     computer_control: Capability
     coding_agent: Capability
+    voice_identity: Capability = "not_configured"
+    persian_tts: Capability = "not_configured"
     conversation_history: Literal["session_local"] = "session_local"
     memory_storage: Literal["in_process"] = "in_process"
     principal_label: str
@@ -269,6 +318,11 @@ class VoiceResponse(OperationResult):
     transcript: str | None = None
     forwarded_to_agent: bool = False
     reply: str | None = None
+    # Safe, normalized speaker metadata: never a score, embedding, or template.
+    speaker: Literal["owner", "guest"] | None = None
+    speaker_result: str | None = None
+    language: Literal["fa", "en"] | None = None
+    direction: Literal["rtl", "ltr"] | None = None
 
 
 class SpeakResponse(OperationResult):
@@ -280,3 +334,41 @@ class SpeakResponse(OperationResult):
 class DecisionResponse(BaseModel):
     status: Literal["approved", "denied"]
     confirmation_id: str
+
+
+class GuestInfo(BaseModel):
+    active: bool
+    seconds_remaining: int = 0
+
+
+class IdentityStatusResponse(BaseModel):
+    """Everything the Settings screen may show about voice identity."""
+
+    available: bool
+    enrolled: bool | None = None  # None: the secure store could not be read
+    mode: Literal["owner_only", "guest_mode"] = "owner_only"
+    guest: GuestInfo = GuestInfo(active=False)
+    last_verification: Literal["verified", "not_verified", "unknown"] | None = None
+    speaker_model: Capability = "not_configured"
+    local_stt: Capability = "not_configured"
+    persian_tts: Capability = "not_configured"
+    samples_needed: int = 3
+    samples_max: int = 5
+
+
+class EnrollBeginResponse(OperationResult):
+    session_id: str | None = None
+    samples_needed: int = 3
+
+
+class EnrollProgressResponse(OperationResult):
+    accepted: bool = False
+    sample_count: int = 0
+    samples_needed: int = 3
+
+
+class ChallengeResponse(OperationResult):
+    challenge_id: str | None = None
+    text_en: str | None = None
+    text_fa: str | None = None
+    expires_in_seconds: int = 0

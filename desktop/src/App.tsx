@@ -15,6 +15,7 @@ import { IconButton } from "./components/primitives";
 import { Sidebar, type NavEntry } from "./components/Sidebar";
 import { SystemPanel } from "./components/SystemPanel";
 import type { AudioEnvironment } from "./lib/recorder";
+import { GuestBanner } from "./components/GuestBanner";
 import { SamProvider, useSam } from "./state";
 import { ActivityView } from "./views/ActivityView";
 import { KnowledgeView } from "./views/KnowledgeView";
@@ -26,15 +27,25 @@ import { ToolsView } from "./views/ToolsView";
 
 export type ViewId = "sam" | "knowledge" | "memory" | "tools" | "permissions" | "activity" | "settings";
 
-const NAV: (NavEntry & { id: ViewId })[] = [
-  { id: "sam", label: "Chat", icon: <IconChat /> },
-  { id: "knowledge", label: "Knowledge", icon: <IconKnowledge /> },
-  { id: "memory", label: "Memory", icon: <IconMemory /> },
-  { id: "tools", label: "Tools", icon: <IconTools /> },
-  { id: "permissions", label: "Permissions", icon: <IconShield /> },
-  { id: "activity", label: "Activity", icon: <IconActivity /> },
-  { id: "settings", label: "Settings", icon: <IconSettings /> },
-];
+const NAV_ICONS: Record<ViewId, ReactNode> = {
+  sam: <IconChat />,
+  knowledge: <IconKnowledge />,
+  memory: <IconMemory />,
+  tools: <IconTools />,
+  permissions: <IconShield />,
+  activity: <IconActivity />,
+  settings: <IconSettings />,
+};
+const NAV_KEYS = {
+  sam: "nav.chat",
+  knowledge: "nav.knowledge",
+  memory: "nav.memory",
+  tools: "nav.tools",
+  permissions: "nav.permissions",
+  activity: "nav.activity",
+  settings: "nav.settings",
+} as const;
+const VIEW_ORDER: ViewId[] = ["sam", "knowledge", "memory", "tools", "permissions", "activity", "settings"];
 
 interface Conversation {
   id: string;
@@ -57,7 +68,12 @@ function titleFrom(messages: ChatMessage[]): string {
 }
 
 function Shell({ audioEnvironment }: { audioEnvironment?: AudioEnvironment | null }) {
-  const { connection, prefs, updatePrefs, status, refreshStatus } = useSam();
+  const { connection, prefs, updatePrefs, status, refreshStatus, t } = useSam();
+  const NAV: (NavEntry & { id: ViewId })[] = VIEW_ORDER.map((id) => ({
+    id,
+    label: t(NAV_KEYS[id]),
+    icon: NAV_ICONS[id],
+  }));
   const [view, setView] = useState<ViewId>("sam");
   const [panelOpen, setPanelOpen] = useState(false);
   // Conversation history is session-local React state: never persisted.
@@ -95,6 +111,7 @@ function Shell({ audioEnvironment }: { audioEnvironment?: AudioEnvironment | nul
   return (
     <div className="app">
       <div className="pulse" data-state={connection} aria-hidden="true" />
+      <GuestBanner />
       {connection === "unavailable" ? (
         <div className="banner" role="alert">
           <span>Can't reach Sam's backend</span>
@@ -170,7 +187,7 @@ function pageFor(view: ViewId): ReactNode {
 
 export function App({ bridge, audioEnvironment }: { bridge: SamBridge; audioEnvironment?: AudioEnvironment | null }) {
   return (
-    <SamProvider bridge={bridge}>
+    <SamProvider bridge={bridge} audioEnvironment={audioEnvironment}>
       <div className="scene" aria-hidden="true" />
       <Shell audioEnvironment={audioEnvironment} />
     </SamProvider>

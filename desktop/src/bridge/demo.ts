@@ -5,9 +5,11 @@
  * production bundles. It simulates responses only; it is not a policy engine
  * and never claims to enforce permissions.
  */
-import type { SamBridge } from "./bridge";
+import { BridgeError, type SamBridge } from "./bridge";
+import { detectLanguage, directionFor } from "../lib/language";
 import type {
   ActivityItem,
+  IdentityStatus,
   Challenge,
   GrantInfo,
   KnowledgeHit,
@@ -26,6 +28,22 @@ const wait = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms));
 const iso = () => new Date().toISOString();
 
 export function demoBridge(): SamBridge {
+  const identity = { enrolled: false, samples: 0, session: null as string | null, guestUntil: 0 };
+  const snapshot = (): IdentityStatus => {
+    const remaining = Math.max(0, Math.round((identity.guestUntil - Date.now()) / 1000));
+    return {
+      available: true,
+      enrolled: identity.enrolled,
+      mode: remaining > 0 ? "guest_mode" : "owner_only",
+      guest: { active: remaining > 0, seconds_remaining: remaining },
+      last_verification: identity.enrolled ? "verified" : null,
+      speaker_model: "configured",
+      local_stt: "configured",
+      persian_tts: "not_configured",
+      samples_needed: 3,
+      samples_max: 5,
+    };
+  };
   const resources: ResourceInfo[] = [
     {
       resource_id: "res-demo-1",
@@ -80,7 +98,9 @@ export function demoBridge(): SamBridge {
         server_count: 0,
         voice_input: "not_configured",
         speech_output: "configured",
-        speech_profiles: [{ profile_id: "sam_default" }],
+        speech_profiles: [{ profile_id: "sam_default", languages: ["en"] }],
+        voice_identity: "configured",
+        persian_tts: "not_configured",
         computer_control: "not_configured",
         coding_agent: "not_configured",
         conversation_history: "session_local",
@@ -88,14 +108,21 @@ export function demoBridge(): SamBridge {
         principal_label: "local-user",
       };
     },
-    async chat(message) {
+    async chat(message, language = "auto") {
       await wait(500);
       log("chat", "Sam request", "completed");
+      const detected = detectLanguage(message);
+      const lang = language === "auto" ? (detected ?? "en") : language;
       return {
         ...empty,
         status: "ok",
         reference_id: "demo-exec",
-        reply: `This is a demo reply to: "${message.slice(0, 80)}". In the real app the answer comes from Sam's agent core through the local bridge.`,
+        language: lang,
+        direction: directionFor(lang),
+        reply:
+          lang === "fa"
+            ? `این یک پاسخ نمایشی است: «${message.slice(0, 60)}». در برنامهٔ واقعی، پاسخ از هستهٔ عامل سام می‌آید. برای نمونه: API و Docker به همان شکل لاتین می‌مانند. https://example.com/docs`
+            : `This is a demo reply to: "${message.slice(0, 80)}". In the real app the answer comes from Sam's agent core through the local bridge.`,
       };
     },
     async knowledgeList() {
@@ -206,6 +233,10 @@ export function demoBridge(): SamBridge {
         transcript: null,
         forwarded_to_agent: false,
         reply: null,
+        speaker: null,
+        speaker_result: null,
+        language: null,
+        direction: null,
       };
     },
     async speak() {
@@ -219,6 +250,64 @@ export function demoBridge(): SamBridge {
         audio_format: null,
         byte_length: null,
       };
+    },
+
+    // ---- owner voice identity & Guest Mode (demo state only) ----
+    async identityStatus() {
+      await wait(60);
+      return snapshot();
+    },
+    async identityEnrollBegin({ stepUp }) {
+      await wait(150);
+      if (stepUp !== "demo-step-up") throw new BridgeError("step_up_failed", "That step-up secret wasn't accepted.");
+      identity.session = `enroll-${Date.now()}`;
+      identity.samples = 0;
+      return { ...empty, status: "ok", session_id: identity.session, samples_needed: 3 };
+    },
+    async identityEnrollSample() {
+      await wait(250);
+      identity.samples += 1;
+      return { ...empty, status: "ok", accepted: true, sample_count: identity.samples, samples_needed: 3 };
+    },
+    async identityEnrollComplete() {
+      await wait(200);
+      identity.enrolled = true;
+      identity.session = null;
+      log("voice", "Owner voice enrolled", "completed");
+      return { ...empty, status: "ok" };
+    },
+    async identityEnrollCancel() {
+      identity.session = null;
+      return { ...empty, status: "ok" };
+    },
+    async identityDelete(stepUp) {
+      await wait(150);
+      if (stepUp !== "demo-step-up") throw new BridgeError("step_up_failed", "That step-up secret wasn't accepted.");
+      identity.enrolled = false;
+      identity.guestUntil = 0;
+      return { ...empty, status: "ok" };
+    },
+    async guestChallenge() {
+      await wait(100);
+      return {
+        ...empty,
+        status: "ok",
+        challenge_id: `ch-${Date.now()}`,
+        text_en: "Please say: 7 4 9 2 blue",
+        text_fa: "بگویید: 7 4 9 2 آبی",
+        expires_in_seconds: 60,
+      };
+    },
+    async guestStart({ minutes }) {
+      await wait(300);
+      identity.guestUntil = Date.now() + minutes * 60_000;
+      log("voice", "Guest mode started", "active");
+      return { ...empty, status: "ok" };
+    },
+    async guestEnd() {
+      identity.guestUntil = 0;
+      log("voice", "Guest mode revoked", "ok");
+      return { ...empty, status: "ok" };
     },
   };
 }

@@ -52,6 +52,40 @@ pub fn optional_step_up(value: Option<&str>) -> Result<(), BridgeError> {
     }
 }
 
+/// The UI language preference: a closed set, never free text.
+pub fn language(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "auto" | "fa" | "en" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// The language of text to be spoken: only the two supported languages.
+pub fn speech_language(value: Option<&str>) -> Result<(), BridgeError> {
+    match value {
+        None | Some("fa") | Some("en") => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// Guest Mode duration in minutes (the backend enforces the same 1..=30).
+pub fn guest_minutes(value: u32) -> Result<(), BridgeError> {
+    if (1..=30).contains(&value) {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+/// A user-typed step-up secret that must be present (not optional).
+pub fn required_step_up(value: &str) -> Result<(), BridgeError> {
+    if !value.is_empty() && value.chars().count() <= 256 {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
 /// A voice *profile id* (never a provider voice reference or endpoint).
 pub fn profile_id(value: &str) -> Result<(), BridgeError> {
     let ok = !value.is_empty()
@@ -129,6 +163,30 @@ mod tests {
             &"a".repeat(65),
         ] {
             assert!(profile_id(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn language_and_guest_minutes_are_closed_sets() {
+        for ok in ["auto", "fa", "en"] {
+            assert!(language(ok).is_ok());
+        }
+        for bad in ["", "FA", "klingon", "fa-IR", "auto "] {
+            assert!(language(bad).is_err(), "{bad}");
+        }
+        assert!(guest_minutes(1).is_ok() && guest_minutes(30).is_ok());
+        assert!(guest_minutes(0).is_err() && guest_minutes(31).is_err());
+        assert!(required_step_up("x").is_ok());
+        assert!(required_step_up("").is_err());
+        assert!(required_step_up(&"x".repeat(257)).is_err());
+    }
+
+    #[test]
+    fn speech_language_is_fa_or_en_only() {
+        assert!(speech_language(None).is_ok());
+        assert!(speech_language(Some("fa")).is_ok() && speech_language(Some("en")).is_ok());
+        for bad in ["auto", "", "FA", "fa-IR", "klingon"] {
+            assert!(speech_language(Some(bad)).is_err(), "{bad}");
         }
     }
 

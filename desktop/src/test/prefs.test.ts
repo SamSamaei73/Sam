@@ -20,7 +20,9 @@ describe("preferences allowlist", () => {
     expect(Object.keys(JSON.parse(window.localStorage.getItem("sam.ui.prefs.v1") ?? "{}")).sort()).toEqual([
       "readAloudVoice",
       "reducedMotion",
+      "responseLanguage",
       "sidebarCollapsed",
+      "uiLanguage",
     ]);
     expect(all).not.toMatch(/transcript|message|token|confirmation/i);
   });

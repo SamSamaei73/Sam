@@ -1,14 +1,15 @@
 import { useCallback, useRef, useState } from "react";
 import { BridgeError, toBridgeError } from "../bridge/bridge";
-import type { OperationResult } from "../bridge/types";
+import type { OperationResult, ResponseLanguage } from "../bridge/types";
 import { AgentActivity } from "../components/AgentActivity";
+import { Composer } from "../components/Composer";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
 import { IconKnowledge, IconPanelRight, IconPlus, IconShield, IconSparkle } from "../components/Icons";
-import { Composer } from "../components/Composer";
 import { MessageBubble, type ChatMessage } from "../components/MessageBubble";
 import { IconButton, NeonButton, Notice, SelectPill } from "../components/primitives";
 import { ReadAloud } from "../components/ReadAloud";
 import { VoiceRecorder } from "../components/VoiceRecorder";
+import { detectLanguage } from "../lib/language";
 import type { AudioEnvironment } from "../lib/recorder";
 import { useSam } from "../state";
 
@@ -46,7 +47,7 @@ export function SamView({
   onNavigate: (view: "knowledge" | "permissions") => void;
   audioEnvironment?: AudioEnvironment | null;
 }) {
-  const { bridge, status, connection, prefs, confirmable } = useSam();
+  const { bridge, status, connection, prefs, confirmable, t, refreshIdentity } = useSam();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -61,18 +62,29 @@ export function SamView({
 
   const agentReady = status?.agent === "configured";
   const profiles = status?.speech_profiles ?? [];
-  const activeProfile =
-    profiles.find((p) => p.profile_id === prefs.readAloudVoice)?.profile_id ?? profiles[0]?.profile_id ?? null;
-  const canSpeak = status?.speech_output === "configured" && activeProfile !== null;
+  /** A trusted voice that can actually speak this language, or none (text-only). */
+  const profileFor = (language: ResponseLanguage): string | null => {
+    const capable = profiles.filter((p) => p.languages.includes(language));
+    const preferred = capable.find((p) => p.profile_id === prefs.readAloudVoice);
+    return (preferred ?? capable[0])?.profile_id ?? null;
+  };
+  const canSpeak = status?.speech_output === "configured";
 
   const send = async (text: string) => {
     setError(null);
     push({ role: "user", text });
     setBusy("Sam is thinking…");
     try {
-      const result = await bridge.chat(text);
+      const result = await bridge.chat(text, prefs.responseLanguage);
       if (result.status === "ok" && result.reply !== null) {
-        push({ role: "sam", text: result.reply, status: "ok", referenceId: result.reference_id });
+        push({
+          role: "sam",
+          text: result.reply,
+          status: "ok",
+          referenceId: result.reference_id,
+          language: result.language,
+          direction: result.direction,
+        });
       } else {
         push({ role: "notice", text: resultText(result), status: "failed", referenceId: result.reference_id });
       }
@@ -87,10 +99,30 @@ export function SamView({
     setError(null);
     setBusy("Understanding your voice message…");
     try {
-      const result = await confirmable((confirmationId) => bridge.voiceUtterance(audioBase64, confirmationId));
-      if (result.status === "ok" && result.transcript) {
-        push({ role: "user", text: result.transcript, source: "voice" });
-        if (result.reply) push({ role: "sam", text: result.reply, status: "ok" });
+      const result = await confirmable((confirmationId) =>
+        bridge.voiceUtterance(audioBase64, confirmationId, prefs.responseLanguage),
+      );
+      void refreshIdentity();
+      if (result.reason_code === "owner_verification_required") {
+        // A non-owner speaker is stopped before any transcription: show the
+        // fixed, translated notice — never a transcript.
+        push({ role: "notice", text: t("voice.ownerRequired"), status: "failed" });
+      } else if (result.status === "ok" && result.transcript) {
+        push({
+          role: result.speaker === "guest" ? "guest" : "user",
+          text: result.transcript,
+          source: "voice",
+          language: detectLanguage(result.transcript),
+        });
+        if (result.reply) {
+          push({
+            role: "sam",
+            text: result.reply,
+            status: "ok",
+            language: result.language,
+            direction: result.direction,
+          });
+        }
       } else {
         // Secret-looking or otherwise ineligible transcripts are never shown or forwarded.
         push({ role: "notice", text: resultText(result), status: "failed", referenceId: result.reference_id });
@@ -102,10 +134,10 @@ export function SamView({
     }
   };
 
-  const greeting = (() => {
-    const hour = new Date().getHours();
-    return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  })();
+  const hour = new Date().getHours();
+  const greeting = t(
+    hour < 12 ? "chat.greeting.morning" : hour < 18 ? "chat.greeting.afternoon" : "chat.greeting.evening",
+  );
 
   return (
     <section className="chat" aria-label="Conversation with Sam">
@@ -113,7 +145,7 @@ export function SamView({
         <ConnectionIndicator state={connection} />
         {messages.length > 0 ? (
           <NeonButton variant="quiet" onClick={() => setMessages([])}>
-            Clear chat
+            {t("chat.clear")}
           </NeonButton>
         ) : null}
         <IconButton
@@ -132,37 +164,39 @@ export function SamView({
                 <IconSparkle />
               </div>
               <h2>{greeting}</h2>
-              <p>
-                Ask a question, search your documents, or use the mic to talk. This conversation lives only in this
-                window and is never saved.
-              </p>
+              <p>{t("chat.hero")}</p>
               <div className="chips">
                 <button type="button" className="chip" onClick={() => onNavigate("knowledge")}>
-                  <IconKnowledge /> Add a document
+                  <IconKnowledge /> {t("chat.addDocument")}
                 </button>
                 <button type="button" className="chip" onClick={() => onNavigate("permissions")}>
-                  <IconShield /> Review permissions
+                  <IconShield /> {t("chat.reviewPermissions")}
                 </button>
               </div>
             </div>
           ) : (
-            messages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                tools={
-                  message.role === "sam" && canSpeak && activeProfile ? (
-                    <ReadAloud
-                      bridge={bridge}
-                      text={message.text}
-                      profile={activeProfile}
-                      confirm={confirmable}
-                      onError={setError}
-                    />
-                  ) : null
-                }
-              />
-            ))
+            messages.map((message) => {
+              const language = message.language ?? detectLanguage(message.text) ?? "en";
+              const profile = canSpeak && message.role === "sam" ? profileFor(language) : null;
+              return (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  tools={
+                    profile ? (
+                      <ReadAloud
+                        bridge={bridge}
+                        text={message.text}
+                        profile={profile}
+                        language={language}
+                        confirm={confirmable}
+                        onError={setError}
+                      />
+                    ) : null
+                  }
+                />
+              );
+            })
           )}
           <div ref={endRef} />
         </div>
@@ -190,14 +224,18 @@ export function SamView({
             onChange={onSelectConversation}
             options={conversations.map((c) => ({ value: c.id, label: c.title }))}
           />
-          <IconButton label="New chat" onClick={onNewChat}>
+          <IconButton label={t("chat.newChat")} onClick={onNewChat}>
             <IconPlus />
           </IconButton>
         </div>
         <Composer
           disabled={busy !== null || !agentReady || connection === "unavailable"}
           onSend={(text) => void send(text)}
-          leading={<span className="pill" data-tone="info">Sam</span>}
+          leading={
+            <span className="pill" data-tone="info">
+              {t("chat.sam")}
+            </span>
+          }
           trailing={
             <VoiceRecorder
               available={status?.voice_input === "configured"}

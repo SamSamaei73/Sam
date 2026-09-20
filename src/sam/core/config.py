@@ -1,6 +1,7 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import (
     AnyHttpUrl,
@@ -38,6 +39,12 @@ class Settings(BaseSettings):
     # can ever be supplied by the UI, the LLM, or a request.
     fish_audio_voice_reference: str | None = None
     fish_audio_model: str = Field(default="s2.1-pro-free", min_length=1)
+    # OPTIONAL Persian speech (Gemini TTS). Off unless GEMINI_API_KEY is set
+    # locally. There is deliberately NO endpoint or model setting: both are
+    # pinned in sam.tts.gemini_tts. Free-tier only; Sam never enables billing
+    # and never falls back to another (paid) provider.
+    gemini_api_key: SecretStr | None = None
+    gemini_tts_voice: str = Field(default="Kore", min_length=1, max_length=24)
     # Shared secret between the local backend and the desktop shell. When
     # unset the /desktop/v1 routes refuse every request (fail closed).
     desktop_bridge_token: SecretStr | None = None
@@ -45,6 +52,11 @@ class Settings(BaseSettings):
     # desktop. Unset means CRITICAL actions cannot be approved from the UI at
     # all (fail closed: approve out-of-band or not at all).
     desktop_step_up_secret: SecretStr | None = None
+    # Owner voice identity (Phase 12). Off unless explicitly enabled; the local
+    # models are set up explicitly and never downloaded during a request.
+    voice_identity_enabled: bool = False
+    speaker_verification_threshold: float = Field(default=0.5, ge=0.3, le=0.9)
+    local_stt_model: Literal["small", "medium", "large-v3"] = "small"
     claude_model: str = Field(default="claude-sonnet-4-5", min_length=1)
     claude_base_url: AnyHttpUrl = Field(
         default=AnyHttpUrl("https://api.anthropic.com")
@@ -68,6 +80,15 @@ class Settings(BaseSettings):
 
         if value is not None and not value.get_secret_value().strip():
             raise ValueError("FISH_AUDIO_API_KEY must not be blank")
+        return value
+
+    @field_validator("gemini_api_key")
+    @classmethod
+    def validate_gemini_api_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """Reject configured keys that contain no usable credential."""
+
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("GEMINI_API_KEY must not be blank")
         return value
 
     @field_validator("desktop_bridge_token")

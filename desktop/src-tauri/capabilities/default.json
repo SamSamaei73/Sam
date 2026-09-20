@@ -19,6 +19,15 @@
     "allow-sam-activity",
     "allow-sam-decide-confirmation",
     "allow-sam-voice-utterance",
-    "allow-sam-speak"
+    "allow-sam-speak",
+    "allow-sam-identity-status",
+    "allow-sam-identity-enroll-begin",
+    "allow-sam-identity-enroll-sample",
+    "allow-sam-identity-enroll-complete",
+    "allow-sam-identity-enroll-cancel",
+    "allow-sam-identity-delete",
+    "allow-sam-guest-challenge",
+    "allow-sam-guest-start",
+    "allow-sam-guest-end"
   ]
 }

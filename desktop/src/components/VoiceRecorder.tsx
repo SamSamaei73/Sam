@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { useSam } from "../state";
 import { Recorder, RecorderError, type AudioEnvironment } from "../lib/recorder";
 import { IconMic, IconStop } from "./Icons";
 import { IconButton, Tooltip } from "./primitives";
 
-const ERROR_COPY: Record<string, string> = {
-  unsupported: "This device can't record audio.",
-  denied: "Microphone access was declined.",
-  failed: "The microphone couldn't be started.",
-  empty: "Nothing was recorded.",
-};
+
 
 /**
  * Explicit push-to-record. Recording starts ONLY from the click/keypress on
@@ -29,6 +25,10 @@ export function VoiceRecorder({
   onError: (message: string) => void;
   environment?: AudioEnvironment | null;
 }) {
+  const { t, audioEnvironment } = useSam();
+  const env = environment !== undefined ? environment : audioEnvironment;
+  const errorText = (code: string): string =>
+    t(`mic.${code === "denied" || code === "unsupported" || code === "empty" ? code : "failed"}` as "mic.failed");
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const recorder = useRef<Recorder | null>(null);
@@ -55,7 +55,7 @@ export function VoiceRecorder({
       const result = await active.stop();
       onRecorded(result.base64);
     } catch (error) {
-      onError(ERROR_COPY[error instanceof RecorderError ? error.code : "failed"] ?? ERROR_COPY.failed!);
+      onError(errorText(error instanceof RecorderError ? error.code : "failed"));
     }
   };
   useEffect(() => {
@@ -63,14 +63,14 @@ export function VoiceRecorder({
   });
 
   const begin = async () => {
-    const next = new Recorder(environment, () => finishRef.current());
+    const next = new Recorder(env, () => finishRef.current());
     recorder.current = next;
     try {
       await next.start();
       setRecording(true);
     } catch (error) {
       recorder.current = null;
-      onError(ERROR_COPY[error instanceof RecorderError ? error.code : "failed"] ?? ERROR_COPY.failed!);
+      onError(errorText(error instanceof RecorderError ? error.code : "failed"));
     }
   };
 
@@ -83,8 +83,8 @@ export function VoiceRecorder({
 
   if (!available) {
     return (
-      <Tooltip text="Voice input isn't configured">
-        <IconButton label="Voice input (not configured)" disabled>
+      <Tooltip text={t("mic.notConfigured")}>
+        <IconButton label={`${t("mic.start")} (${t("mic.notConfigured")})`} disabled>
           <IconMic />
         </IconButton>
       </Tooltip>
@@ -97,15 +97,17 @@ export function VoiceRecorder({
         <>
           <span className="pill" data-tone="critical" role="status" aria-live="polite">
             <span className="rec-dot" aria-hidden="true" />
-            <span className="pill-text">Recording {elapsed}s</span>
+            <span className="pill-text">
+              {t("mic.recording")} {elapsed}s
+            </span>
           </span>
-          <IconButton label="Cancel recording" onClick={cancel}>
+          <IconButton label={t("mic.cancel")} onClick={cancel}>
             ✕
           </IconButton>
         </>
       ) : null}
       <IconButton
-        label={recording ? "Stop recording and send" : "Record a voice message"}
+        label={recording ? t("mic.stop") : t("mic.start")}
         active={recording}
         disabled={busy}
         onClick={() => (recording ? void finish() : void begin())}

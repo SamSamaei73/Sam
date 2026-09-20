@@ -19,7 +19,8 @@ the PermissionEngine; nothing here (and no identity result) shortcuts that.
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Callable
+from typing import Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,6 +47,18 @@ class AgentSink(Protocol):
 
     def execute(
         self, request: AgentRequest, execution_id: str = "direct"
+    ) -> AgentResponse: ...
+
+
+class LanguageAgentSink(Protocol):
+    """AgentCore with the trusted response-language keyword."""
+
+    def execute(
+        self,
+        request: AgentRequest,
+        execution_id: str = "direct",
+        *,
+        response_language: str | None = None,
     ) -> AgentResponse: ...
 
 
@@ -81,9 +94,19 @@ def _forwardable_transcript(voice: VoiceProcessingResult) -> str | None:
 
 
 class VoiceAgentBoundary:
-    def __init__(self, gateway: VoiceInvoker, agent: AgentSink) -> None:
+    def __init__(
+        self,
+        gateway: VoiceInvoker,
+        agent: AgentSink,
+        *,
+        language_for: Callable[[str, str | None], Literal["fa", "en"] | None]
+        | None = None,
+    ) -> None:
         self._gateway = gateway
         self._agent = agent
+        # (transcript, recognizer language tag) -> response language. Trusted
+        # code only (the language policy); None keeps the Phase 9 behaviour.
+        self._language_for = language_for
 
     def handle_voice(
         self, request: VoiceProcessingRequest, *, confirmation_id: str | None = None
@@ -107,10 +130,22 @@ class VoiceAgentBoundary:
         if transcript is None:
             return VoiceAgentOutcome(voice=voice)
         try:
-            reply = self._agent.execute(
-                AgentRequest(message=transcript),
-                execution_id=voice.utterance_id,
+            language = (
+                self._language_for(transcript, voice.language)
+                if self._language_for is not None
+                else None
             )
+            agent_request = AgentRequest(message=transcript)
+            if language is None:
+                reply = self._agent.execute(
+                    agent_request, execution_id=voice.utterance_id
+                )
+            else:
+                reply = cast(LanguageAgentSink, self._agent).execute(
+                    agent_request,
+                    execution_id=voice.utterance_id,
+                    response_language=language,
+                )
         except Exception:
             return VoiceAgentOutcome(
                 voice=voice, forwarded_to_agent=True, agent_error=True

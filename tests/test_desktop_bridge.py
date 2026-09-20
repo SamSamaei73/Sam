@@ -419,14 +419,19 @@ def test_voice_not_configured() -> None:
     assert body["status"] == "not_configured"
 
 
-def test_voice_utterance_forwards_transcript_once() -> None:
+def test_voice_without_owner_identity_fails_closed_and_text_chat_still_works() -> None:
+    """No identity runtime: voice is refused (no legacy owner voice session),
+    nothing is transcribed or forwarded, and text chat is unaffected."""
+
     stt = FakeTranscriptionProvider("what is the weather")
     bridge = Bridge(stt=stt)
     body = bridge.post("/voice/utterance", {"audio_base64": wav_b64()}).json()
-    assert body["status"] == "ok", body
-    assert body["transcript"] == "what is the weather"
-    assert bridge.agent.messages == ["what is the weather"]
-    assert stt.call_count == 1
+    assert body["status"] == "denied"
+    assert body["reason_code"] == "identity_not_configured"
+    assert body.get("transcript") is None and body.get("speaker") is None
+    assert stt.call_count == 0 and bridge.agent.messages == []
+    chat = bridge.post("/chat", {"message": "hello"})
+    assert chat.status_code == 200 and bridge.agent.messages == ["hello"]
 
 
 def test_voice_secret_transcript_is_withheld() -> None:
@@ -438,15 +443,11 @@ def test_voice_secret_transcript_is_withheld() -> None:
     assert body["status"] != "ok" or body.get("forwarded_to_agent") is False
 
 
-def test_voice_malformed_audio_rejected() -> None:
+def test_voice_malformed_audio_never_reaches_the_agent() -> None:
     bridge = Bridge(stt=FakeTranscriptionProvider())
-    assert bridge.post("/voice/utterance", {"audio_base64": b64(b"not a wav")}).json()[
-        "status"
-    ] in ("rejected", "failed")
-    assert (
-        bridge.post("/voice/utterance", {"audio_base64": "###"}).json()["status"]
-        == "rejected"
-    )
+    for audio in (b64(b"not a wav"), "###"):
+        body = bridge.post("/voice/utterance", {"audio_base64": audio}).json()
+        assert body["status"] == "denied"  # identity gate comes first
     assert bridge.agent.messages == []
 
 
@@ -577,6 +578,16 @@ def test_router_has_only_the_documented_routes() -> None:
             ("POST", "/desktop/v1/confirmations/decide"),
             ("POST", "/desktop/v1/voice/utterance"),
             ("POST", "/desktop/v1/tts/speak"),
+            # Phase 12: owner voice identity and Guest Mode
+            ("GET", "/desktop/v1/voice/identity"),
+            ("POST", "/desktop/v1/voice/identity/enroll/begin"),
+            ("POST", "/desktop/v1/voice/identity/enroll/sample"),
+            ("POST", "/desktop/v1/voice/identity/enroll/complete"),
+            ("POST", "/desktop/v1/voice/identity/enroll/cancel"),
+            ("POST", "/desktop/v1/voice/identity/delete"),
+            ("POST", "/desktop/v1/voice/guest/challenge"),
+            ("POST", "/desktop/v1/voice/guest/start"),
+            ("POST", "/desktop/v1/voice/guest/end"),
         ]
     )
 

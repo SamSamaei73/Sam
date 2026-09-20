@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { vi } from "vitest";
 import { App } from "../App";
 import type { SamBridge } from "../bridge/bridge";
-import type { OperationResult, StatusResponse } from "../bridge/types";
+import type { IdentityStatus, OperationResult, StatusResponse } from "../bridge/types";
 import type { AudioEnvironment } from "../lib/recorder";
 
 export const ok: OperationResult = {
@@ -24,6 +24,8 @@ export const baseStatus: StatusResponse = {
   voice_input: "not_configured",
   speech_output: "not_configured",
   speech_profiles: [],
+  voice_identity: "not_configured",
+  persian_tts: "not_configured",
   computer_control: "not_configured",
   coding_agent: "not_configured",
   conversation_history: "session_local",
@@ -31,12 +33,25 @@ export const baseStatus: StatusResponse = {
   principal_label: "local-user",
 };
 
+export const baseIdentity: IdentityStatus = {
+  available: false,
+  enrolled: null,
+  mode: "owner_only",
+  guest: { active: false, seconds_remaining: 0 },
+  last_verification: null,
+  speaker_model: "not_configured",
+  local_stt: "not_configured",
+  persian_tts: "not_configured",
+  samples_needed: 3,
+  samples_max: 5,
+};
+
 export type MockBridge = { [K in keyof SamBridge]: ReturnType<typeof vi.fn> } & SamBridge;
 
 export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
   const base: SamBridge = {
     status: vi.fn(async () => baseStatus),
-    chat: vi.fn(async () => ({ ...ok, reply: "Hello from Sam" })),
+    chat: vi.fn(async () => ({ ...ok, reply: "Hello from Sam", language: "en" as const, direction: "ltr" as const })),
     knowledgeList: vi.fn(async () => ({ ...ok, resources: [] })),
     knowledgeQuery: vi.fn(async () => ({ ...ok, hits: [] })),
     knowledgeIngest: vi.fn(async () => ({ ...ok, resource: null, duplicate_of: null })),
@@ -55,6 +70,10 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
       transcript: null,
       forwarded_to_agent: false,
       reply: null,
+      speaker: null,
+      speaker_result: null,
+      language: null,
+      direction: null,
     })),
     speak: vi.fn(async () => ({
       ...ok,
@@ -62,6 +81,21 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
       audio_format: null,
       byte_length: null,
     })),
+    identityStatus: vi.fn(async () => baseIdentity),
+    identityEnrollBegin: vi.fn(async () => ({ ...ok, session_id: "enroll-1", samples_needed: 3 })),
+    identityEnrollSample: vi.fn(async () => ({ ...ok, accepted: true, sample_count: 1, samples_needed: 3 })),
+    identityEnrollComplete: vi.fn(async () => ok),
+    identityEnrollCancel: vi.fn(async () => ok),
+    identityDelete: vi.fn(async () => ok),
+    guestChallenge: vi.fn(async () => ({
+      ...ok,
+      challenge_id: "ch-1",
+      text_en: "Please say: 7 4 9 2 blue",
+      text_fa: "بگویید: 7 4 9 2 آبی",
+      expires_in_seconds: 60,
+    })),
+    guestStart: vi.fn(async () => ok),
+    guestEnd: vi.fn(async () => ok),
   };
   return { ...base, ...overrides } as MockBridge;
 }

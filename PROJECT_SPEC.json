@@ -388,11 +388,42 @@
         "memory visibility",
         "settings"
       ],
-      "status": "implementation_completed_ready_for_review",
+      "status": "approved",
       "scope_note": "Phase 11 implements the Tauri 2 + React desktop UI and a narrow local bridge (/desktop/v1) onto the existing engines. The UI is not an authorization boundary: PermissionEngine remains the sole authority; the principal is bound server-side; the UI can only answer a backend-issued confirmation (approve/deny), view and revoke grants, and read Memory/Tools/Activity. Not implemented: computer control UI, coding-agent UI, MCP administration/registration UI, real speech-to-text, wake word/background listening, persistent conversation history, Memory or Knowledge writes from chat, remote/network access."
     },
     {
       "id": 12,
+      "name": "owner_voice_identity_persian_guest_mode",
+      "scope": [
+        "owner speaker verification",
+        "Persian/Farsi first-class support",
+        "English support",
+        "Persian-English code switching",
+        "owner-controlled temporary Guest Mode"
+      ],
+      "status": "approved",
+      "scope_note": "Phase 12 adds local owner speaker verification (Keychain-backed template), local Persian/English STT, an explicit language policy with RTL rendering, and owner-authorized restricted Guest Mode. Voice identity is an authentication signal, not authorization; speaker verification is probabilistic; paid fallback is disabled. Persian speech has an OPTIONAL, disabled-by-default Gemini free-tier provider (external service; text is sent to Google; no retry; text-only on quota/error/unconfigured; paid fallback OFF; Sam never enables billing). Gemini Persian TTS is implemented but CURRENTLY UNAVAILABLE on the owner's Google project: the one live smoke returned HTTP 400 with a non-object JSON error body, contrary to the documented contract, and no retry or fallback was made; it never generated live audio, so Sam stays text-only. Local Persian STT was validated on owner recordings (English exact; Persian approximate; mixed Persian-English best-effort). Not implemented: always-on/wake-word listening, liveness beyond the spoken challenge, non-macOS enrollment."
+    },
+    {
+      "id": 13,
+      "name": "multi_model_router_personal_content_privacy_policy",
+      "scope": [
+        "multi-model routing",
+        "personal content policy",
+        "privacy and cost routing policy"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": 14,
+      "name": "professional_intelligence",
+      "scope": [
+        "professional intelligence"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": 15,
       "name": "proactive_agent",
       "scope": [
         "scheduled workflows",
@@ -401,7 +432,25 @@
         "background tasks",
         "conditional automation"
       ],
-      "rule": "Proactive behavior must respect the same permission engine as interactive behavior."
+      "rule": "Proactive behavior must respect the same permission engine as interactive behavior.",
+      "status": "not_started"
+    },
+    {
+      "id": 16,
+      "name": "career_and_phd_agent",
+      "scope": [
+        "career and PhD agent"
+      ],
+      "status": "not_started"
+    },
+    {
+      "id": 17,
+      "name": "production_integration_hardening",
+      "scope": [
+        "production integration",
+        "hardening"
+      ],
+      "status": "not_started"
     }
   ],
   "mcp_integrations": {
@@ -680,9 +729,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 11,
-    "status": "implementation_completed_ready_for_review",
-    "next_phase": 12,
+    "phase": 12,
+    "status": "approved",
+    "next_phase": 13,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {
@@ -743,6 +792,31 @@
       "no_automatic_memory_or_knowledge_writes_from_chat",
       "errors_are_safe_with_reference_ids_no_tokens_paths_or_provider_bodies",
       "ui_structure_follows_openjarvis_layout_visual_style_follows_the_project_reference_images"
+    ]
+  },
+  "voice_identity_policy": {
+    "rules": [
+      "voice_identity_is_an_authentication_signal_not_authorization",
+      "speaker_match_never_creates_grants_answers_confirmations_or_satisfies_critical_authentication",
+      "permission_engine_is_the_only_authorization_authority",
+      "speaker_verification_is_probabilistic_and_never_described_as_proof",
+      "speaker_is_classified_before_any_transcription",
+      "default_mode_is_owner_only_unknown_and_errors_fail_closed",
+      "owner_template_persists_only_in_the_macos_keychain_no_insecure_fallback",
+      "raw_enrollment_and_verification_audio_is_never_persisted",
+      "biometric_data_never_reaches_logs_audit_memory_knowledge_llm_mcp_or_browser_storage",
+      "enrollment_reenrollment_and_deletion_require_backend_verified_step_up",
+      "sensitive_identity_transitions_require_a_fresh_random_one_time_spoken_challenge_plus_speaker_match",
+      "challenge_response_does_not_stop_real_time_voice_cloning",
+      "guest_mode_is_off_by_default_temporary_max_30_minutes_revocable_and_conversation_only",
+      "guest_has_its_own_principal_and_permission_store_with_no_memory_knowledge_tool_or_send_publish_delete_access",
+      "guest_cannot_extend_start_another_guest_or_become_owner",
+      "guest_context_is_session_local_and_never_written_to_memory_or_knowledge",
+      "models_come_from_a_pinned_trusted_registry_with_sha256_and_are_acquired_only_by_explicit_setup",
+      "no_trust_remote_code_no_pickle_no_hidden_downloads_no_runtime_network_for_local_voice",
+      "microphone_capture_is_explicit_visible_and_never_background_or_wake_word",
+      "persian_is_first_class_language_policy_is_presentation_not_authorization",
+      "paid_fallback_is_off_an_unavailable_voice_means_text_only"
     ]
   }
 }

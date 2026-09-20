@@ -13,6 +13,7 @@ returned — never taken from the provider.
 from __future__ import annotations
 
 import hashlib
+import struct
 
 from sam.tts.errors import TTSInvalidAudioError, TTSOutputTooLargeError
 from sam.tts.models import MAX_TTS_AUDIO_BYTES, TTSAudioFormat
@@ -41,6 +42,21 @@ def _valid_mp3_signature(data: bytes) -> bool:
     return False
 
 
+def _valid_wav(data: bytes) -> bool:
+    """A canonical PCM WAV as produced by Sam: RIFF/WAVE, 16-bit mono PCM,
+    a fmt chunk then a data chunk whose declared length matches the payload."""
+
+    if len(data) <= 44 or data[:4] != b"RIFF" or data[8:16] != b"WAVEfmt ":
+        return False
+    audio_format, channels, _rate, _byte_rate, _align, bits = struct.unpack(
+        "<HHIIHH", data[20:36]
+    )
+    if (audio_format, channels, bits) != (1, 1, 16) or data[36:40] != b"data":
+        return False
+    (declared,) = struct.unpack("<I", data[40:44])
+    return bool(declared == len(data) - 44 and declared % 2 == 0)
+
+
 def validate_audio_bytes(data: object, fmt: TTSAudioFormat) -> tuple[bytes, str]:
     """Return ``(audio_bytes, sha256_hex)`` or raise a typed error."""
 
@@ -54,6 +70,8 @@ def validate_audio_bytes(data: object, fmt: TTSAudioFormat) -> tuple[bytes, str]
         raise TTSInvalidAudioError("provider returned a text body, not audio")
     if fmt is TTSAudioFormat.MP3 and not _valid_mp3_signature(data):
         raise TTSInvalidAudioError("provider audio has no valid MP3 signature")
+    if fmt is TTSAudioFormat.WAV and not _valid_wav(data):
+        raise TTSInvalidAudioError("provider audio is not a valid PCM WAV")
     return data, hashlib.sha256(data).hexdigest()
 
 

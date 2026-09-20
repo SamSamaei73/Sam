@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from sam.agent.errors import AgentError, AgentExecutionError, InvalidRequestError
 from sam.agent.models import AgentRequest, AgentResponse, Message, MessageRole
 from sam.agent.provider import LLMProvider
+from sam.language.policy import INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +21,37 @@ class AgentCore:
         self._max_turns = max_turns
 
     def execute(
-        self, request: AgentRequest, execution_id: str = "direct"
+        self,
+        request: AgentRequest,
+        execution_id: str = "direct",
+        *,
+        response_language: str | None = None,
     ) -> AgentResponse:
-        """Execute at most the configured number of provider turns."""
+        """Execute at most the configured number of provider turns.
+
+        ``response_language`` is supplied by trusted code (the language
+        policy), not by the request: it only selects a fixed, reviewed
+        instruction about which language to answer in and is never authority.
+        """
 
         message = request.message.strip()
         if not message:
             raise InvalidRequestError("message must not be blank")
+        if response_language is not None and response_language not in INSTRUCTIONS:
+            raise InvalidRequestError("unsupported response language")
 
         logger.info("Agent execution started id=%s", execution_id)
         messages: Sequence[Message] = [
             Message(role=MessageRole.USER, content=message),
         ]
+        if response_language is not None:
+            messages = [
+                Message(
+                    role=MessageRole.SYSTEM,
+                    content=INSTRUCTIONS[response_language],
+                ),
+                *messages,
+            ]
         try:
             for _ in range(self._max_turns):
                 logger.info("Provider call started id=%s", execution_id)

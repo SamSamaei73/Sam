@@ -7,7 +7,7 @@ const voiceStatus = { ...baseStatus, voice_input: "configured" as const };
 const speechStatus = {
   ...baseStatus,
   speech_output: "configured" as const,
-  speech_profiles: [{ profile_id: "sam_default" }],
+  speech_profiles: [{ profile_id: "sam_default", languages: ["en" as const] }],
 };
 
 describe("voice input", () => {
@@ -15,7 +15,7 @@ describe("voice input", () => {
     const fake = fakeAudioEnvironment();
     renderApp(mockBridge(), fake.env);
     await screen.findByLabelText("Connection: Connected");
-    expect(screen.getByRole("button", { name: "Voice input (not configured)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Voice input isn't configured/ })).toBeDisabled();
     expect(fake.getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -35,6 +35,10 @@ describe("voice input", () => {
         transcript: "what's the weather",
         forwarded_to_agent: true,
         reply: "Sunny.",
+        speaker: "owner" as const,
+        speaker_result: "owner_verified",
+        language: "en" as const,
+        direction: "ltr" as const,
       })),
     });
     renderApp(bridge, fake.env);
@@ -88,6 +92,10 @@ describe("voice input", () => {
         transcript: null,
         forwarded_to_agent: false,
         reply: null,
+        speaker: null,
+        speaker_result: null,
+        language: null,
+        direction: null,
       })),
     });
     renderApp(bridge, fake.env);
@@ -180,6 +188,7 @@ describe("read aloud", () => {
     expect(bridge.speak).toHaveBeenCalledWith({
       text: "Hello from Sam",
       voiceProfile: "sam_default",
+      language: "en",
       confirmationId: undefined,
     });
     expect(created).toHaveLength(1);

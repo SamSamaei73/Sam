@@ -1,14 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { Challenge } from "../bridge/types";
 import { humanize } from "../lib/format";
+import { useSam } from "../state";
 import { NeonButton, StatusPill } from "./primitives";
 
-const RISK_COPY: Record<Challenge["risk"], string> = {
-  low: "Low risk",
-  medium: "Medium risk",
-  high: "High risk",
-  critical: "Critical risk",
-};
 
 const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
@@ -38,6 +33,7 @@ export function ConfirmationDialog({
   onApprove: (stepUp?: string) => void;
   onDeny: () => void;
 }) {
+  const { t } = useSam();
   const titleId = useId();
   const descId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -99,9 +95,9 @@ export function ConfirmationDialog({
         data-risk={challenge.risk}
         onKeyDown={onKeyDown}
       >
-        <h2 id={titleId}>Sam needs your confirmation</h2>
+        <h2 id={titleId}>{t("confirm.title")}</h2>
         <div className="row">
-          <StatusPill tone={challenge.risk} label={RISK_COPY[challenge.risk]} />
+          <StatusPill tone={challenge.risk} label={t(`confirm.risk.${challenge.risk}`)} />
         </div>
         <p id={descId} className="muted">
           Review exactly what will happen. Sam will only proceed if its permission rules also allow it.
@@ -129,7 +125,7 @@ export function ConfirmationDialog({
         {critical ? (
           <div style={{ marginBottom: 14 }}>
             <label htmlFor="step-up" className="muted">
-              Critical actions need your step-up secret
+              {t("confirm.stepUp")}
             </label>
             <input
               id="step-up"
@@ -151,14 +147,14 @@ export function ConfirmationDialog({
         ) : null}
         <div className="dialog-actions">
           <button ref={denyRef} type="button" className="neon-button" data-variant="quiet" onClick={onDeny}>
-            Deny
+            {t("confirm.deny")}
           </button>
           <NeonButton
             variant={challenge.risk === "low" || challenge.risk === "medium" ? "primary" : "danger"}
             disabled={submitted || (critical && stepUp.length === 0)}
             onClick={approve}
           >
-            Approve
+            {t("confirm.approve")}
           </NeonButton>
         </div>
       </div>

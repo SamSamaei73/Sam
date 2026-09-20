@@ -46,11 +46,20 @@ pub enum Route {
     DecideConfirmation,
     VoiceUtterance,
     Speak,
+    IdentityStatus,
+    IdentityEnrollBegin,
+    IdentityEnrollSample,
+    IdentityEnrollComplete,
+    IdentityEnrollCancel,
+    IdentityDelete,
+    GuestChallenge,
+    GuestStart,
+    GuestEnd,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 14] = [
+    pub const ALL: [Route; 23] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -65,6 +74,15 @@ impl Route {
         Route::DecideConfirmation,
         Route::VoiceUtterance,
         Route::Speak,
+        Route::IdentityStatus,
+        Route::IdentityEnrollBegin,
+        Route::IdentityEnrollSample,
+        Route::IdentityEnrollComplete,
+        Route::IdentityEnrollCancel,
+        Route::IdentityDelete,
+        Route::GuestChallenge,
+        Route::GuestStart,
+        Route::GuestEnd,
     ];
 
     pub fn path(self) -> &'static str {
@@ -83,6 +101,15 @@ impl Route {
             Route::DecideConfirmation => "/desktop/v1/confirmations/decide",
             Route::VoiceUtterance => "/desktop/v1/voice/utterance",
             Route::Speak => "/desktop/v1/tts/speak",
+            Route::IdentityStatus => "/desktop/v1/voice/identity",
+            Route::IdentityEnrollBegin => "/desktop/v1/voice/identity/enroll/begin",
+            Route::IdentityEnrollSample => "/desktop/v1/voice/identity/enroll/sample",
+            Route::IdentityEnrollComplete => "/desktop/v1/voice/identity/enroll/complete",
+            Route::IdentityEnrollCancel => "/desktop/v1/voice/identity/enroll/cancel",
+            Route::IdentityDelete => "/desktop/v1/voice/identity/delete",
+            Route::GuestChallenge => "/desktop/v1/voice/guest/challenge",
+            Route::GuestStart => "/desktop/v1/voice/guest/start",
+            Route::GuestEnd => "/desktop/v1/voice/guest/end",
         }
     }
 
@@ -94,14 +121,18 @@ impl Route {
                 | Route::Tools
                 | Route::Permissions
                 | Route::Activity
+                | Route::IdentityStatus
         )
     }
 
     pub fn timeout(self) -> Duration {
         match self {
-            Route::Chat | Route::VoiceUtterance | Route::Speak | Route::KnowledgeIngest => {
-                LONG_TIMEOUT
-            }
+            Route::Chat
+            | Route::VoiceUtterance
+            | Route::Speak
+            | Route::KnowledgeIngest
+            | Route::IdentityEnrollSample
+            | Route::GuestStart => LONG_TIMEOUT,
             _ => SHORT_TIMEOUT,
         }
     }
@@ -116,6 +147,7 @@ pub enum BridgeError {
     StepUpUnavailable,
     StepUpFailed,
     StepUpLocked,
+    GuestModeActive,
     NotConfigured,
     TooLarge,
     Invalid,
@@ -131,6 +163,7 @@ impl BridgeError {
             BridgeError::StepUpUnavailable => "step_up_unavailable",
             BridgeError::StepUpFailed => "step_up_failed",
             BridgeError::StepUpLocked => "step_up_locked",
+            BridgeError::GuestModeActive => "guest_mode_active",
             BridgeError::NotConfigured => "not_configured",
             BridgeError::TooLarge => "too_large",
             BridgeError::Invalid => "invalid",
@@ -229,13 +262,14 @@ impl Backend {
 }
 
 /// The backend reports step-up outcomes as `{"detail":{"code":"step_up_*"}}`.
-/// Only these three allowlisted codes are surfaced; nothing else from the body.
+/// Only these allowlisted codes are surfaced; nothing else from the body.
 fn step_up_code(body: &[u8]) -> Option<BridgeError> {
     let value: Value = serde_json::from_slice(body).ok()?;
     match value.get("detail")?.get("code")?.as_str()? {
         "step_up_unavailable" => Some(BridgeError::StepUpUnavailable),
         "step_up_failed" => Some(BridgeError::StepUpFailed),
         "step_up_locked" => Some(BridgeError::StepUpLocked),
+        "guest_mode_active" => Some(BridgeError::GuestModeActive),
         _ => None,
     }
 }
@@ -319,7 +353,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 14);
+        assert_eq!(paths.len(), 23);
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));
@@ -434,6 +468,7 @@ mod tests {
             ("step_up_unavailable", BridgeError::StepUpUnavailable),
             ("step_up_failed", BridgeError::StepUpFailed),
             ("step_up_locked", BridgeError::StepUpLocked),
+            ("guest_mode_active", BridgeError::GuestModeActive),
             ("bridge_forbidden", BridgeError::Unauthorized),
             ("anything-else secret", BridgeError::Unauthorized),
         ];
@@ -479,6 +514,7 @@ mod tests {
             BridgeError::StepUpUnavailable,
             BridgeError::StepUpFailed,
             BridgeError::StepUpLocked,
+            BridgeError::GuestModeActive,
             BridgeError::NotConfigured,
             BridgeError::TooLarge,
             BridgeError::Invalid,

@@ -41,9 +41,19 @@ fn sam_status(state: State<'_, AppState>) -> CommandResult {
 }
 
 #[tauri::command]
-fn sam_chat(state: State<'_, AppState>, message: String) -> CommandResult {
+fn sam_chat(
+    state: State<'_, AppState>,
+    message: String,
+    language: Option<String>,
+) -> CommandResult {
     invalid(validate::text(&message, validate::MAX_MESSAGE_CHARS))?;
-    run(&state, Route::Chat, Some(json!({ "message": message })))
+    let language = language.unwrap_or_else(|| "auto".to_string());
+    invalid(validate::language(&language))?;
+    run(
+        &state,
+        Route::Chat,
+        Some(json!({ "message": message, "language": language })),
+    )
 }
 
 #[tauri::command]
@@ -180,9 +190,11 @@ fn sam_speak(
     text: String,
     voice_profile: String,
     confirmation_id: Option<String>,
+    language: Option<String>,
 ) -> CommandResult {
     invalid(validate::text(&text, validate::MAX_SPEAK_CHARS))?;
     invalid(validate::profile_id(&voice_profile))?;
+    invalid(validate::speech_language(language.as_deref()))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
     run(
         &state,
@@ -191,8 +203,113 @@ fn sam_speak(
             "text": text,
             "voice_profile": voice_profile,
             "confirmation_id": confirmation_id,
+            "language": language,
         })),
     )
+}
+
+#[tauri::command]
+fn sam_identity_status(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::IdentityStatus, None)
+}
+
+#[tauri::command]
+fn sam_identity_enroll_begin(
+    state: State<'_, AppState>,
+    step_up: String,
+    re_enroll: bool,
+) -> CommandResult {
+    invalid(validate::required_step_up(&step_up))?;
+    run(
+        &state,
+        Route::IdentityEnrollBegin,
+        Some(json!({ "step_up": step_up, "re_enroll": re_enroll })),
+    )
+}
+
+#[tauri::command]
+fn sam_identity_enroll_sample(
+    state: State<'_, AppState>,
+    session_id: String,
+    audio_base64: String,
+) -> CommandResult {
+    invalid(validate::id(&session_id))?;
+    invalid(validate::base64_payload(
+        &audio_base64,
+        validate::MAX_AUDIO_BASE64,
+    ))?;
+    run(
+        &state,
+        Route::IdentityEnrollSample,
+        Some(json!({ "session_id": session_id, "audio_base64": audio_base64 })),
+    )
+}
+
+#[tauri::command]
+fn sam_identity_enroll_complete(state: State<'_, AppState>, session_id: String) -> CommandResult {
+    invalid(validate::id(&session_id))?;
+    run(
+        &state,
+        Route::IdentityEnrollComplete,
+        Some(json!({ "session_id": session_id })),
+    )
+}
+
+#[tauri::command]
+fn sam_identity_enroll_cancel(state: State<'_, AppState>, session_id: String) -> CommandResult {
+    invalid(validate::id(&session_id))?;
+    run(
+        &state,
+        Route::IdentityEnrollCancel,
+        Some(json!({ "session_id": session_id })),
+    )
+}
+
+#[tauri::command]
+fn sam_identity_delete(state: State<'_, AppState>, step_up: String) -> CommandResult {
+    invalid(validate::required_step_up(&step_up))?;
+    run(
+        &state,
+        Route::IdentityDelete,
+        Some(json!({ "step_up": step_up })),
+    )
+}
+
+#[tauri::command]
+fn sam_guest_challenge(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::GuestChallenge, Some(json!({})))
+}
+
+#[tauri::command]
+fn sam_guest_start(
+    state: State<'_, AppState>,
+    challenge_id: String,
+    audio_base64: String,
+    step_up: String,
+    minutes: u32,
+) -> CommandResult {
+    invalid(validate::id(&challenge_id))?;
+    invalid(validate::base64_payload(
+        &audio_base64,
+        validate::MAX_AUDIO_BASE64,
+    ))?;
+    invalid(validate::required_step_up(&step_up))?;
+    invalid(validate::guest_minutes(minutes))?;
+    run(
+        &state,
+        Route::GuestStart,
+        Some(json!({
+            "challenge_id": challenge_id,
+            "audio_base64": audio_base64,
+            "step_up": step_up,
+            "minutes": minutes,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_guest_end(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::GuestEnd, Some(json!({})))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -216,6 +333,15 @@ pub fn run_app() {
             sam_decide_confirmation,
             sam_voice_utterance,
             sam_speak,
+            sam_identity_status,
+            sam_identity_enroll_begin,
+            sam_identity_enroll_sample,
+            sam_identity_enroll_complete,
+            sam_identity_enroll_cancel,
+            sam_identity_delete,
+            sam_guest_challenge,
+            sam_guest_start,
+            sam_guest_end,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sam desktop");

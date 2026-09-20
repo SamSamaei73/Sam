@@ -15,12 +15,14 @@ export function ReadAloud({
   bridge,
   text,
   profile,
+  language,
   confirm,
   onError,
 }: {
   bridge: SamBridge;
   text: string;
   profile: string;
+  language: "fa" | "en";
   confirm: (run: (confirmationId?: string) => Promise<SpeakResponse>) => Promise<SpeakResponse>;
   onError: (message: string) => void;
 }) {
@@ -46,7 +48,7 @@ export function ReadAloud({
     setState("loading");
     try {
       const result = await confirm((confirmationId) =>
-        bridge.speak({ text, voiceProfile: profile, confirmationId }),
+        bridge.speak({ text, voiceProfile: profile, language, confirmationId }),
       );
       if (!mounted.current) return;
       if (result.status !== "ok" || !result.audio_base64) {

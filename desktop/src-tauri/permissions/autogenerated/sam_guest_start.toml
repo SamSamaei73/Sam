@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-guest-start"
+description = "Enables the sam_guest_start command without any pre-configured scope."
+commands.allow = ["sam_guest_start"]
+
+[[permission]]
+identifier = "deny-sam-guest-start"
+description = "Denies the sam_guest_start command without any pre-configured scope."
+commands.deny = ["sam_guest_start"]

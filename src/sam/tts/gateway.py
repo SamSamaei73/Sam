@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
@@ -94,6 +94,7 @@ class TTSGateway:
         permission_engine: PermissionEngine,
         provider: SpeechSynthesisProvider,
         profiles: TrustedVoiceProfiles,
+        extra_providers: Sequence[SpeechSynthesisProvider] = (),
         audit_sink: TTSAuditSink | None = None,
         clock: Callable[[], datetime] = utc_now,
         provider_timeout_seconds: float = DEFAULT_TTS_TIMEOUT_SECONDS,
@@ -101,8 +102,15 @@ class TTSGateway:
         if not 0 < provider_timeout_seconds <= MAX_TTS_TIMEOUT_SECONDS:
             raise ValueError("timeout must be within the speech-synthesis bound")
         self._engine = permission_engine
-        self._provider = provider
-        self._provider_id = require_valid_provider_id(provider.provider_id)
+        # Providers are bound to trusted profiles by provider id. Nothing a
+        # request, an LLM, or a provider returns can pick or switch one, and
+        # there is no fallback from one provider to another.
+        self._providers: dict[str, SpeechSynthesisProvider] = {}
+        for candidate in (provider, *extra_providers):
+            candidate_id = require_valid_provider_id(candidate.provider_id)
+            if candidate_id in self._providers:
+                raise ValueError("duplicate speech provider id")
+            self._providers[candidate_id] = candidate
         self._profiles = profiles
         self._audit = audit_sink
         self._clock = clock
@@ -138,8 +146,9 @@ class TTSGateway:
             profile = self._profiles.get(request.trusted_voice_profile)
         except TTSError as error:
             return self._result(request, run, now, rejected, error.category)
-        if profile.provider_id != self._provider_id:
-            # A profile bound to another provider can never reach this one.
+        provider = self._providers.get(profile.provider_id)
+        if provider is None:
+            # A profile bound to a provider Sam does not have is unusable.
             return self._result(request, run, now, rejected, _C.UNKNOWN_PROFILE)
         run.profile = profile
         run.text_length = len(request.text) if isinstance(request.text, str) else None
@@ -185,7 +194,7 @@ class TTSGateway:
         )
         deadline = time.monotonic() + self._timeout
         try:
-            raw = self._provider.synthesize(
+            raw = provider.synthesize(
                 provider_request, timeout_seconds=self._timeout
             )
         except TimeoutError:
@@ -210,7 +219,7 @@ class TTSGateway:
         run.output_size = len(audio_bytes)
         audio = SynthesizedAudio(
             synthesis_id=run.synthesis_id,
-            provider_id=self._provider_id,  # Sam's, never provider-supplied
+            provider_id=profile.provider_id,  # Sam's, never provider-supplied
             trusted_profile_id=profile.profile_id,  # Sam's, never provider-supplied
             format=profile.output_format,
             byte_length=len(audio_bytes),
@@ -317,7 +326,7 @@ class TTSGateway:
                     request_id=request.request_id,
                     synthesis_id=run.synthesis_id,
                     principal=request.principal,
-                    provider_id=self._provider_id if run.profile else None,
+                    provider_id=run.profile.provider_id if run.profile else None,
                     trusted_profile_id=run.profile.profile_id if run.profile else None,
                     permission_action=perm.action if perm else None,
                     permission_resource=perm.resource if perm else None,

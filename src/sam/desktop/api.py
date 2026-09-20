@@ -14,7 +14,7 @@ import base64
 import binascii
 import contextlib
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -61,7 +61,7 @@ from sam.desktop.models import (
     VoiceUtteranceRequest,
 )
 from sam.desktop.runtime import KNOWLEDGE_COLLECTION, DesktopRuntime
-from sam.desktop.security import bridge_runtime
+from sam.desktop.security import bridge_runtime, owner_bridge_runtime
 from sam.knowledge.models import (
     GetResourceRequest as _Unused,  # noqa: F401  (kept out of the public surface)
 )
@@ -76,6 +76,8 @@ from sam.knowledge.models import (
     RetrievalQuery,
     RetrieveRequest,
 )
+from sam.language.hint import language_hint_scope
+from sam.language.policy import LanguagePreference
 from sam.memory.models import Memory
 from sam.memory.models import RetrievalQuery as MemoryQuery
 from sam.permissions.errors import ConfirmationError, GrantNotFoundError
@@ -89,9 +91,12 @@ from sam.voice.models import (
     VoiceProcessingRequest,
     VoiceProcessingStatus,
 )
+from sam.voice_identity.policy import SpeakerClass
 
 router = APIRouter(prefix="/desktop/v1", tags=["desktop"])
 _runtime = Depends(bridge_runtime)
+# Owner-bound routes: refused while Guest Mode is active (see security.py).
+_owner_runtime = Depends(owner_bridge_runtime)
 
 _AGENT_MESSAGES = {
     "invalid_request": "That message couldn't be processed.",
@@ -138,6 +143,9 @@ _MESSAGES = {
     "invalid_audio": "The voice service returned unusable audio.",
     "output_too_large": "The generated audio was too large.",
     "agent_error": "Sam couldn't reply to that.",
+    "owner_verification_required": "Owner verification required.",
+    "identity_not_configured": "Voice needs owner voice identity to be set up first.",
+    "language_unsupported": "No trusted voice speaks that language: text only.",
 }
 _DEFAULT_MESSAGE = "The request couldn't be completed."
 
@@ -225,6 +233,7 @@ _REJECTION_REASONS = frozenset(
         "text_too_large",
         "unknown_profile",
         "profile_disabled",
+        "language_unsupported",
         "malformed_audio",
         "unsupported_audio",
         "audio_too_large",
@@ -267,6 +276,13 @@ def _decode(data: str) -> bytes | None:
 # ---------------------------------------------------------------- status
 
 
+def _profile_languages(
+    runtime: DesktopRuntime, profile_id: str
+) -> list[Literal["fa", "en"]]:
+    known = runtime.speech_profile_languages.get(profile_id, frozenset({"en"}))
+    return [lang for lang in ("fa", "en") if lang in known]  # type: ignore[misc]
+
+
 @router.get("/status", response_model=StatusResponse)
 def status(runtime: DesktopRuntime = _runtime) -> StatusResponse:
     registry = runtime.mcp_registry
@@ -287,10 +303,22 @@ def status(runtime: DesktopRuntime = _runtime) -> StatusResponse:
         voice_input="configured" if runtime.voice_boundary else "not_configured",
         speech_output="configured" if runtime.speech_boundary else "not_configured",
         speech_profiles=[
-            SpeechProfile(profile_id=p) for p in runtime.speech_profile_ids
+            SpeechProfile(
+                profile_id=p,
+                languages=_profile_languages(runtime, p),
+            )
+            for p in runtime.speech_profile_ids
         ],
         computer_control="foundation_ready",
         coding_agent="foundation_ready",
+        voice_identity="configured"
+        if runtime.identity is not None
+        else "not_configured",
+        persian_tts=(
+            "configured"
+            if any("fa" in v for v in runtime.speech_profile_languages.values())
+            else "not_configured"
+        ),
         principal_label=runtime.principal.id,
     )
 
@@ -299,7 +327,9 @@ def status(runtime: DesktopRuntime = _runtime) -> StatusResponse:
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(payload: ChatRequest, runtime: DesktopRuntime = _runtime) -> ChatResponse:
+def chat(
+    payload: ChatRequest, runtime: DesktopRuntime = _owner_runtime
+) -> ChatResponse:
     if not runtime.agent_configured:
         runtime.activity.add("chat", "Sam request", "not configured")
         return ChatResponse(
@@ -308,9 +338,12 @@ def chat(payload: ChatRequest, runtime: DesktopRuntime = _runtime) -> ChatRespon
             message="Sam's language model isn't configured.",
         )
     execution_id = uuid4().hex
+    language = runtime.language.resolve(payload.language, payload.message)
     try:
         response = runtime.agent.execute(
-            AgentRequest(message=payload.message), execution_id
+            AgentRequest(message=payload.message),
+            execution_id,
+            response_language=language.response_language,
         )
     except AgentError as error:
         runtime.activity.add("chat", "Sam request", "failed")
@@ -329,14 +362,20 @@ def chat(payload: ChatRequest, runtime: DesktopRuntime = _runtime) -> ChatRespon
             reference_id=execution_id,
         )
     runtime.activity.add("chat", "Sam request", "completed")
-    return ChatResponse(status="ok", reply=response.message, reference_id=execution_id)
+    return ChatResponse(
+        status="ok",
+        reply=response.message,
+        reference_id=execution_id,
+        language=language.response_language,
+        direction=language.direction,
+    )
 
 
 # ------------------------------------------------------------- knowledge
 
 
 @router.get("/knowledge/resources", response_model=KnowledgeListResponse)
-def knowledge_list(runtime: DesktopRuntime = _runtime) -> KnowledgeListResponse:
+def knowledge_list(runtime: DesktopRuntime = _owner_runtime) -> KnowledgeListResponse:
     result = runtime.knowledge.list_resources(
         ListResourcesRequest(
             principal=runtime.principal, collection_id=KNOWLEDGE_COLLECTION
@@ -357,7 +396,7 @@ def knowledge_list(runtime: DesktopRuntime = _runtime) -> KnowledgeListResponse:
 
 @router.post("/knowledge/query", response_model=KnowledgeQueryResponse)
 def knowledge_query(
-    payload: KnowledgeQueryRequest, runtime: DesktopRuntime = _runtime
+    payload: KnowledgeQueryRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> KnowledgeQueryResponse:
     try:
         query = RetrievalQuery(
@@ -404,7 +443,7 @@ def knowledge_query(
 
 @router.post("/knowledge/ingest", response_model=KnowledgeIngestResponse)
 def knowledge_ingest(
-    payload: KnowledgeIngestRequest, runtime: DesktopRuntime = _runtime
+    payload: KnowledgeIngestRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> KnowledgeIngestResponse:
     content = _decode(payload.content_base64)
     if content is None or not content:
@@ -454,7 +493,7 @@ def knowledge_ingest(
 
 @router.post("/knowledge/remove", response_model=OperationResult)
 def knowledge_remove(
-    payload: KnowledgeRemoveRequest, runtime: DesktopRuntime = _runtime
+    payload: KnowledgeRemoveRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> OperationResult:
     try:
         request = RemoveResourceRequest(
@@ -485,7 +524,7 @@ def knowledge_remove(
 
 @router.post("/memory/search", response_model=MemoryResponse)
 def memory_search(
-    payload: MemorySearchRequest, runtime: DesktopRuntime = _runtime
+    payload: MemorySearchRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> MemoryResponse:
     """Read-only. There is intentionally no write route: nothing the UI does
     (chat, documents, voice) becomes a memory automatically."""
@@ -514,7 +553,7 @@ def memory_search(
 
 
 @router.get("/tools", response_model=ToolsResponse)
-def tools(runtime: DesktopRuntime = _runtime) -> ToolsResponse:
+def tools(runtime: DesktopRuntime = _owner_runtime) -> ToolsResponse:
     """Read-only view of the trusted MCP registry. There is no route that can
     register, enable, disable, or edit a tool, and no admin handle exists in
     this runtime."""
@@ -547,7 +586,7 @@ def tools(runtime: DesktopRuntime = _runtime) -> ToolsResponse:
 
 
 @router.get("/permissions", response_model=PermissionsResponse)
-def permissions(runtime: DesktopRuntime = _runtime) -> PermissionsResponse:
+def permissions(runtime: DesktopRuntime = _owner_runtime) -> PermissionsResponse:
     grants = runtime.grants.list_grants(runtime.principal)
     infos = []
     for g in sorted(grants, key=lambda g: g.grant_id):
@@ -570,7 +609,7 @@ def permissions(runtime: DesktopRuntime = _runtime) -> PermissionsResponse:
 
 @router.post("/permissions/revoke", response_model=OperationResult)
 def revoke(
-    payload: RevokeGrantRequest, runtime: DesktopRuntime = _runtime
+    payload: RevokeGrantRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> OperationResult:
     """Revocation only ever *removes* authority, so it is safe to expose.
     There is no create-grant route."""
@@ -614,7 +653,7 @@ _OUTCOME_LABELS = {
 
 
 @router.get("/activity", response_model=ActivityResponse)
-def activity(runtime: DesktopRuntime = _runtime) -> ActivityResponse:
+def activity(runtime: DesktopRuntime = _owner_runtime) -> ActivityResponse:
     """Current-session activity only: PermissionEngine audit events for the
     local principal plus the desktop's own content-free log. Nothing here can
     contain message text, prompts, credentials, or document content."""
@@ -645,6 +684,16 @@ def activity(runtime: DesktopRuntime = _runtime) -> ActivityResponse:
                 outcome=record.outcome,
             )
         )
+    if runtime.identity is not None:
+        for entry in runtime.identity.audit.events():
+            items.append(
+                ActivityItem(
+                    timestamp=entry.occurred_at.isoformat(),
+                    kind="voice_identity",
+                    label=entry.event.replace("_", " ").capitalize(),
+                    outcome=entry.reason_code,
+                )
+            )
     items.sort(key=lambda i: i.timestamp, reverse=True)
     return ActivityResponse(items=items[:MAX_ACTIVITY_ITEMS])
 
@@ -654,7 +703,7 @@ def activity(runtime: DesktopRuntime = _runtime) -> ActivityResponse:
 
 @router.post("/confirmations/decide", response_model=DecisionResponse)
 def decide(
-    payload: ConfirmationDecisionRequest, runtime: DesktopRuntime = _runtime
+    payload: ConfirmationDecisionRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> DecisionResponse:
     """Record a human's approve/deny for ONE pending confirmation.
 
@@ -673,7 +722,7 @@ def decide(
         raise HTTPException(status_code=404, detail={"code": "confirmation_not_found"})
     if payload.approved and record.risk is RiskLevel.CRITICAL:
         verdict = runtime.check_step_up(
-            payload.confirmation_id,
+            f"confirmation:{payload.confirmation_id}",
             payload.step_up.get_secret_value() if payload.step_up else None,
         )
         if verdict != "ok":
@@ -716,15 +765,33 @@ def decide(
 def voice_utterance(
     payload: VoiceUtteranceRequest, runtime: DesktopRuntime = _runtime
 ) -> VoiceResponse:
-    """One explicit recording -> Phase 9 gateway -> (if the transcript is
-    eligible) exactly one AgentCore call. Secret-looking transcripts are
-    withheld by the Phase 9 gateway and are never forwarded."""
+    """One explicit recording.
 
-    if runtime.voice_boundary is None:
+    With owner voice identity configured the speaker is classified FIRST
+    (owner / guest / blocked) — before any transcription — so a non-owner's
+    speech is never turned into text for the agent while Sam is owner-only.
+    The classification is an authentication signal only: it grants nothing.
+    Then: Phase 9 gateway -> (if the transcript is eligible) exactly one
+    AgentCore call, in the language the language policy chose. Secret-looking
+    transcripts are withheld by the gateway and never forwarded.
+    """
+
+    if runtime.voice_gateway is None:
         return VoiceResponse(
             status="not_configured",
             reason_code="not_configured",
             message=_message("not_configured"),
+        )
+    identity = runtime.identity
+    if identity is None:
+        # Owner voice identity is unavailable: voice input fails closed. There
+        # is deliberately NO fallback to an un-verified owner voice session.
+        # Text chat is a separate, authenticated path and is unaffected.
+        runtime.activity.add("voice", "Voice blocked", "identity_not_configured")
+        return VoiceResponse(
+            status="denied",
+            reason_code="identity_not_configured",
+            message=_message("identity_not_configured"),
         )
     audio = _decode(payload.audio_base64)
     if audio is None or not audio:
@@ -733,31 +800,79 @@ def voice_utterance(
             reason_code="malformed_audio",
             message=_message("malformed_audio"),
         )
-    session_id = runtime.voice_session()
-    if session_id is None:
+    preference = LanguagePreference(payload.language)
+    boundary = runtime.voice_boundary_for(preference)
+    principal = runtime.principal
+    session_id: str | None
+    speaker: Literal["owner", "guest"] | None = None
+    speaker_result: str | None = None
+    guest_context = None
+    decision = identity.coordinator.decide(
+        AudioInput(content=audio, declared_format=AudioFormat.WAV_PCM16)
+    )
+    identity.last_speaker_result = decision.result.value
+    speaker_result = decision.result.value
+    if decision.speaker_class is SpeakerClass.BLOCKED:
+        runtime.activity.add("voice", "Speaker blocked", decision.result.value)
+        return VoiceResponse(
+            status="denied",
+            reason_code="owner_verification_required",
+            message=_message("owner_verification_required"),
+            speaker_result=speaker_result,
+        )
+    if decision.speaker_class is SpeakerClass.GUEST:
+        guest_context = identity.guest_voice()
+        if guest_context is None:
+            return VoiceResponse(
+                status="denied",
+                reason_code="owner_verification_required",
+                message=_message("owner_verification_required"),
+                speaker_result=speaker_result,
+            )
+        boundary = guest_context.boundary_factory(preference)
+        principal = guest_context.principal
+        session_id = guest_context.session_id
+        speaker = "guest"
+    else:
+        session_id = runtime.voice_session()
+        speaker = "owner"
+    if boundary is None or session_id is None:
         return VoiceResponse(
             status="denied",
             reason_code="permission_denied",
             message=_message("permission_denied"),
         )
-    outcome = runtime.voice_boundary.handle_voice(
-        VoiceProcessingRequest(
-            principal=runtime.principal,
-            session_id=session_id,
-            audio=AudioInput(content=audio, declared_format=AudioFormat.WAV_PCM16),
-        ),
-        confirmation_id=payload.confirmation_id,
-    )
+    with language_hint_scope(payload.language if payload.language != "auto" else None):
+        outcome = boundary.handle_voice(
+            VoiceProcessingRequest(
+                principal=principal,
+                session_id=session_id,
+                audio=AudioInput(content=audio, declared_format=AudioFormat.WAV_PCM16),
+            ),
+            # A guest can never satisfy a confirmation.
+            confirmation_id=None
+            if guest_context is not None
+            else payload.confirmation_id,
+        )
     voice = outcome.voice
-    if voice.error_category is not None and voice.error_category.value in (
-        "session_error",
-        "session_limit",
-    ):
-        runtime.reset_voice_session()
+    if guest_context is None and voice.error_category is not None:
+        if voice.error_category.value in ("session_error", "session_limit"):
+            runtime.reset_voice_session()
     runtime.activity.add("voice", "Voice processed", voice.status.value)
     permission = voice.permission_outcome.value if voice.permission_outcome else None
     reason = voice.error_category.value if voice.error_category else None
     if voice.status is VoiceProcessingStatus.SUCCEEDED:
+        decision_lang = runtime.language.resolve(
+            preference, voice.transcript or "", stt_language=voice.language
+        )
+        if identity is not None and decision_lang.user_language is not None:
+            identity.audit.record(
+                "language_detected", "ok", decision_lang.user_language
+            )
+        if guest_context is not None and identity is not None:
+            identity.guests.remember_turn("user", voice.transcript or "")
+            if outcome.agent_message:
+                identity.guests.remember_turn("sam", outcome.agent_message)
         if outcome.agent_error:
             return VoiceResponse(
                 status="failed",
@@ -765,12 +880,20 @@ def voice_utterance(
                 message=_message("agent_error"),
                 transcript=voice.transcript,
                 forwarded_to_agent=True,
+                speaker=speaker,
+                speaker_result=speaker_result,
+                language=decision_lang.response_language,
+                direction=decision_lang.direction,
             )
         return VoiceResponse(
             status="ok",
             transcript=voice.transcript,
             forwarded_to_agent=outcome.forwarded_to_agent,
             reply=outcome.agent_message,
+            speaker=speaker,
+            speaker_result=speaker_result,
+            language=decision_lang.response_language,
+            direction=decision_lang.direction,
         )
     base = _result(
         runtime,
@@ -780,7 +903,9 @@ def voice_utterance(
         confirmation_id=voice.confirmation_id,
         reference=voice.utterance_id,
     )
-    return VoiceResponse(**base.model_dump())
+    return VoiceResponse(
+        **base.model_dump(), speaker=speaker, speaker_result=speaker_result
+    )
 
 
 # ------------------------------------------------------------------- tts
@@ -788,7 +913,7 @@ def voice_utterance(
 
 @router.post("/tts/speak", response_model=SpeakResponse)
 def tts_speak(
-    payload: SpeakRequest, runtime: DesktopRuntime = _runtime
+    payload: SpeakRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> SpeakResponse:
     """One explicit read-aloud request. The UI supplies text and a profile id
     from the list ``/status`` advertised — nothing that selects an endpoint,
@@ -800,6 +925,18 @@ def tts_speak(
             reason_code="not_configured",
             message=_message("not_configured"),
         )
+    if payload.language is not None:
+        supported = runtime.speech_profile_languages.get(payload.voice_profile)
+        if supported is None or payload.language not in supported:
+            # Text-only: no provider call, no substitute voice, no fallback.
+            runtime.activity.add(
+                "speech", "Speech unavailable for language", "text_only"
+            )
+            return SpeakResponse(
+                status="rejected",
+                reason_code="language_unsupported",
+                message=_message("language_unsupported"),
+            )
     result = runtime.speech_boundary.speak(
         SpeechProposal(text=payload.text, voice_profile=payload.voice_profile),
         principal=runtime.principal,

@@ -27,6 +27,15 @@ const METHODS = [
   "decideConfirmation",
   "voiceUtterance",
   "speak",
+  "identityStatus",
+  "identityEnrollBegin",
+  "identityEnrollSample",
+  "identityEnrollComplete",
+  "identityEnrollCancel",
+  "identityDelete",
+  "guestChallenge",
+  "guestStart",
+  "guestEnd",
 ].sort();
 
 describe("tauri bridge", () => {
@@ -64,7 +73,15 @@ describe("tauri bridge", () => {
     await tauriBridge.revokeGrant("g1");
     await tauriBridge.memorySearch("x");
     await tauriBridge.knowledgeQuery("q");
-    const forbidden = /principal|scope|risk|permission|allow|endpoint|url|token|api_?key|model|voice_?reference|user_?id/i;
+    await tauriBridge.identityEnrollBegin({ stepUp: "s", reEnroll: false });
+    await tauriBridge.identityEnrollSample("sess-1", "AAAA");
+    await tauriBridge.identityEnrollComplete("sess-1");
+    await tauriBridge.identityDelete("s");
+    await tauriBridge.guestStart({ challengeId: "c1", audioBase64: "AAAA", stepUp: "s", minutes: 15 });
+    await tauriBridge.guestChallenge();
+    await tauriBridge.guestEnd();
+    await tauriBridge.identityStatus();
+    const forbidden = /principal|scope|risk|permission|allow|endpoint|url|token|api_?key|model|voice_?reference|user_?id|owner|speaker/i;
     for (const [, args] of invoke.mock.calls) {
       for (const key of Object.keys((args ?? {}) as object)) expect(key).not.toMatch(forbidden);
     }
@@ -80,6 +97,8 @@ describe("tauri bridge", () => {
 
   it("keeps known error codes and drops unknown ones", () => {
     expect(toBridgeError("timeout").code).toBe("timeout");
+    expect(toBridgeError("guest_mode_active").code).toBe("guest_mode_active");
+    expect(toBridgeError("guest_mode_active").message).toMatch(/End Guest Mode/);
     expect(toBridgeError({ any: "thing" }).code).toBe("failed");
   });
 });

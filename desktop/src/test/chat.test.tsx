@@ -91,12 +91,12 @@ describe("chat", () => {
     await screen.findByLabelText("Connection: Connected");
     await send("hello sam");
     expect(await screen.findByText("Hello from Sam")).toBeInTheDocument();
-    expect(bridge.chat).toHaveBeenCalledWith("hello sam");
+    expect(bridge.chat).toHaveBeenCalledWith("hello sam", "auto");
   });
 
   it("renders untrusted model output as inert text", async () => {
     const payload = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=1</script>**bold**';
-    renderApp(mockBridge({ chat: vi.fn(async () => ({ ...ok, reply: payload })) }));
+    renderApp(mockBridge({ chat: vi.fn(async () => ({ ...ok, reply: payload, language: null, direction: null })) }));
     await screen.findByLabelText("Connection: Connected");
     await send("hi");
     expect(await screen.findByText(payload)).toBeInTheDocument();
@@ -114,6 +114,8 @@ describe("chat", () => {
           message: "The language model timed out.",
           reference_id: "ref-123",
           reply: null,
+          language: null,
+          direction: null,
         })),
       }),
     );

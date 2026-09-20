@@ -1,6 +1,9 @@
 import type { Capability } from "../bridge/types";
 import { Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
+import { useState } from "react";
+import { EnrollmentDialog, GuestDialog, RemoveProfileDialog } from "../components/IdentityDialogs";
+import { NeonButton } from "../components/primitives";
 import { useSam } from "../state";
 
 const CAPABILITY: Record<Capability, { label: string; tone: Tone }> = {
@@ -11,8 +14,39 @@ const CAPABILITY: Record<Capability, { label: string; tone: Tone }> = {
   unavailable: { label: "Unavailable", tone: "danger" },
 };
 
+function SelectRow({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: [string, string][];
+}) {
+  return (
+    <label className="row">
+      <span>{label}</span>
+      <select className="field" style={{ width: "auto" }} value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map(([v, text]) => (
+          <option key={v} value={v}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function capabilityPill(value: string | undefined, t: (k: "settings.configured" | "settings.notConfigured") => string) {
+  const on = value === "configured";
+  return <StatusPill tone={on ? "ok" : "muted"} label={on ? t("settings.configured") : t("settings.notConfigured")} />;
+}
+
 export function SettingsView() {
-  const { status, connection, prefs, updatePrefs, refreshStatus } = useSam();
+  const { status, connection, prefs, updatePrefs, refreshStatus, identity, refreshIdentity, bridge, t } = useSam();
+  const [dialog, setDialog] = useState<null | "enroll" | "reEnroll" | "remove" | "guest">(null);
   const rows: [string, Capability | undefined, string][] = [
     ["Sam (language model)", status?.agent, "Answers your messages."],
     ["Knowledge", status?.knowledge, "Your documents, kept for this session."],
@@ -27,7 +61,7 @@ export function SettingsView() {
 
   return (
     <div className="page-narrow">
-      <SectionHeader title="Settings" description="Connection status and interface preferences." />
+      <SectionHeader title={t("settings.title")} description="Connection status and interface preferences." />
       <section className="glass panel" aria-labelledby="conn-h">
         <h3 id="conn-h">Connection</h3>
         <div className="card-row">
@@ -41,6 +75,134 @@ export function SettingsView() {
           they're never shown or editable here.
         </p>
       </section>
+
+      <section className="glass panel" aria-labelledby="lang-h">
+        <h3 id="lang-h">{t("settings.language")}</h3>
+        <div className="row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
+          <SelectRow
+            label={t("settings.interfaceLanguage")}
+            value={prefs.uiLanguage}
+            onChange={(v) => updatePrefs({ uiLanguage: v === "fa" ? "fa" : "en" })}
+            options={[["en", "English"], ["fa", "فارسی"]]}
+          />
+          <SelectRow
+            label={t("settings.responseLanguage")}
+            value={prefs.responseLanguage}
+            onChange={(v) => updatePrefs({ responseLanguage: v === "fa" || v === "en" ? v : "auto" })}
+            options={[["auto", t("settings.lang.auto")], ["fa", t("settings.lang.fa")], ["en", t("settings.lang.en")]]}
+          />
+        </div>
+      </section>
+
+      <section className="glass panel" aria-labelledby="owner-h">
+        <h3 id="owner-h">{t("settings.ownerVoice")}</h3>
+        {!identity?.available ? (
+          <p className="muted">{t("settings.voiceIdentityOff")}</p>
+        ) : (
+          <>
+            <div className="card-row" style={{ marginBottom: 10 }}>
+              <span className="muted">{t("settings.ownerVoice")}</span>
+              <StatusPill
+                tone={identity.enrolled === true ? "ok" : identity.enrolled === false ? "muted" : "warn"}
+                label={
+                  identity.enrolled === true
+                    ? t("settings.enrolled")
+                    : identity.enrolled === false
+                      ? t("settings.notEnrolled")
+                      : t("settings.enrollUnknown")
+                }
+              />
+            </div>
+            <div className="card-row" style={{ marginBottom: 14 }}>
+              <span className="muted">{t("settings.lastVerification")}</span>
+              <span>
+                {identity.last_verification
+                  ? t(`settings.verification.${identity.last_verification}`)
+                  : t("settings.verification.none")}
+              </span>
+            </div>
+            <div className="row">
+              {identity.enrolled === false ? (
+                <NeonButton onClick={() => setDialog("enroll")}>{t("settings.enroll")}</NeonButton>
+              ) : null}
+              {identity.enrolled === true ? (
+                <>
+                  <NeonButton variant="quiet" onClick={() => setDialog("reEnroll")}>
+                    {t("settings.reEnroll")}
+                  </NeonButton>
+                  <NeonButton variant="danger" onClick={() => setDialog("remove")}>
+                    {t("settings.remove")}
+                  </NeonButton>
+                </>
+              ) : null}
+            </div>
+          </>
+        )}
+        <p className="faint" style={{ marginBottom: 0 }}>
+          {t("settings.privacy")}
+        </p>
+      </section>
+
+      <section className="glass panel" aria-labelledby="guest-h">
+        <h3 id="guest-h">{t("settings.guestMode")}</h3>
+        <div className="card-row" style={{ marginBottom: 12 }}>
+          <span className="muted">{t("settings.guestMode")}</span>
+          <StatusPill
+            tone={identity?.guest.active ? "warn" : "muted"}
+            label={identity?.guest.active ? t("guest.active") : t("guest.off")}
+          />
+        </div>
+        {identity?.guest.active ? (
+          <NeonButton
+            variant="danger"
+            onClick={() => void bridge.guestEnd().finally(() => void refreshIdentity())}
+          >
+            {t("guest.end")}
+          </NeonButton>
+        ) : (
+          <>
+            <NeonButton disabled={identity?.enrolled !== true} onClick={() => setDialog("guest")}>
+              {t("guest.start")}
+            </NeonButton>
+            {identity?.available && identity.enrolled !== true ? (
+              <p className="faint">{t("guest.needsEnrollment")}</p>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      <section className="glass panel" aria-labelledby="vp-h">
+        <h3 id="vp-h">{t("settings.voiceProcessing")}</h3>
+        <div className="kv">
+          <span className="muted">{t("settings.localStt")}</span>
+          {capabilityPill(identity?.local_stt, t)}
+        </div>
+        <div className="kv">
+          <span className="muted">{t("settings.speakerModel")}</span>
+          {capabilityPill(identity?.speaker_model, t)}
+        </div>
+        <div className="kv">
+          <span className="muted">{t("settings.persianTts")}</span>
+          {capabilityPill(status?.persian_tts, t)}
+        </div>
+        <p className="muted small" data-testid="persian-tts-note">
+          {t("settings.persianTtsNote")}
+        </p>
+      </section>
+
+      {dialog === "enroll" || dialog === "reEnroll" ? (
+        <EnrollmentDialog
+          reEnroll={dialog === "reEnroll"}
+          onClose={() => setDialog(null)}
+          onDone={() => void refreshIdentity()}
+        />
+      ) : null}
+      {dialog === "remove" ? (
+        <RemoveProfileDialog onClose={() => setDialog(null)} onDone={() => void refreshIdentity()} />
+      ) : null}
+      {dialog === "guest" ? (
+        <GuestDialog onClose={() => setDialog(null)} onDone={() => void refreshIdentity()} />
+      ) : null}
 
       <section className="glass panel" aria-labelledby="cap-h">
         <h3 id="cap-h">Capabilities</h3>

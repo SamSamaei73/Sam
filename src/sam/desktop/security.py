@@ -74,4 +74,22 @@ def bridge_runtime(request: Request) -> DesktopRuntime:
     return cast(DesktopRuntime, runtime)
 
 
-__all__ = ["TOKEN_HEADER", "bridge_runtime"]
+def owner_bridge_runtime(request: Request) -> DesktopRuntime:
+    """Authenticate the bridge AND refuse while Guest Mode is active.
+
+    Every owner-bound route binds the backend's default OWNER principal, so
+    UI reachability must not be the boundary: while a Guest Mode session is
+    live, these routes are refused here, before any body is processed, any
+    provider is called, or any confirmation is touched. Only the owner ending
+    Guest Mode (which removes access) and read-only status stay available.
+    """
+
+    runtime = bridge_runtime(request)
+    identity = runtime.identity
+    if identity is not None and identity.guests.current() is not None:
+        runtime.activity.add("permission", "Owner route refused", "guest_mode_active")
+        raise _deny(403, "guest_mode_active")
+    return runtime
+
+
+__all__ = ["TOKEN_HEADER", "bridge_runtime", "owner_bridge_runtime"]

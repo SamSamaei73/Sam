@@ -44,6 +44,8 @@ export interface OperationResult {
 
 export interface ChatResponse extends OperationResult {
   reply: string | null;
+  language: ResponseLanguage | null;
+  direction: Direction | null;
 }
 
 export interface StatusResponse {
@@ -56,7 +58,9 @@ export interface StatusResponse {
   server_count: number;
   voice_input: Capability;
   speech_output: Capability;
-  speech_profiles: { profile_id: string }[];
+  speech_profiles: { profile_id: string; languages: ResponseLanguage[] }[];
+  voice_identity: Capability;
+  persian_tts: Capability;
   computer_control: Capability;
   coding_agent: Capability;
   conversation_history: "session_local";
@@ -168,6 +172,11 @@ export interface VoiceResponse extends OperationResult {
   transcript: string | null;
   forwarded_to_agent: boolean;
   reply: string | null;
+  /** Safe, normalized speaker metadata: never a score or biometric value. */
+  speaker: "owner" | "guest" | null;
+  speaker_result: string | null;
+  language: ResponseLanguage | null;
+  direction: Direction | null;
 }
 
 export interface SpeakResponse extends OperationResult {
@@ -181,4 +190,46 @@ export interface DecisionResponse {
   confirmation_id: string;
 }
 
+export type LanguageChoice = "auto" | "fa" | "en";
+export type ResponseLanguage = "fa" | "en";
+export type Direction = "rtl" | "ltr";
+
 export type ResourceKind = "pdf" | "txt" | "markdown" | "json" | "csv";
+
+export interface GuestInfo {
+  active: boolean;
+  seconds_remaining: number;
+}
+
+/** Everything Settings may show about owner voice identity. */
+export interface IdentityStatus {
+  available: boolean;
+  /** null: the secure store could not be read. */
+  enrolled: boolean | null;
+  mode: "owner_only" | "guest_mode";
+  guest: GuestInfo;
+  last_verification: "verified" | "not_verified" | "unknown" | null;
+  speaker_model: Capability;
+  local_stt: Capability;
+  persian_tts: Capability;
+  samples_needed: number;
+  samples_max: number;
+}
+
+export interface EnrollBeginResponse extends OperationResult {
+  session_id: string | null;
+  samples_needed: number;
+}
+
+export interface EnrollProgressResponse extends OperationResult {
+  accepted: boolean;
+  sample_count: number;
+  samples_needed: number;
+}
+
+export interface ChallengeResponse extends OperationResult {
+  challenge_id: string | null;
+  text_en: string | null;
+  text_fa: string | null;
+  expires_in_seconds: number;
+}

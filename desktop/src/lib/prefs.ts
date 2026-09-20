@@ -10,12 +10,18 @@ export interface Prefs {
   sidebarCollapsed: boolean;
   reducedMotion: boolean;
   readAloudVoice: string | null;
+  /** Interface language (static reviewed strings). */
+  uiLanguage: "en" | "fa";
+  /** Which language Sam should answer in. Instruction only, never authority. */
+  responseLanguage: "auto" | "fa" | "en";
 }
 
 export const DEFAULT_PREFS: Prefs = {
   sidebarCollapsed: false,
   reducedMotion: false,
   readAloudVoice: null,
+  uiLanguage: "en",
+  responseLanguage: "auto",
 };
 
 const PROFILE_ID = /^[a-z0-9_-]{1,64}$/;
@@ -28,6 +34,14 @@ export function sanitizePrefs(raw: unknown): Prefs {
   if (typeof value.reducedMotion === "boolean") out.reducedMotion = value.reducedMotion;
   if (typeof value.readAloudVoice === "string" && PROFILE_ID.test(value.readAloudVoice)) {
     out.readAloudVoice = value.readAloudVoice;
+  }
+  if (value.uiLanguage === "en" || value.uiLanguage === "fa") out.uiLanguage = value.uiLanguage;
+  if (
+    value.responseLanguage === "auto" ||
+    value.responseLanguage === "fa" ||
+    value.responseLanguage === "en"
+  ) {
+    out.responseLanguage = value.responseLanguage;
   }
   return out;
 }

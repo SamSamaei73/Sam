@@ -137,13 +137,13 @@ describe("Settings", () => {
   });
 
   it("has no field for a backend URL, token, API key or endpoint", async () => {
-    renderApp(mockBridge({ status: vi.fn(async () => ({ ...baseStatus, speech_output: "configured" as const, speech_profiles: [{ profile_id: "sam_default" }] })) }));
+    renderApp(mockBridge({ status: vi.fn(async () => ({ ...baseStatus, speech_output: "configured" as const, speech_profiles: [{ profile_id: "sam_default", languages: ["en" as const] }] })) }));
     await goto("Settings");
     await screen.findByText("Capabilities");
     const main = screen.getByRole("main");
     expect(within(main).queryByRole("textbox")).toBeNull();
     expect(within(main).queryByLabelText(/url|token|key|endpoint|secret|password/i)).toBeNull();
-    const select = within(main).getByRole("combobox");
+    const select = within(main).getByRole("combobox", { name: /read-aloud voice/i });
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["sam_default"]);
   });
 

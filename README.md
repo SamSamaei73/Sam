@@ -126,3 +126,7 @@ exactly; an undeclared copy in a virtual environment is not relied on.
 ## Desktop UI (Phase 11)
 
 A Tauri + React desktop app lives in `desktop/` and talks to the backend through a narrow local bridge. The UI is not an authorization boundary; `PermissionEngine` stays the sole authority. See [docs/desktop.md](docs/desktop.md). Use `make desktop-check` and `make desktop-rust-check` (kept separate from `make check`).
+
+## Owner voice identity, Persian and Guest Mode (Phase 12)
+
+Optional local voice stack (`uv sync --group voice-local`, macOS/Apple silicon): owner speaker verification with a Keychain-stored template, local Persian/English speech-to-text, an explicit language policy with RTL rendering, and owner-authorized restricted Guest Mode. Voice identity is an authentication signal, not authorization. See [docs/voice_identity.md](docs/voice_identity.md) and [docs/persian.md](docs/persian.md).

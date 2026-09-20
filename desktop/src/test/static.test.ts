@@ -52,7 +52,7 @@ describe("static security checks (production sources)", () => {
     expect(users.map((f) => relative(ROOT, f))).toEqual(["src/bridge/tauri.ts"]);
     const text = read(join(SRC, "bridge", "tauri.ts"));
     const commands = [...text.matchAll(/call(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(commands.length).toBe(14);
+    expect(commands.length).toBe(23);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
   });
 
@@ -84,5 +84,39 @@ describe("static security checks (production sources)", () => {
     for (const css of productionSources.filter((f) => f.endsWith(".css"))) {
       expect(read(css)).not.toMatch(/@import|url\(\s*["']?https?:/);
     }
+  });
+
+  it("no production code logs to the console (no accidental leakage of secrets or transcripts)", () => {
+    const offenders = productionSources
+      .filter((f) => /\.(ts|tsx)$/.test(f))
+      .filter((f) => /\bconsole\.(log|info|warn|error|debug|trace)\(/.test(code(f)));
+    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  });
+
+  it("password fields exist only where a step-up secret is legitimately typed", () => {
+    const users = productionSources
+      .filter((f) => f.endsWith(".tsx") && /type="password"/.test(code(f)))
+      .map((f) => relative(ROOT, f))
+      .sort();
+    expect(users).toEqual(["src/components/ConfirmationDialog.tsx", "src/components/IdentityDialogs.tsx"]);
+  });
+
+  it("the UI never asserts an owner identity or a principal in a request", () => {
+    for (const file of productionSources.filter((f) => /components|views|bridge/.test(f))) {
+      const text = code(file);
+      expect(text, relative(ROOT, file)).not.toMatch(/\bisOwner\b|\bowner\s*:\s*true\b|\bprincipal\s*:|speaker\s*:\s*["']owner["']\s*[,}]/);
+    }
+  });
+
+  it("recordings are never persisted or turned into files/URLs by the recorder or dialogs", () => {
+    for (const name of ["lib/recorder.ts", "components/IdentityDialogs.tsx", "components/VoiceRecorder.tsx"]) {
+      const text = code(join(SRC, name));
+      expect(text, name).not.toMatch(/MediaRecorder|createObjectURL|indexedDB|FileSystem|showSaveFilePicker|\.download\s*=/);
+    }
+  });
+
+  it("the interface language strings are static (no runtime translation calls)", () => {
+    const text = code(join(SRC, "i18n", "strings.ts"));
+    expect(text).not.toMatch(/fetch|import\(|Intl\.Translator|translate\(.*await/);
   });
 });

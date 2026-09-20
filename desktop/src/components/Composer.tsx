@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { IconArrowUp } from "./Icons";
+import { useSam } from "../state";
 import { IconButton } from "./primitives";
 
 export const MAX_COMPOSER_CHARS = 100_000;
@@ -20,6 +21,7 @@ export function Composer({
   leading?: ReactNode;
   trailing?: ReactNode;
 }) {
+  const { t } = useSam();
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const trimmed = text.trim();
@@ -49,7 +51,8 @@ export function Composer({
         ref={ref}
         rows={2}
         value={text}
-        placeholder="Ask Sam anything…"
+        placeholder={t("chat.placeholder")}
+        dir="auto"
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -68,7 +71,7 @@ export function Composer({
         <div className="lead">{leading}</div>
         <div className="trail">
           {trailing}
-          <IconButton label="Send message" type="submit" primary disabled={!canSend}>
+          <IconButton label={t("chat.send")} type="submit" primary disabled={!canSend}>
             <IconArrowUp />
           </IconButton>
         </div>

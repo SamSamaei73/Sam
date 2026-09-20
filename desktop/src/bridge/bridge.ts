@@ -1,7 +1,12 @@
 import type {
   ActivityResponse,
+  ChallengeResponse,
   ChatResponse,
   DecisionResponse,
+  EnrollBeginResponse,
+  EnrollProgressResponse,
+  IdentityStatus,
+  LanguageChoice,
   KnowledgeIngestResponse,
   KnowledgeListResponse,
   KnowledgeQueryResponse,
@@ -23,7 +28,7 @@ import type {
  */
 export interface SamBridge {
   status(): Promise<StatusResponse>;
-  chat(message: string): Promise<ChatResponse>;
+  chat(message: string, language?: LanguageChoice): Promise<ChatResponse>;
   knowledgeList(): Promise<KnowledgeListResponse>;
   knowledgeQuery(query: string): Promise<KnowledgeQueryResponse>;
   knowledgeIngest(input: {
@@ -49,12 +54,39 @@ export interface SamBridge {
   voiceUtterance(
     audioBase64: string,
     confirmationId?: string,
+    language?: LanguageChoice,
   ): Promise<VoiceResponse>;
   speak(input: {
     text: string;
     voiceProfile: string;
+    /** Language of the text; the backend refuses a voice that can't speak it. */
+    language?: "fa" | "en";
     confirmationId?: string;
   }): Promise<SpeakResponse>;
+
+  // Owner voice identity & Guest Mode. Identity is an authentication signal
+  // only: none of these can grant a permission or answer a confirmation, and
+  // none accepts a principal, an "owner" flag or a capability.
+  identityStatus(): Promise<IdentityStatus>;
+  identityEnrollBegin(input: {
+    stepUp: string;
+    reEnroll: boolean;
+  }): Promise<EnrollBeginResponse>;
+  identityEnrollSample(
+    sessionId: string,
+    audioBase64: string,
+  ): Promise<EnrollProgressResponse>;
+  identityEnrollComplete(sessionId: string): Promise<OperationResult>;
+  identityEnrollCancel(sessionId: string): Promise<OperationResult>;
+  identityDelete(stepUp: string): Promise<OperationResult>;
+  guestChallenge(): Promise<ChallengeResponse>;
+  guestStart(input: {
+    challengeId: string;
+    audioBase64: string;
+    stepUp: string;
+    minutes: number;
+  }): Promise<OperationResult>;
+  guestEnd(): Promise<OperationResult>;
 }
 
 /** A failure the UI may show. Contains no backend body, path or secret. */
@@ -78,6 +110,7 @@ export const SAFE_ERROR_MESSAGES: Record<string, string> = {
     "Critical actions can't be approved from this window. Nothing was changed.",
   step_up_failed: "That step-up secret wasn't accepted.",
   step_up_locked: "Too many wrong attempts. The request was denied.",
+  guest_mode_active: "Guest Mode is active. End Guest Mode to use this.",
   too_large: "That is too large to send.",
   invalid: "That request was not valid.",
   failed: "Something went wrong.",

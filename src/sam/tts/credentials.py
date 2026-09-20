@@ -137,7 +137,22 @@ def credentials_from_settings(
     return provider
 
 
+def gemini_credentials_from_settings(
+    settings: Settings, reference: TTSCredentialReference
+) -> FakeTTSCredentialProvider:
+    """Bootstrap helper for the OPTIONAL Gemini provider. Raises
+    ``TTSCredentialError`` unless ``GEMINI_API_KEY`` is locally configured."""
+
+    key = settings.gemini_api_key
+    if key is None:
+        raise TTSCredentialError("no speech-synthesis credential is configured")
+    provider = FakeTTSCredentialProvider()
+    provider.add(reference, key.get_secret_value())
+    return provider
+
+
 __all__ = [
+    "gemini_credentials_from_settings",
     "FakeTTSCredentialProvider",
     "TTSCredential",
     "TTSCredentialProvider",

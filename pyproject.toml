@@ -21,6 +21,19 @@ dev = [
     "pytest>=9.0.3,<10.0",
     "ruff>=0.9,<1.0",
 ]
+# Heavy local voice stack for Phase 12 (owner speaker verification, local
+# Persian/English STT, Keychain-backed profile store). Deliberately NOT part of
+# the minimal install and NOT needed by the core test suite (which uses fakes):
+#   uv sync --group voice-local
+# macOS on Apple silicon only, because the owner template lives in the macOS
+# Keychain. torch and torchaudio must be pinned as a matching pair.
+voice-local = [
+    "torch==2.11.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "torchaudio==2.11.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "speechbrain==1.1.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "faster-whisper==1.2.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "keyring>=25.7,<26; sys_platform == 'darwin'",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -51,3 +64,22 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
+
+# The heavy local-voice libraries live in the optional ``voice-local`` group and
+# are imported lazily; they may be absent (or untyped) when type-checking.
+[[tool.mypy.overrides]]
+module = [
+    "torch",
+    "torch.*",
+    "speechbrain",
+    "speechbrain.*",
+    "faster_whisper",
+    "faster_whisper.*",
+    "keyring",
+    "keyring.*",
+    "huggingface_hub",
+    "huggingface_hub.*",
+    "numpy",
+    "numpy.*",
+]
+ignore_missing_imports = true
