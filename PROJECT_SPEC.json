@@ -361,7 +361,7 @@
         "voice_session_management"
       ],
       "security_rule": "Speaker recognition alone must not authorize critical irreversible actions.",
-      "status": "implementation_completed_ready_for_review",
+      "status": "approved",
       "scope_note": "Phase 9 implements the secure voice INPUT foundation only, against deterministic fakes: explicit bounded PCM/WAV audio, validation, controlled untrusted transcription, an optional transient context-bound identity signal, sessions, and a narrow AgentCore boundary. Not implemented: real STT, microphone, wake word, background listening, biometrics/enrollment, challenge-response, OS-level authentication, TTS. Voice identity is an authentication signal, not an authorization decision."
     },
     {
@@ -373,7 +373,8 @@
         "voice response streaming",
         "voice personality"
       ],
-      "status": "not_started"
+      "status": "implementation_completed_ready_for_review",
+      "scope_note": "Phase 10 implements explicit, non-streaming REST text-to-speech only: a provider-independent gateway plus Fish Audio as the first provider, against a trusted preconfigured voice profile. Not implemented: voice cloning, voice creation/enrollment, reference-audio upload, streaming/WebSocket, arbitrary Fish API operations, Fish ASR, playback, UI, automatic synthesis. Fish Audio is a synthesis provider, not an authorization or security boundary."
     },
     {
       "id": 11,
@@ -386,7 +387,8 @@
         "tool activity",
         "memory visibility",
         "settings"
-      ]
+      ],
+      "status": "not_started"
     },
     {
       "id": 12,
@@ -609,6 +611,34 @@
       "no_automatic_retries"
     ]
   },
+  "tts_gateway_policy": {
+    "workflow": [
+      "resolve_trusted_voice_profile",
+      "validate_text",
+      "withhold_secret_containing_text",
+      "build_permission_request",
+      "permission_engine_evaluate",
+      "reserve_request_id",
+      "at_most_one_provider_call_with_sam_owned_timeout",
+      "validate_untrusted_audio_and_compute_digest",
+      "emit_content_free_audit_event",
+      "return_normalized_audio_in_memory_only"
+    ],
+    "rules": [
+      "fish_audio_is_a_synthesis_provider_not_a_security_boundary",
+      "permission_engine_is_the_only_authorization_authority",
+      "speech_synthesis_has_its_own_permission_resource_distinct_from_voice",
+      "secret_containing_text_is_never_sent_to_the_provider",
+      "voice_model_endpoint_credentials_and_authorization_are_controlled_by_sam",
+      "endpoint_is_pinned_https_no_redirects_no_ambient_environment",
+      "api_key_exists_only_at_the_provider_execution_boundary",
+      "no_voice_cloning_no_reference_audio_upload_no_voice_creation",
+      "no_streaming_no_playback_no_automatic_synthesis",
+      "one_request_at_most_one_provider_call_no_retries",
+      "never_persist_or_audit_text_or_audio",
+      "never_write_speech_text_or_audio_to_memory_or_knowledge"
+    ]
+  },
   "security": {
     "principles": [
       "least_privilege",
@@ -649,9 +679,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 9,
+    "phase": 10,
     "status": "implementation_completed_ready_for_review",
-    "next_phase": 10,
+    "next_phase": 11,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {

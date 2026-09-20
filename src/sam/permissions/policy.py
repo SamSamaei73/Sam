@@ -151,6 +151,15 @@ _POLICY: dict[tuple[PermissionResource, PermissionAction], PolicyEntry] = {
     (_R.VOICE, _A.READ): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.VOICE, _A.UPDATE): PolicyEntry(RiskLevel.LOW, False),
     (_R.VOICE, _A.EXECUTE): PolicyEntry(RiskLevel.HIGH, True),
+    # --- speech_synthesis (Phase 10) -------------------------------------
+    # sam.tts sends text to an EXTERNAL text-to-speech provider. That is data
+    # egress, so it gets its own resource: a Phase 9 `voice` grant (local
+    # session/utterance handling) can never authorize it. One explicit row:
+    # SEND/MEDIUM, no mandatory confirmation (routine voice output), while a
+    # grant may still add `always_require_confirmation`. Every other action on
+    # this resource is unclassified and therefore denied. Voice cloning,
+    # enrollment and reference-audio upload have no row and no code path.
+    (_R.SPEECH_SYNTHESIS, _A.SEND): PolicyEntry(RiskLevel.MEDIUM, False),
 }
 
 # Defense in depth: even if a table entry above were ever misconfigured to

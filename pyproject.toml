@@ -14,6 +14,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    # Required by the current starlette.testclient (it prefers httpx2 and
+    # deprecates httpx). Test-only: Sam's production HTTP client stays httpx.
+    "httpx2>=2.13,<3",
     "mypy>=1.15,<2.0",
     "pytest>=9.0.3,<10.0",
     "ruff>=0.9,<1.0",

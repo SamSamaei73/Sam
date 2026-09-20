@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     api_host: str = Field(default="127.0.0.1", min_length=1)
     api_port: int = Field(default=8000, ge=1, le=65535)
     anthropic_api_key: SecretStr | None = None
+    # Loaded here, at the trusted bootstrap boundary, so no provider ever
+    # reads the ambient environment itself. There is deliberately NO Fish
+    # base-URL setting: the Fish endpoint is pinned in sam.tts.fish_audio.
+    fish_audio_api_key: SecretStr | None = None
     claude_model: str = Field(default="claude-sonnet-4-5", min_length=1)
     claude_base_url: AnyHttpUrl = Field(
         default=AnyHttpUrl("https://api.anthropic.com")
@@ -36,6 +40,15 @@ class Settings(BaseSettings):
 
         if value is not None and not value.get_secret_value().strip():
             raise ValueError("ANTHROPIC_API_KEY must not be blank")
+        return value
+
+    @field_validator("fish_audio_api_key")
+    @classmethod
+    def validate_fish_audio_api_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """Reject configured keys that contain no usable credential."""
+
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("FISH_AUDIO_API_KEY must not be blank")
         return value
 
     @field_validator("claude_model")

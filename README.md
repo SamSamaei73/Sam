@@ -16,6 +16,8 @@ Phase 8 adds Sam's MCP Gateway & Integrations Framework: a secure, provider-inde
 
 Phase 9 adds Sam's Secure Voice Input & Speech Understanding Foundation: a provider-independent path (`src/sam/voice/`) from one explicitly supplied, bounded audio input to a normalized transcript with provenance, built and tested entirely against deterministic fakes — **no real speech-to-text, microphone, wake word, background listening, or biometric enrollment**. Only 16-bit PCM and PCM-WAV are accepted (structurally validated, no codecs, no ffmpeg, no subprocess); every operation passes the existing Phase 3 `PermissionEngine` (a new `VOICE` resource) before any provider is called; the transcription provider is untrusted (validated results, contained errors, Sam-owned timeouts, at most one call, no retries); and an optional voice-identity result is only a transient, signed, one-time, session/utterance/audio-bound *authentication signal* — **voice identity is not authorization, and voice input never bypasses PermissionEngine, confirmation, or stronger authentication**. Raw audio and transcripts are never persisted, audited, or written to Memory or Knowledge, and a transcript that looks like it contains a secret is withheld entirely and never forwarded to AgentCore or an LLM provider. The voice layer creates no threads: provider timeouts are Sam-owned and passed to the provider, with late results discarded. AgentCore is unchanged; `VoiceAgentBoundary` forwards only the validated transcript text as ordinary user input. See [`docs/voice.md`](docs/voice.md) for the trust model and limitations.
 
+Phase 10 adds Sam's Secure Voice Synthesis layer (`src/sam/tts/`): explicit, non-streaming REST text-to-speech with a provider-independent `TTSGateway` and **Fish Audio as the first real provider** (`FishAudioProvider`, exercised in tests only through `httpx.MockTransport` — no live call, no real key, no billing). **Fish Audio is a synthesis provider, not an authorization or security boundary**, and **Phase 10 does not implement voice cloning**. Synthesis has its own `PermissionResource.SPEECH_SYNTHESIS` (`SEND`, MEDIUM) so a Phase 9 `voice` grant can never authorize sending text to an external service; the voice and model come only from a trusted, read-only voice profile catalog (never from the LLM, the text, or Fish); the endpoint is pinned (`https://api.fish.audio/v1/tts`, no redirects, no ambient proxy/env, no base-URL setting); the API key exists only at the provider execution boundary; **secret-containing text is never sent to Fish Audio**; provider output is validated (size, MP3 signature, digest computed by Sam); there is at most one HTTP call per request and no retries; and text and audio are never persisted, audited, or written to Memory or Knowledge. See [`docs/tts.md`](docs/tts.md) for the verified Fish API assumptions, trust model, and limitations.
+
 ## Requirements
 
 - Python 3.12+
@@ -87,13 +89,36 @@ always-on/background listening, biometric enrollment or database, challenge-
 response, OS-level authentication, MCP/tool execution from voice, automatic
 Memory/Knowledge writes, or AgentCore rewrite — see `docs/voice.md` for the
 full scope boundary.
+Phase 10 intentionally contains no voice cloning, voice creation/enrollment or reference-audio
+upload, WebSocket/streaming synthesis, arbitrary Fish API operations, Fish ASR, audio
+playback, UI, automatic synthesis of agent output, MCP/tool execution from speech, or
+automatic Memory/Knowledge writes — see `docs/tts.md` for the full scope boundary.
 
 ## Test-stack compatibility
 
 Starlette 1.6.0 still imports a deprecated AnyIO type alias from its test client.
 The test configuration narrowly filters that single upstream warning until a
 Starlette release includes the existing upstream fix. All other warnings are
-treated as errors. `httpx` (the real upstream package, not a look-alike) is a
-direct dependency: Starlette's `TestClient` requires it, and the Claude
-provider tests use `httpx.MockTransport` to drive the real Anthropic SDK
-against a fake transport instead of hand-rolled fakes.
+treated as errors, and no warning suppression exists for the `httpx`
+deprecation described below.
+
+Two HTTP clients are declared, for two different purposes:
+
+```text
+httpx   (runtime dependency)
+  -> Sam's production HTTP client: the Fish Audio provider, and the transport
+     the Anthropic SDK is driven with. Tests use httpx.MockTransport for both.
+
+httpx2  (development/test dependency only, in the `dev` group)
+  -> required by the current Starlette TestClient, which prefers httpx2 and
+     deprecates httpx. Nothing under src/ imports it; Sam and Fish traffic
+     never use it.
+```
+
+`httpx2` is the Pydantic-maintained continuation of `httpx` (PyPI project
+`httpx2`, source `github.com/pydantic/httpx2`). It resolves from the standard
+PyPI registry with no path, git, or index override, and brings `httpcore2` and
+`truststore` transitively. Its `httpx2-jsfetch` dependency is gated to
+`sys_platform == 'emscripten'` and is never installed on macOS or Linux.
+Because it is declared and locked, `uv sync --frozen` reproduces the suite
+exactly; an undeclared copy in a virtual environment is not relied on.

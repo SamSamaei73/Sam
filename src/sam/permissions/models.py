@@ -76,6 +76,7 @@ class PermissionResource(StrEnum):
     CODE = "code"
     KNOWLEDGE = "knowledge"
     VOICE = "voice"
+    SPEECH_SYNTHESIS = "speech_synthesis"
 
 
 class RiskLevel(StrEnum):
