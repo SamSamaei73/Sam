@@ -13,6 +13,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from sam.core.deployment import DeploymentMode
+
 
 class Settings(BaseSettings):
     """Typed runtime settings for the Sam service."""
@@ -45,6 +47,15 @@ class Settings(BaseSettings):
     # and never falls back to another (paid) provider.
     gemini_api_key: SecretStr | None = None
     gemini_tts_voice: str = Field(default="Kore", min_length=1, max_length=24)
+    # Multi-model router (Phase 13). The Claude provider uses the owner's own
+    # Claude Code SUBSCRIPTION login, never an API key; there is deliberately no
+    # OpenAI/xAI setting and no paid-fallback switch. ``claude_code_executable``
+    # is a trusted absolute path to a binary named ``claude`` (validated).
+    claude_subscription_enabled: bool = True
+    # Trusted deployment constraint (never prompt-controlled). The Claude
+    # subscription provider works ONLY in owner_local mode.
+    deployment_mode: DeploymentMode = DeploymentMode.OWNER_LOCAL
+    claude_code_executable: str | None = None
     # Shared secret between the local backend and the desktop shell. When
     # unset the /desktop/v1 routes refuse every request (fail closed).
     desktop_bridge_token: SecretStr | None = None
@@ -58,9 +69,7 @@ class Settings(BaseSettings):
     speaker_verification_threshold: float = Field(default=0.5, ge=0.3, le=0.9)
     local_stt_model: Literal["small", "medium", "large-v3"] = "small"
     claude_model: str = Field(default="claude-sonnet-4-5", min_length=1)
-    claude_base_url: AnyHttpUrl = Field(
-        default=AnyHttpUrl("https://api.anthropic.com")
-    )
+    claude_base_url: AnyHttpUrl = Field(default=AnyHttpUrl("https://api.anthropic.com"))
     claude_timeout: FiniteFloat = Field(default=30.0, gt=0, le=300)
     claude_max_retries: int = Field(default=2, ge=0, le=3)
 

@@ -141,8 +141,11 @@ describe("Settings", () => {
     await goto("Settings");
     await screen.findByText("Capabilities");
     const main = screen.getByRole("main");
-    expect(within(main).queryByRole("textbox")).toBeNull();
-    expect(within(main).queryByLabelText(/url|token|key|endpoint|secret|password/i)).toBeNull();
+    // The only free-text field is the owner's own topic blocklist (Phase 13).
+    const textboxes = within(main).queryAllByRole("textbox");
+    expect(textboxes).toHaveLength(1);
+    expect(textboxes[0]).toHaveAccessibleName(/topic blocklist/i);
+    expect(within(main).queryByLabelText(/url|token|api key|endpoint|secret|password/i)).toBeNull();
     const select = within(main).getByRole("combobox", { name: /read-aloud voice/i });
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["sam_default"]);
   });

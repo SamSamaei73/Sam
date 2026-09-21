@@ -233,3 +233,68 @@ export interface ChallengeResponse extends OperationResult {
   text_fa: string | null;
   expires_in_seconds: number;
 }
+
+// ---- AI providers, routing and privacy (Phase 13). Display/preferences only:
+// no key, token, prefix, header or provider response body ever appears here.
+
+export type ProviderId = "claude_subscription" | "gemini_free" | "openai_api" | "grok_api";
+export type ProviderState =
+  | "available"
+  | "rate_limited"
+  | "usage_limit"
+  | "unauthorized"
+  | "not_configured"
+  | "disabled"
+  | "unattested"
+  | "unavailable";
+export type CostClass = "subscription_included" | "free_tier" | "paid_api" | "local";
+export type ClaudeImprovementState = "unknown" | "owner_reports_disabled" | "owner_reports_enabled";
+export type GeminiAttestation = "unknown" | "owner_attested_unbilled";
+export type ChatPrivacy = "normal" | "personal" | "private";
+
+export interface ProviderStatus {
+  provider_id: ProviderId;
+  display_name: string;
+  state: ProviderState;
+  enabled: boolean;
+  cost_class: CostClass;
+  external: boolean;
+  free_tier_data_use: boolean;
+  note: string;
+  detail?: string | null;
+  models: string[];
+}
+
+export interface ProviderPreferences {
+  preferred_provider: ProviderId | null;
+  allow_free_fallback: boolean;
+  personal_to_free_tier: boolean;
+  private_to_free_tier: boolean;
+  claude_improvement_state: ClaudeImprovementState;
+  private_to_claude_when_improvement_enabled: boolean;
+  gemini_attestation: GeminiAttestation;
+}
+
+export interface ContentPolicyInfo {
+  mode: "permissive";
+  topic_blocklist: string[];
+  follow_user_tone: boolean;
+  private_content_auto_memory: false;
+}
+
+export interface ProvidersStatus {
+  available: boolean;
+  providers: ProviderStatus[];
+  preferences: ProviderPreferences | null;
+  content: ContentPolicyInfo | null;
+  routing_mode: "auto";
+  paid_fallback: "off";
+  max_provider_attempts: number;
+}
+
+/** What the owner may set. There is no field for an endpoint, key, model,
+ * cost class or billing switch. `stepUp` is needed only to LOOSEN privacy. */
+export interface ProviderPreferencesInput extends ProviderPreferences {
+  topic_blocklist: string[];
+  stepUp?: string;
+}

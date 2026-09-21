@@ -45,14 +45,17 @@ fn sam_chat(
     state: State<'_, AppState>,
     message: String,
     language: Option<String>,
+    privacy: Option<String>,
 ) -> CommandResult {
     invalid(validate::text(&message, validate::MAX_MESSAGE_CHARS))?;
     let language = language.unwrap_or_else(|| "auto".to_string());
     invalid(validate::language(&language))?;
+    let privacy = privacy.unwrap_or_else(|| "normal".to_string());
+    invalid(validate::privacy_label(&privacy))?;
     run(
         &state,
         Route::Chat,
-        Some(json!({ "message": message, "language": language })),
+        Some(json!({ "message": message, "language": language, "privacy": privacy })),
     )
 }
 
@@ -312,6 +315,50 @@ fn sam_guest_end(state: State<'_, AppState>) -> CommandResult {
     run(&state, Route::GuestEnd, Some(json!({})))
 }
 
+#[tauri::command]
+fn sam_models_status(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::ModelsStatus, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_models_preferences(
+    state: State<'_, AppState>,
+    preferred_provider: Option<String>,
+    allow_free_fallback: bool,
+    personal_to_free_tier: bool,
+    private_to_free_tier: bool,
+    claude_improvement_state: String,
+    private_to_claude_when_improvement_enabled: bool,
+    gemini_attestation: String,
+    topic_blocklist: Vec<String>,
+    step_up: Option<String>,
+) -> CommandResult {
+    if let Some(provider) = &preferred_provider {
+        invalid(validate::provider_id(provider))?;
+    }
+    invalid(validate::improvement_state(&claude_improvement_state))?;
+    invalid(validate::gemini_attestation(&gemini_attestation))?;
+    invalid(validate::blocklist(&topic_blocklist))?;
+    if let Some(secret) = &step_up {
+        invalid(validate::required_step_up(secret))?;
+    }
+    let mut body = json!({
+        "preferred_provider": preferred_provider,
+        "allow_free_fallback": allow_free_fallback,
+        "personal_to_free_tier": personal_to_free_tier,
+        "private_to_free_tier": private_to_free_tier,
+        "claude_improvement_state": claude_improvement_state,
+        "private_to_claude_when_improvement_enabled": private_to_claude_when_improvement_enabled,
+        "gemini_attestation": gemini_attestation,
+        "topic_blocklist": topic_blocklist,
+    });
+    if let Some(secret) = step_up {
+        body["step_up"] = json!(secret);
+    }
+    run(&state, Route::ModelsPreferences, Some(body))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run_app() {
     tauri::Builder::default()
@@ -342,6 +389,8 @@ pub fn run_app() {
             sam_guest_challenge,
             sam_guest_start,
             sam_guest_end,
+            sam_models_status,
+            sam_models_preferences,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sam desktop");

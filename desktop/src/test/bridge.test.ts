@@ -36,6 +36,8 @@ const METHODS = [
   "guestChallenge",
   "guestStart",
   "guestEnd",
+  "providersStatus",
+  "setProviderPreferences",
 ].sort();
 
 describe("tauri bridge", () => {
@@ -85,6 +87,39 @@ describe("tauri bridge", () => {
     for (const [, args] of invoke.mock.calls) {
       for (const key of Object.keys((args ?? {}) as object)) expect(key).not.toMatch(forbidden);
     }
+  });
+
+  it("provider commands send only trusted preference fields, never an endpoint, key, model or cost class", async () => {
+    invoke.mockResolvedValue({});
+    await tauriBridge.providersStatus();
+    await tauriBridge.setProviderPreferences({
+      preferred_provider: "gemini_free",
+      allow_free_fallback: true,
+      personal_to_free_tier: false,
+      private_to_free_tier: true,
+      claude_improvement_state: "unknown",
+      private_to_claude_when_improvement_enabled: false,
+      gemini_attestation: "unknown",
+      topic_blocklist: ["x"],
+      stepUp: "s",
+    });
+    await tauriBridge.chat("hi", "auto", "private");
+    const providerCalls = invoke.mock.calls.filter((call) => /^sam_models_/.test(String(call[0])));
+    expect(providerCalls.map((call) => call[0])).toEqual(["sam_models_status", "sam_models_preferences"]);
+    const keys = Object.keys((providerCalls[1]?.[1] ?? {}) as object).sort();
+    expect(keys).toEqual([
+      "allowFreeFallback",
+      "claudeImprovementState",
+      "geminiAttestation",
+      "personalToFreeTier",
+      "preferredProvider",
+      "privateToClaudeWhenImprovementEnabled",
+      "privateToFreeTier",
+      "stepUp",
+      "topicBlocklist",
+    ]);
+    for (const key of keys) expect(key).not.toMatch(/endpoint|url|token|api_?key|model|cost|billing|paid|principal|scope|risk/i);
+    expect(invoke.mock.calls.at(-1)).toEqual(["sam_chat", { message: "hi", language: "auto", privacy: "private" }]);
   });
 
   it("turns any backend failure into a safe, generic error", async () => {

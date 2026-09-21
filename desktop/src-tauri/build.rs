@@ -24,6 +24,8 @@ const COMMANDS: &[&str] = &[
     "sam_guest_challenge",
     "sam_guest_start",
     "sam_guest_end",
+    "sam_models_status",
+    "sam_models_preferences",
 ];
 
 fn main() {

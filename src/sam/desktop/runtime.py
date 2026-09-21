@@ -40,6 +40,8 @@ from sam.mcp.registry import MCPRegistryAdmin, MCPRegistryReader
 from sam.memory.engine import MemoryEngine
 from sam.memory.store import InMemoryMemoryStore
 from sam.memory.working import InMemoryWorkingMemoryStore
+from sam.models.factory import ModelSettingsStore
+from sam.models.router import ModelRouter
 from sam.permissions.audit import InMemoryAuditSink
 from sam.permissions.confirmation import InMemoryConfirmationProvider
 from sam.permissions.engine import PermissionEngine
@@ -116,6 +118,8 @@ class DesktopRuntime:
         settings: Settings,
         agent: AgentCore,
         agent_configured: bool,
+        model_router: ModelRouter | None = None,
+        model_settings: ModelSettingsStore | None = None,
         mcp_registry: MCPRegistryReader,
         transcription_provider: TranscriptionProvider | None,
         speech_provider: SpeechSynthesisProvider | None,
@@ -129,6 +133,8 @@ class DesktopRuntime:
         self.principal = LOCAL_PRINCIPAL
         self.agent = agent
         self.agent_configured = agent_configured
+        self.model_router = model_router
+        self.model_settings = model_settings
         self.mcp_registry = mcp_registry
         self.clock = clock
 
@@ -454,6 +460,8 @@ def build_desktop_runtime(
     agent: AgentCore,
     *,
     agent_configured: bool | None = None,
+    model_router: ModelRouter | None = None,
+    model_settings: ModelSettingsStore | None = None,
     transcription_provider: TranscriptionProvider | None = None,
     speech_provider: SpeechSynthesisProvider | None = None,
     speech_profiles: TrustedVoiceProfiles | None = None,
@@ -507,11 +515,13 @@ def build_desktop_runtime(
         agent_configured=(
             agent_configured
             if agent_configured is not None
-            else settings.anthropic_api_key is not None
+            else (model_router.any_usable() if model_router is not None else False)
         ),
         mcp_registry=admin.reader(),
         transcription_provider=transcription_provider,
         speech_provider=speech_provider,
+        model_router=model_router,
+        model_settings=model_settings,
         speech_profiles=speech_profiles,
         extra_speech_providers=extra_speech_providers,
         speaker_embedder=speaker_embedder,

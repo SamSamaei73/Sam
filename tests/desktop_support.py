@@ -67,6 +67,8 @@ class Bridge:
         profile_store: Any = None,
         step_up: str | None = None,
         clock: Any = None,
+        model_router: Any = None,
+        model_settings: Any = None,
     ) -> None:
         self.agent = agent or StubAgent()
         self.stt = stt
@@ -99,6 +101,8 @@ class Bridge:
             mcp_admin=mcp_admin,
             speaker_embedder=embedder,
             profile_store=profile_store,
+            model_router=model_router,
+            model_settings=model_settings,
             **({"clock": clock} if clock is not None else {}),
         )
         self.app.state.desktop_runtime = self.runtime

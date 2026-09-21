@@ -588,6 +588,9 @@ def test_router_has_only_the_documented_routes() -> None:
             ("POST", "/desktop/v1/voice/guest/challenge"),
             ("POST", "/desktop/v1/voice/guest/start"),
             ("POST", "/desktop/v1/voice/guest/end"),
+            # Phase 13: AI provider status and owner routing/privacy preferences
+            ("GET", "/desktop/v1/models"),
+            ("POST", "/desktop/v1/models/preferences"),
         ]
     )
 

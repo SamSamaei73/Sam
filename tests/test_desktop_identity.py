@@ -44,6 +44,9 @@ class IdentityBridge(Bridge):
         text: str = "hello there",
         with_secret: bool = True,
         tts: FakeSpeechSynthesisProvider | None = None,
+        agent: Any = None,
+        model_router: Any = None,
+        model_settings: Any = None,
     ) -> None:
         self.embedder = FakeSpeakerEmbeddingProvider(dimension=DIM)
         self.store = InMemoryVoiceProfileStore()
@@ -53,6 +56,9 @@ class IdentityBridge(Bridge):
         super().__init__(
             stt=self.voice_stt,
             tts=tts,
+            agent=agent,
+            model_router=model_router,
+            model_settings=model_settings,
             embedder=self.embedder,
             profile_store=self.store,
             step_up=SECRET if with_secret else None,
@@ -750,14 +756,25 @@ def test_there_is_no_paid_or_cross_provider_fallback_in_the_desktop_code() -> No
         return re.sub(r"(?m)#.*$", "", re.sub(r'""".*?"""', "", source, flags=re.S))
 
     text = "\n".join(strip(p.read_text()) for p in root.glob("*.py")).lower()
+    # The ONLY places these words may appear are the Phase 13 display/preference
+    # names: ``paid_fallback: "off"`` (a constant), ``allow_free_fallback`` (an
+    # owner preference for FREE providers) and the ``paid_api`` billing label.
+    allowed = ("allow_free_fallback", "paid_fallback", "paid_api", "free_fallback")
+    scanned = text
+    for name in allowed:
+        scanned = scanned.replace(name, "")
     for banned in ("fallback", "billing", "paid", "upgrade_tier", "openai_tts"):
-        assert banned not in text, banned
+        assert banned not in scanned, banned
+    assert text.count("paid_fallback") <= 2  # only the fixed Literal["off"] field
+    assert 'paid_fallback: literal["off"]' in text
     # Gemini is an OPTIONAL, explicitly configured Persian voice: it may appear
     # only in the runtime's trusted composition, never in a route or request.
     mentions = {
         p.name for p in root.glob("*.py") if "gemini" in strip(p.read_text()).lower()
     }
-    assert mentions <= {"runtime.py"}, mentions
+    # ...plus the Phase 13 provider-status display models/route, which only NAME
+    # the trusted providers (``gemini_free``) and never select or call one.
+    assert mentions <= {"runtime.py", "models.py", "models_api.py"}, mentions
 
 
 def test_the_guests_own_permission_store_holds_only_voice_session_grants() -> None:

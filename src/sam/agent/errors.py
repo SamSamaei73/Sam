@@ -76,3 +76,19 @@ class AgentExecutionError(AgentError):
 
     status_code = 500
     error_code = "agent_execution_failed"
+
+
+class PolicyBlockedError(AgentError):
+    """Sam's own privacy, cost or owner policy refused the request before any
+    provider was called."""
+
+    status_code = 403
+    error_code = "blocked_by_policy"
+
+
+class ProviderRefusalError(AgentError):
+    """The selected provider declined the request under its own policy. This is
+    not an outage and Sam does not work around it."""
+
+    status_code = 422
+    error_code = "provider_policy_limit"

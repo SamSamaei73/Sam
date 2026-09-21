@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { vi } from "vitest";
 import { App } from "../App";
 import type { SamBridge } from "../bridge/bridge";
-import type { IdentityStatus, OperationResult, StatusResponse } from "../bridge/types";
+import type { IdentityStatus, ProvidersStatus, OperationResult, StatusResponse } from "../bridge/types";
 import type { AudioEnvironment } from "../lib/recorder";
 
 export const ok: OperationResult = {
@@ -44,6 +44,69 @@ export const baseIdentity: IdentityStatus = {
   persian_tts: "not_configured",
   samples_needed: 3,
   samples_max: 5,
+};
+
+export const baseProviders: ProvidersStatus = {
+  available: true,
+  providers: [
+    {
+      provider_id: "claude_subscription",
+      display_name: "Claude (subscription)",
+      state: "available",
+      enabled: true,
+      cost_class: "subscription_included",
+      external: true,
+      free_tier_data_use: false,
+      note: "Uses your Claude subscription through the local Claude Code app, not Anthropic API billing.",
+      models: ["subscription_default"],
+    },
+    {
+      provider_id: "gemini_free",
+      display_name: "Gemini (Free Tier)",
+      state: "available",
+      enabled: true,
+      cost_class: "free_tier",
+      external: true,
+      free_tier_data_use: true,
+      note: "External cloud provider (Google). Data leaves this device.",
+      models: ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+    },
+    {
+      provider_id: "openai_api",
+      display_name: "OpenAI (API)",
+      state: "disabled",
+      enabled: false,
+      cost_class: "paid_api",
+      external: true,
+      free_tier_data_use: false,
+      note: "Disabled. The OpenAI API is separate paid billing.",
+      models: [],
+    },
+    {
+      provider_id: "grok_api",
+      display_name: "Grok (xAI API)",
+      state: "disabled",
+      enabled: false,
+      cost_class: "paid_api",
+      external: true,
+      free_tier_data_use: false,
+      note: "Disabled. The xAI API is separate prepaid billing.",
+      models: [],
+    },
+  ],
+  preferences: {
+    preferred_provider: null,
+    allow_free_fallback: true,
+    personal_to_free_tier: false,
+    private_to_free_tier: false,
+    claude_improvement_state: "unknown",
+    private_to_claude_when_improvement_enabled: false,
+    gemini_attestation: "unknown",
+  },
+  content: { mode: "permissive", topic_blocklist: [], follow_user_tone: true, private_content_auto_memory: false },
+  routing_mode: "auto",
+  paid_fallback: "off",
+  max_provider_attempts: 2,
 };
 
 export type MockBridge = { [K in keyof SamBridge]: ReturnType<typeof vi.fn> } & SamBridge;
@@ -96,6 +159,8 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
     })),
     guestStart: vi.fn(async () => ok),
     guestEnd: vi.fn(async () => ok),
+    providersStatus: vi.fn(async () => baseProviders),
+    setProviderPreferences: vi.fn(async () => baseProviders),
   };
   return { ...base, ...overrides } as MockBridge;
 }

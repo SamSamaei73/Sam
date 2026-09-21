@@ -80,6 +80,8 @@ from sam.language.hint import language_hint_scope
 from sam.language.policy import LanguagePreference
 from sam.memory.models import Memory
 from sam.memory.models import RetrievalQuery as MemoryQuery
+from sam.models.adapter import privacy_scope
+from sam.models.models import PrivacyClass
 from sam.permissions.errors import ConfirmationError, GrantNotFoundError
 from sam.permissions.models import ConfirmationStatus, GrantStatus, RiskLevel
 from sam.permissions.policy import classify
@@ -98,7 +100,19 @@ _runtime = Depends(bridge_runtime)
 # Owner-bound routes: refused while Guest Mode is active (see security.py).
 _owner_runtime = Depends(owner_bridge_runtime)
 
+_PRIVACY = {
+    "normal": PrivacyClass.NORMAL,
+    "personal": PrivacyClass.PERSONAL,
+    "private": PrivacyClass.PRIVATE,
+}
 _AGENT_MESSAGES = {
+    "blocked_by_policy": (
+        "Sam's privacy or content policy blocked this request. "
+        "Nothing was sent to any provider."
+    ),
+    "provider_policy_limit": (
+        "The AI provider declined this request under its own policy."
+    ),
     "invalid_request": "That message couldn't be processed.",
     "provider_authentication_failed": "Sam's language model isn't configured.",
     "provider_timeout": "The language model timed out.",
@@ -340,11 +354,12 @@ def chat(
     execution_id = uuid4().hex
     language = runtime.language.resolve(payload.language, payload.message)
     try:
-        response = runtime.agent.execute(
-            AgentRequest(message=payload.message),
-            execution_id,
-            response_language=language.response_language,
-        )
+        with privacy_scope(_PRIVACY[payload.privacy]):
+            response = runtime.agent.execute(
+                AgentRequest(message=payload.message),
+                execution_id,
+                response_language=language.response_language,
+            )
     except AgentError as error:
         runtime.activity.add("chat", "Sam request", "failed")
         return ChatResponse(

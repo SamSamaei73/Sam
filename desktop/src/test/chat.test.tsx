@@ -91,7 +91,7 @@ describe("chat", () => {
     await screen.findByLabelText("Connection: Connected");
     await send("hello sam");
     expect(await screen.findByText("Hello from Sam")).toBeInTheDocument();
-    expect(bridge.chat).toHaveBeenCalledWith("hello sam", "auto");
+    expect(bridge.chat).toHaveBeenCalledWith("hello sam", "auto", "normal");
   });
 
   it("renders untrusted model output as inert text", async () => {

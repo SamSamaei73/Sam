@@ -52,7 +52,7 @@ describe("static security checks (production sources)", () => {
     expect(users.map((f) => relative(ROOT, f))).toEqual(["src/bridge/tauri.ts"]);
     const text = read(join(SRC, "bridge", "tauri.ts"));
     const commands = [...text.matchAll(/call(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(commands.length).toBe(23);
+    expect(commands.length).toBe(25);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
   });
 
@@ -98,7 +98,12 @@ describe("static security checks (production sources)", () => {
       .filter((f) => f.endsWith(".tsx") && /type="password"/.test(code(f)))
       .map((f) => relative(ROOT, f))
       .sort();
-    expect(users).toEqual(["src/components/ConfirmationDialog.tsx", "src/components/IdentityDialogs.tsx"]);
+    expect(users).toEqual([
+      "src/components/ConfirmationDialog.tsx",
+      "src/components/IdentityDialogs.tsx",
+      // Phase 13: the step-up secret that must accompany LOOSENING a privacy setting.
+      "src/components/ModelSettings.tsx",
+    ]);
   });
 
   it("the UI never asserts an owner identity or a principal in a request", () => {

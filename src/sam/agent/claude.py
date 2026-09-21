@@ -1,4 +1,12 @@
-"""Anthropic-backed implementation of the language model provider contract."""
+"""Anthropic-backed implementation of the language model provider contract.
+
+LEGACY (Phase 2) and NOT WIRED into production: this provider calls the paid
+Anthropic Messages API with an API key. Since Phase 13 every model call goes
+through the ``sam.models`` router, which has no Anthropic-API provider
+(``PAID_FALLBACK = OFF``); Claude is reached only through the owner's own
+subscription login (``claude_subscription``). A test asserts nothing in
+production wiring imports this module.
+"""
 
 import logging
 import os

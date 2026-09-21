@@ -6,6 +6,9 @@ import type {
   EnrollBeginResponse,
   EnrollProgressResponse,
   IdentityStatus,
+  ChatPrivacy,
+  ProviderPreferencesInput,
+  ProvidersStatus,
   LanguageChoice,
   KnowledgeIngestResponse,
   KnowledgeListResponse,
@@ -28,7 +31,7 @@ import type {
  */
 export interface SamBridge {
   status(): Promise<StatusResponse>;
-  chat(message: string, language?: LanguageChoice): Promise<ChatResponse>;
+  chat(message: string, language?: LanguageChoice, privacy?: ChatPrivacy): Promise<ChatResponse>;
   knowledgeList(): Promise<KnowledgeListResponse>;
   knowledgeQuery(query: string): Promise<KnowledgeQueryResponse>;
   knowledgeIngest(input: {
@@ -87,6 +90,11 @@ export interface SamBridge {
     minutes: number;
   }): Promise<OperationResult>;
   guestEnd(): Promise<OperationResult>;
+
+  // AI providers, routing and privacy. Read-only status plus the owner's own
+  // preferences: nothing here can enable a paid provider or carry a credential.
+  providersStatus(): Promise<ProvidersStatus>;
+  setProviderPreferences(input: ProviderPreferencesInput): Promise<ProvidersStatus>;
 }
 
 /** A failure the UI may show. Contains no backend body, path or secret. */

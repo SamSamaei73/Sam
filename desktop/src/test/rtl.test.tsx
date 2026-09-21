@@ -108,7 +108,7 @@ describe("Persian / RTL rendering", () => {
     await user.click(screen.getByRole("button", { name: "Chat" }));
     await user.type(screen.getByLabelText("Message Sam"), "hello");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(bridge.chat).toHaveBeenCalledWith("hello", "fa"));
+    await waitFor(() => expect(bridge.chat).toHaveBeenCalledWith("hello", "fa", "normal"));
     expect(JSON.parse(window.localStorage.getItem("sam.ui.prefs.v1") ?? "{}").responseLanguage).toBe("fa");
   });
 });

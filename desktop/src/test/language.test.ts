@@ -132,6 +132,23 @@ describe("static UI strings", () => {
     expect(STRINGS.fa["settings.persianTtsNote"]).toContain("برای Google ارسال می‌شود");
   });
 
+  it("the AI provider and privacy strings are exact canonical Persian", () => {
+    const fa = (key: StringKey) => STRINGS.fa[key];
+    expect(fa("models.title")).toBe("ارائه‌دهندگان هوش مصنوعی");
+    expect(fa("models.paidFallback")).toBe("جایگزین پولی");
+    expect(fa("models.off")).toBe("خاموش");
+    expect(fa("models.cost.paid_api")).toBe("API پولی — غیرفعال");
+    expect(fa("models.privateToFree")).toBe("ارسال محتوای خصوصی به سطح رایگان Gemini");
+    expect(fa("models.external")).toBe("ارائه‌دهندهٔ ابری خارجی — داده از این دستگاه خارج می‌شود");
+    expect(fa("models.privateMemory")).toBe("محتوای خصوصی به‌طور خودکار در حافظهٔ بلندمدت ذخیره نمی‌شود.");
+    // Logical order, checked by code point (independent of any viewer): "خاموش" starts with KHAH.
+    expect(Array.from(fa("models.off")).map((c) => c.codePointAt(0))[0]).toBe(0x62e);
+    for (const key of Object.keys(STRINGS.en).filter((k) => k.startsWith("models.")) as StringKey[]) {
+      expect(STRINGS.fa[key]).toMatch(/[؀-ۿ]/);
+      expect(STRINGS.fa[key]).not.toMatch(/[ﭐ-﷿ﹰ-ﻼ]/); // no presentation forms
+    }
+  });
+
   it("has no mojibake or replacement characters", () => {
     for (const language of ["en", "fa"] as const) {
       for (const key of keys) expect(STRINGS[language][key]).not.toMatch(/�|Ø|Ù|Ã/);

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-models-preferences"
+description = "Enables the sam_models_preferences command without any pre-configured scope."
+commands.allow = ["sam_models_preferences"]
+
+[[permission]]
+identifier = "deny-sam-models-preferences"
+description = "Denies the sam_models_preferences command without any pre-configured scope."
+commands.deny = ["sam_models_preferences"]

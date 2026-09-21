@@ -28,6 +28,8 @@
     "allow-sam-identity-delete",
     "allow-sam-guest-challenge",
     "allow-sam-guest-start",
-    "allow-sam-guest-end"
+    "allow-sam-guest-end",
+    "allow-sam-models-status",
+    "allow-sam-models-preferences"
   ]
 }

@@ -56,6 +56,10 @@ class ChatRequest(_Request):
     message: str = Field(min_length=1, max_length=MAX_CHAT_MESSAGE_CHARS)
     # A presentation/instruction preference only; never authority.
     language: LanguageChoice = "auto"
+    # The owner may mark a message more sensitive. It can only RAISE how
+    # restricted the request is (never lower it), and SECRET is always detected
+    # by Sam, not chosen here.
+    privacy: Literal["normal", "personal", "private"] = "normal"
 
 
 class KnowledgeQueryRequest(_Request):
@@ -372,3 +376,95 @@ class ChallengeResponse(OperationResult):
     text_en: str | None = None
     text_fa: str | None = None
     expires_in_seconds: int = 0
+
+
+# ------------------------------------------------ AI providers (Phase 13)
+
+ProviderIdLiteral = Literal[
+    "claude_subscription", "gemini_free", "openai_api", "grok_api"
+]
+ProviderStateLiteral = Literal[
+    "available",
+    "rate_limited",
+    "usage_limit",
+    "unauthorized",
+    "not_configured",
+    "disabled",
+    "unattested",
+    "unavailable",
+]
+GeminiAttestationLiteral = Literal["unknown", "owner_attested_unbilled"]
+ClaudeImprovementLiteral = Literal[
+    "unknown", "owner_reports_disabled", "owner_reports_enabled"
+]
+
+
+class ProviderStatus(BaseModel):
+    """Trusted, display-only provider state. No key, token, prefix, header or
+    provider response body ever appears here."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider_id: ProviderIdLiteral
+    display_name: str
+    state: ProviderStateLiteral
+    enabled: bool
+    cost_class: Literal["subscription_included", "free_tier", "paid_api", "local"]
+    external: bool
+    free_tier_data_use: bool
+    note: str
+    # A safe lowercase reason code when not available (for example
+    # ``managed_policy_present`` or ``free_tier_unattested``); never a message.
+    detail: str | None = None
+    models: list[str]
+
+
+class ModelPreferencesInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    preferred_provider: ProviderIdLiteral | None
+    allow_free_fallback: bool
+    personal_to_free_tier: bool
+    private_to_free_tier: bool
+    claude_improvement_state: ClaudeImprovementLiteral
+    private_to_claude_when_improvement_enabled: bool
+    gemini_attestation: GeminiAttestationLiteral
+
+
+class ContentPolicyInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: Literal["permissive"] = "permissive"
+    topic_blocklist: list[str]
+    follow_user_tone: bool
+    private_content_auto_memory: Literal[False] = False
+
+
+class ModelsStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    available: bool
+    providers: list[ProviderStatus] = []
+    preferences: ModelPreferencesInfo | None = None
+    content: ContentPolicyInfo | None = None
+    routing_mode: Literal["auto"] = "auto"
+    paid_fallback: Literal["off"] = "off"
+    max_provider_attempts: int = 2
+
+
+class ModelPreferencesRequest(_Request):
+    """The owner's routing/privacy/content preferences. There is no field for a
+    provider endpoint, credential, model, cost class, or billing switch.
+    ``step_up`` is required only when the change LOOSENS privacy."""
+
+    preferred_provider: ProviderIdLiteral | None = None
+    allow_free_fallback: bool = True
+    personal_to_free_tier: bool = False
+    private_to_free_tier: bool = False
+    claude_improvement_state: ClaudeImprovementLiteral = "unknown"
+    private_to_claude_when_improvement_enabled: bool = False
+    # Loosening: the owner attests the Google project is unbilled. Needs step-up;
+    # session-only; Sam cannot independently verify Google Cloud billing state.
+    gemini_attestation: GeminiAttestationLiteral = "unknown"
+    topic_blocklist: list[str] = Field(default_factory=list, max_length=64)
+    step_up: SecretStr | None = Field(default=None, min_length=1, max_length=256)

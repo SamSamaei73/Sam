@@ -10,6 +10,9 @@ import { detectLanguage, directionFor } from "../lib/language";
 import type {
   ActivityItem,
   IdentityStatus,
+  ProviderPreferences,
+  ProvidersStatus,
+  ProviderStatus,
   Challenge,
   GrantInfo,
   KnowledgeHit,
@@ -28,6 +31,78 @@ const wait = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms));
 const iso = () => new Date().toISOString();
 
 export function demoBridge(): SamBridge {
+  const models = {
+    prefs: {
+      preferred_provider: null,
+      allow_free_fallback: true,
+      personal_to_free_tier: false,
+      private_to_free_tier: false,
+      claude_improvement_state: "unknown",
+      private_to_claude_when_improvement_enabled: false,
+      gemini_attestation: "unknown",
+    } as ProviderPreferences,
+    blocklist: [] as string[],
+  };
+  const providerRows = (): ProviderStatus[] => [
+    {
+      provider_id: "claude_subscription",
+      display_name: "Claude (subscription)",
+      state: "available",
+      enabled: true,
+      cost_class: "subscription_included",
+      external: true,
+      free_tier_data_use: false,
+      note: "Uses your Claude subscription through the local Claude Code app, not Anthropic API billing.",
+      models: ["subscription_default"],
+    },
+    {
+      provider_id: "gemini_free",
+      display_name: "Gemini (Free Tier)",
+      state: "not_configured",
+      enabled: false,
+      cost_class: "free_tier",
+      external: true,
+      free_tier_data_use: true,
+      note: "External cloud provider (Google). On the Free Tier Google may use submitted content to improve its products and human reviewers may read it. Data leaves this device.",
+      models: [],
+    },
+    {
+      provider_id: "openai_api",
+      display_name: "OpenAI (API)",
+      state: "disabled",
+      enabled: false,
+      cost_class: "paid_api",
+      external: true,
+      free_tier_data_use: false,
+      note: "Disabled. The OpenAI API is separate paid billing.",
+      models: [],
+    },
+    {
+      provider_id: "grok_api",
+      display_name: "Grok (xAI API)",
+      state: "disabled",
+      enabled: false,
+      cost_class: "paid_api",
+      external: true,
+      free_tier_data_use: false,
+      note: "Disabled. The xAI API is separate prepaid billing.",
+      models: [],
+    },
+  ];
+  const modelsSnapshot = (): ProvidersStatus => ({
+    available: true,
+    providers: providerRows(),
+    preferences: { ...models.prefs },
+    content: {
+      mode: "permissive",
+      topic_blocklist: [...models.blocklist],
+      follow_user_tone: true,
+      private_content_auto_memory: false,
+    },
+    routing_mode: "auto",
+    paid_fallback: "off",
+    max_provider_attempts: 2,
+  });
   const identity = { enrolled: false, samples: 0, session: null as string | null, guestUntil: 0 };
   const snapshot = (): IdentityStatus => {
     const remaining = Math.max(0, Math.round((identity.guestUntil - Date.now()) / 1000));
@@ -286,6 +361,39 @@ export function demoBridge(): SamBridge {
       identity.enrolled = false;
       identity.guestUntil = 0;
       return { ...empty, status: "ok" };
+    },
+    // ---- AI providers, routing and privacy (demo state only) ----
+    async providersStatus() {
+      await wait(60);
+      return modelsSnapshot();
+    },
+    async setProviderPreferences(input) {
+      await wait(120);
+      const loosens =
+        (input.personal_to_free_tier && !models.prefs.personal_to_free_tier) ||
+        (input.private_to_free_tier && !models.prefs.private_to_free_tier) ||
+        (input.private_to_claude_when_improvement_enabled &&
+          !models.prefs.private_to_claude_when_improvement_enabled) ||
+        (input.gemini_attestation === "owner_attested_unbilled" &&
+          models.prefs.gemini_attestation !== "owner_attested_unbilled");
+      if (loosens && input.stepUp !== "demo-step-up") {
+        throw new BridgeError("step_up_failed", "That step-up secret wasn't accepted.");
+      }
+      if (input.preferred_provider === "openai_api" || input.preferred_provider === "grok_api") {
+        throw new BridgeError("invalid", "That request was not valid.");
+      }
+      models.prefs = {
+        preferred_provider: input.preferred_provider,
+        allow_free_fallback: input.allow_free_fallback,
+        personal_to_free_tier: input.personal_to_free_tier,
+        private_to_free_tier: input.private_to_free_tier,
+        claude_improvement_state: input.claude_improvement_state,
+        private_to_claude_when_improvement_enabled: input.private_to_claude_when_improvement_enabled,
+        gemini_attestation: input.gemini_attestation,
+      };
+      models.blocklist = [...input.topic_blocklist];
+      log("settings", "Model preferences changed", "updated");
+      return modelsSnapshot();
     },
     async guestChallenge() {
       await wait(100);

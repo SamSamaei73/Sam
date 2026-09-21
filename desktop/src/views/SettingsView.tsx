@@ -2,6 +2,7 @@ import type { Capability } from "../bridge/types";
 import { Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
 import { useState } from "react";
+import { ModelSettings } from "../components/ModelSettings";
 import { EnrollmentDialog, GuestDialog, RemoveProfileDialog } from "../components/IdentityDialogs";
 import { NeonButton } from "../components/primitives";
 import { useSam } from "../state";
@@ -170,6 +171,8 @@ export function SettingsView() {
           </>
         )}
       </section>
+
+      <ModelSettings />
 
       <section className="glass panel" aria-labelledby="vp-h">
         <h3 id="vp-h">{t("settings.voiceProcessing")}</h3>

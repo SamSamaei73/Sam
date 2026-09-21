@@ -86,6 +86,54 @@ pub fn required_step_up(value: &str) -> Result<(), BridgeError> {
     }
 }
 
+/// A trusted provider id (never a provider name, model, or endpoint).
+pub fn provider_id(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "claude_subscription" | "gemini_free" | "openai_api" | "grok_api" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// The owner's report about Claude's "help improve" setting.
+pub fn improvement_state(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "unknown" | "owner_reports_disabled" | "owner_reports_enabled" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// The owner's session-only attestation about the Google project behind the
+/// Gemini key. Sam cannot verify it; the backend requires step-up to loosen it.
+pub fn gemini_attestation(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "unknown" | "owner_attested_unbilled" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// How the owner marks a chat message. It can only raise how restricted a
+/// request is; there is deliberately no "public" or "secret" value here.
+pub fn privacy_label(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "normal" | "personal" | "private" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// The owner's own topic blocklist: bounded, single-line, no control characters.
+pub fn blocklist(items: &[String]) -> Result<(), BridgeError> {
+    if items.len() > 64 {
+        return Err(BridgeError::Invalid);
+    }
+    for item in items {
+        let count = item.chars().count();
+        if item.trim().is_empty() || count > 80 || item.chars().any(char::is_control) {
+            return Err(BridgeError::Invalid);
+        }
+    }
+    Ok(())
+}
+
 /// A voice *profile id* (never a provider voice reference or endpoint).
 pub fn profile_id(value: &str) -> Result<(), BridgeError> {
     let ok = !value.is_empty()
@@ -123,6 +171,62 @@ pub fn base64_payload(value: &str, max: usize) -> Result<(), BridgeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_ids_are_the_four_trusted_ones_only() {
+        for ok in [
+            "claude_subscription",
+            "gemini_free",
+            "openai_api",
+            "grok_api",
+        ] {
+            assert!(provider_id(ok).is_ok());
+        }
+        for bad in [
+            "",
+            "anthropic_api",
+            "gpt-5",
+            "https://x",
+            "Claude",
+            "gemini_free ",
+        ] {
+            assert!(provider_id(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn improvement_state_and_privacy_label_are_closed_sets() {
+        for ok in ["unknown", "owner_reports_disabled", "owner_reports_enabled"] {
+            assert!(improvement_state(ok).is_ok());
+        }
+        assert!(improvement_state("on").is_err());
+        for ok in ["normal", "personal", "private"] {
+            assert!(privacy_label(ok).is_ok());
+        }
+        for bad in ["", "public", "secret", "PRIVATE", "normal "] {
+            assert!(privacy_label(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn gemini_attestation_is_a_closed_set() {
+        for ok in ["unknown", "owner_attested_unbilled"] {
+            assert!(gemini_attestation(ok).is_ok());
+        }
+        for bad in ["", "free", "billed", "OWNER_ATTESTED_UNBILLED", "unknown "] {
+            assert!(gemini_attestation(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn blocklist_is_bounded_and_single_line() {
+        assert!(blocklist(&[]).is_ok());
+        assert!(blocklist(&["horse racing".to_string()]).is_ok());
+        assert!(blocklist(&["".to_string()]).is_err());
+        assert!(blocklist(&["x".repeat(81)]).is_err());
+        assert!(blocklist(&["a\nb".to_string()]).is_err());
+        assert!(blocklist(&vec!["x".to_string(); 65]).is_err());
+    }
 
     #[test]
     fn text_bounds() {

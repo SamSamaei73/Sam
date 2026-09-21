@@ -248,10 +248,12 @@ describe("Guest Mode", () => {
     renderApp(bridge);
     const banner = await screen.findByText("Guest Mode is active");
     expect(banner.closest(".guest-banner")).toHaveTextContent("10:00");
-    act(() => {
-      vi.advanceTimersByTime(3000);
+    // Advance asynchronously and WAIT for React to flush the interval's state
+    // update: asserting immediately is racy when the machine is busy.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(banner.closest(".guest-banner")).toHaveTextContent("9:57");
+    await waitFor(() => expect(banner.closest(".guest-banner")).toHaveTextContent("9:57"));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     await user.click(screen.getByRole("button", { name: "Knowledge" }));
     expect(screen.getByText("Guest Mode is active")).toBeInTheDocument();

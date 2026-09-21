@@ -49,6 +49,9 @@ export function SamView({
 }) {
   const { bridge, status, connection, prefs, confirmable, t, refreshIdentity } = useSam();
   const [busy, setBusy] = useState<string | null>(null);
+  // The owner can mark a message private. It only ever RAISES how restricted
+  // the request is; the backend still detects secrets on its own.
+  const [privateChat, setPrivateChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -75,7 +78,7 @@ export function SamView({
     push({ role: "user", text });
     setBusy("Sam is thinking…");
     try {
-      const result = await bridge.chat(text, prefs.responseLanguage);
+      const result = await bridge.chat(text, prefs.responseLanguage, privateChat ? "private" : "normal");
       if (result.status === "ok" && result.reply !== null) {
         push({
           role: "sam",
@@ -232,9 +235,21 @@ export function SamView({
           disabled={busy !== null || !agentReady || connection === "unavailable"}
           onSend={(text) => void send(text)}
           leading={
-            <span className="pill" data-tone="info">
-              {t("chat.sam")}
-            </span>
+            <>
+              <span className="pill" data-tone="info">
+                {t("chat.sam")}
+              </span>
+              <button
+                type="button"
+                className="pill"
+                data-tone={privateChat ? "warn" : "muted"}
+                aria-pressed={privateChat}
+                title={t("models.privateChatHint")}
+                onClick={() => setPrivateChat(!privateChat)}
+              >
+                {t("models.privateChat")}
+              </button>
+            </>
           }
           trailing={
             <VoiceRecorder

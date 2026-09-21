@@ -16,8 +16,8 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 
 export const tauriBridge: SamBridge = {
   status: () => call("sam_status"),
-  chat: (message, language) =>
-    call("sam_chat", { message, language: language ?? "auto" }),
+  chat: (message, language, privacy) =>
+    call("sam_chat", { message, language: language ?? "auto", privacy: privacy ?? "normal" }),
   knowledgeList: () => call("sam_knowledge_list"),
   knowledgeQuery: (query) => call("sam_knowledge_query", { query }),
   knowledgeIngest: ({ name, resourceType, contentBase64, confirmationId }) =>
@@ -65,4 +65,17 @@ export const tauriBridge: SamBridge = {
   guestStart: ({ challengeId, audioBase64, stepUp, minutes }) =>
     call("sam_guest_start", { challengeId, audioBase64, stepUp, minutes }),
   guestEnd: () => call("sam_guest_end"),
+  providersStatus: () => call("sam_models_status"),
+  setProviderPreferences: (input) =>
+    call("sam_models_preferences", {
+      preferredProvider: input.preferred_provider,
+      allowFreeFallback: input.allow_free_fallback,
+      personalToFreeTier: input.personal_to_free_tier,
+      privateToFreeTier: input.private_to_free_tier,
+      claudeImprovementState: input.claude_improvement_state,
+      privateToClaudeWhenImprovementEnabled: input.private_to_claude_when_improvement_enabled,
+      geminiAttestation: input.gemini_attestation,
+      topicBlocklist: input.topic_blocklist,
+      stepUp: input.stepUp ?? null,
+    }),
 };

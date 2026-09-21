@@ -10,7 +10,7 @@ const LIB_RS: &str = include_str!("lib.rs");
 const BACKEND_RS: &str = include_str!("backend.rs");
 const CARGO: &str = include_str!("../Cargo.toml");
 
-const COMMANDS: [&str; 23] = [
+const COMMANDS: [&str; 25] = [
     "sam_status",
     "sam_chat",
     "sam_knowledge_list",
@@ -34,6 +34,8 @@ const COMMANDS: [&str; 23] = [
     "sam_guest_challenge",
     "sam_guest_start",
     "sam_guest_end",
+    "sam_models_status",
+    "sam_models_preferences",
 ];
 
 fn conf() -> Value {
@@ -135,7 +137,7 @@ fn build_script_declares_the_same_command_list_as_the_handler() {
             "handler missing {command}"
         );
     }
-    assert_eq!(BUILD_RS.matches("\"sam_").count(), 23);
+    assert_eq!(BUILD_RS.matches("\"sam_").count(), 25);
 }
 
 #[test]
@@ -162,7 +164,7 @@ fn no_generic_or_privileged_commands_exist() {
             "backend.rs must not contain {banned}"
         );
     }
-    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 23);
+    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 25);
 }
 
 #[test]

@@ -412,7 +412,8 @@
         "personal content policy",
         "privacy and cost routing policy"
       ],
-      "status": "not_started"
+      "status": "approved",
+      "scope_note": "Phase 13 adds one deterministic ModelRouter with a trusted provider registry (claude_subscription, gemini_free; openai_api and grok_api present but permanently disabled), CostPolicy (PAID_FALLBACK OFF, fixed), PrivacyPolicy (SECRET never leaves the device, PRIVATE denied to Gemini Free Tier by default), and an owner-controlled PersonalContentPolicy (empty blocklist by default; provider refusals are never bypassed). Claude is used only through the owner's own subscription login via a constrained claude -p adapter (env allowlist, tools disabled, attested), never the paid API. Approved after independent review. Review remediation: claude_subscription requires --restricted isolation, an exact claude.ai subscription login confirmed via `claude auth status`, an owner_local deployment and no managed policy (otherwise unavailable); gemini_free is unavailable until the owner attests, with step-up and per session, that the project is unbilled (Sam cannot verify Google Cloud billing state). Live evidence: the Claude subscription live smoke PASSED (subscription auth preflight passed, tools and MCP disabled, the paid Anthropic API is not used). KNOWN LIMITATION (accepted): the single owner-run Gemini Free text smoke returned HTTP 400 on the current Google project, so live Gemini availability on this project is NOT confirmed; the Gemini live smoke did not pass. There was no retry, no billing was enabled and there was no paid fallback. This is a provider/project runtime limitation, not a reason to enable billing: any Gemini error, unavailability or quota condition never retries, never falls back to a paid provider and never activates billing, and simply leaves Gemini unavailable (text-only). Safe allowlisted error diagnostics exist for a further owner-run diagnostic request. openai_api and grok_api remain permanently disabled and PAID_FALLBACK stays OFF."
     },
     {
       "id": 14,
@@ -729,9 +730,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 12,
+    "phase": 13,
     "status": "approved",
-    "next_phase": 13,
+    "next_phase": 14,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {
