@@ -6,6 +6,7 @@ import {
   IconKnowledge,
   IconMemory,
   IconPanelLeft,
+  IconProactive,
   IconProfessional,
   IconSettings,
   IconShield,
@@ -22,6 +23,7 @@ import { ActivityView } from "./views/ActivityView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { MemoryView } from "./views/MemoryView";
 import { PermissionsView } from "./views/PermissionsView";
+import { ProactiveView } from "./views/ProactiveView";
 import { ProfessionalView } from "./views/ProfessionalView";
 import { SamView } from "./views/SamView";
 import { SettingsView } from "./views/SettingsView";
@@ -31,6 +33,7 @@ export type ViewId =
   | "sam"
   | "knowledge"
   | "professional"
+  | "proactive"
   | "memory"
   | "tools"
   | "permissions"
@@ -41,6 +44,7 @@ const NAV_ICONS: Record<ViewId, ReactNode> = {
   sam: <IconChat />,
   knowledge: <IconKnowledge />,
   professional: <IconProfessional />,
+  proactive: <IconProactive />,
   memory: <IconMemory />,
   tools: <IconTools />,
   permissions: <IconShield />,
@@ -51,6 +55,7 @@ const NAV_KEYS = {
   sam: "nav.chat",
   knowledge: "nav.knowledge",
   professional: "nav.professional",
+  proactive: "nav.proactive",
   memory: "nav.memory",
   tools: "nav.tools",
   permissions: "nav.permissions",
@@ -61,6 +66,7 @@ const VIEW_ORDER: ViewId[] = [
   "sam",
   "knowledge",
   "professional",
+  "proactive",
   "memory",
   "tools",
   "permissions",
@@ -193,6 +199,8 @@ function pageFor(view: ViewId): ReactNode {
       return <KnowledgeView />;
     case "professional":
       return <ProfessionalView />;
+    case "proactive":
+      return <ProactiveView />;
     case "memory":
       return <MemoryView />;
     case "tools":

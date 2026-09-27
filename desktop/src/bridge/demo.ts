@@ -19,7 +19,9 @@ import type {
   OperationResult,
   ProClaim,
   ProfessionalProfile,
+  ProNotification,
   ProSource,
+  ProTask,
   ResourceInfo,
 } from "./types";
 
@@ -493,6 +495,126 @@ export function demoBridge(): SamBridge {
             : null,
       };
     },
+    // ---- Proactive Agent (demo state only; nothing is ever scheduled or sent) ----
+    async proactiveOverview() {
+      await wait(60);
+      return {
+        ...empty,
+        status: "ok",
+        tasks: auto.tasks,
+        notifications: auto.notifications,
+        history: [],
+        conditions: [
+          { condition_id: "deadline_approaching", label: "deadline", required_params: ["date"], optional_params: ["lead_hours", "time", "timezone"] },
+          { condition_id: "professional_open_conflicts", label: "professional profile", required_params: [], optional_params: [] },
+        ],
+        limits: { min_interval_hours: 1, max_tasks: 100, max_enabled_tasks: 50, max_title_chars: 120, max_instruction_chars: 1000 },
+        live_runs: 0,
+        scheduler_enabled: auto.schedulerEnabled,
+      };
+    },
+    async proactiveScheduler(enabled) {
+      await wait(60);
+      auto.schedulerEnabled = enabled;
+      log("proactive", enabled ? "Automations scheduling on" : "Automations scheduling off", "ok");
+      return { ...empty, status: "ok", scheduler_enabled: enabled };
+    },
+    async proactiveCreate(input) {
+      await wait(100);
+      const s = input.schedule;
+      const task: ProTask = {
+        task_id: `t_demo_${auto.tasks.length + 1}`,
+        title: input.title,
+        task_type: input.taskType,
+        timing_mode: input.timingMode,
+        action: input.action,
+        schedule: {
+          timezone: s.timezone,
+          start_date: s.startDate,
+          time_of_day: s.timeOfDay,
+          daypart: s.daypart,
+          frequency: s.frequency,
+          interval: s.interval,
+          weekdays: s.weekdays,
+          until: s.until,
+          max_runs: s.maxRuns,
+        },
+        condition_id: input.conditionId,
+        condition_params: input.conditionParams,
+        semantics: input.conditionId ? input.semantics : null,
+        instruction: input.instruction,
+        privacy_class: input.privacyClass,
+        notification_level: input.notificationLevel,
+        proposed_action: input.proposedAction,
+        cooldown_hours: input.cooldownHours,
+        enabled: input.enabled,
+        status: "active",
+        expires_at: null,
+        created_at: iso(),
+        next_run_at: input.enabled ? `${s.startDate}T${s.timeOfDay ?? "08:00"}:00Z` : null,
+        last_run_at: null,
+        last_result: null,
+        last_failure: null,
+        last_reason: null,
+        running: false,
+        version: 1,
+      };
+      auto.tasks.push(task);
+      log("proactive", "Automation create", "ok");
+      return { ...empty, status: "ok", task };
+    },
+    async proactiveUpdate(input) {
+      await wait(80);
+      const task = auto.tasks.find((t) => t.task_id === input.taskId);
+      if (!task) return { ...empty, status: "rejected", reason_code: "task_not_found", message: "That automation no longer exists.", task: null };
+      if (input.enabled !== undefined) {
+        task.enabled = input.enabled;
+        task.next_run_at = input.enabled ? iso() : null;
+      }
+      if (input.title) task.title = input.title;
+      if (input.cooldownHours) task.cooldown_hours = input.cooldownHours;
+      task.version += 1;
+      log("proactive", "Automation update", "ok");
+      return { ...empty, status: "ok", task };
+    },
+    async proactiveDelete(taskId, confirmationId) {
+      await wait(80);
+      if (!confirmationId) {
+        return { ...empty, status: "confirmation_required", reason_code: "confirmation_required", message: "This needs your confirmation." };
+      }
+      auto.tasks = auto.tasks.filter((t) => t.task_id !== taskId);
+      log("proactive", "Automation delete", "allow");
+      return { ...empty, status: "ok" };
+    },
+    async proactiveRun(taskId) {
+      await wait(80);
+      const task = auto.tasks.find((t) => t.task_id === taskId);
+      if (!task) return { ...empty, status: "rejected", reason_code: "task_not_found", message: "That automation no longer exists." };
+      const note: ProNotification = {
+        notification_id: `n_demo_${auto.notifications.length + 1}`,
+        task_id: taskId,
+        title: task.title,
+        summary: task.instruction || "Reminder.",
+        created_at: iso(),
+        reason_code: task.action === "watch" ? "condition_met" : "reminder_due",
+        importance: task.notification_level === "requires_attention" ? "attention" : "info",
+        source_label: task.action === "watch" ? "demo condition" : "reminder",
+        proposed_action: task.proposed_action,
+        privacy_class: task.privacy_class,
+        read: false,
+      };
+      auto.notifications.unshift(note);
+      task.last_run_at = iso();
+      task.last_result = "notification_created";
+      log("proactive", "Automation run now", "started");
+      return { ...empty, status: "ok" };
+    },
+    async proactiveNotification(notificationId, action) {
+      await wait(40);
+      if (action === "dismiss") auto.notifications = auto.notifications.filter((n) => n.notification_id !== notificationId);
+      else auto.notifications = auto.notifications.map((n) => (n.notification_id === notificationId ? { ...n, read: true } : n));
+      return { ...empty, status: "ok" };
+    },
   };
 }
 
@@ -511,6 +633,12 @@ const ingestEmpty = {
   candidates_rejected: 0,
   unmapped_skills: 0,
 } as const;
+
+const auto: { tasks: ProTask[]; notifications: ProNotification[]; schedulerEnabled: boolean } = {
+  tasks: [],
+  notifications: [],
+  schedulerEnabled: false,
+};
 
 const pro: { sources: ProSource[] } = {
   sources: [

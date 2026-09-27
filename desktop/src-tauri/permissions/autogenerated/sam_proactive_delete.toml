@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-proactive-delete"
+description = "Enables the sam_proactive_delete command without any pre-configured scope."
+commands.allow = ["sam_proactive_delete"]
+
+[[permission]]
+identifier = "deny-sam-proactive-delete"
+description = "Denies the sam_proactive_delete command without any pre-configured scope."
+commands.deny = ["sam_proactive_delete"]

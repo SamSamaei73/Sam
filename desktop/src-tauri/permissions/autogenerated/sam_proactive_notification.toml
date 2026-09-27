@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-proactive-notification"
+description = "Enables the sam_proactive_notification command without any pre-configured scope."
+commands.allow = ["sam_proactive_notification"]
+
+[[permission]]
+identifier = "deny-sam-proactive-notification"
+description = "Denies the sam_proactive_notification command without any pre-configured scope."
+commands.deny = ["sam_proactive_notification"]

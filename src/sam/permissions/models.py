@@ -78,6 +78,7 @@ class PermissionResource(StrEnum):
     VOICE = "voice"
     SPEECH_SYNTHESIS = "speech_synthesis"
     PROFESSIONAL = "professional"
+    PROACTIVE = "proactive"
 
 
 class RiskLevel(StrEnum):

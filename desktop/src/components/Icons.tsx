@@ -43,6 +43,12 @@ export const IconProfessional = () => (
     <path d="M9 8V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v2M4 13h16" />
   </Base>
 );
+export const IconProactive = () => (
+  <Base>
+    <circle cx="12" cy="13" r="7" />
+    <path d="M12 9.5V13l2.5 1.5M9.5 3.5h5" />
+  </Base>
+);
 export const IconMemory = () => (
   <Base>
     <circle cx="12" cy="12" r="3" />

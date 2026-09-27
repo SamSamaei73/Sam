@@ -43,6 +43,13 @@ const METHODS = [
   "professionalReview",
   "professionalRemove",
   "professionalQuery",
+  "proactiveOverview",
+  "proactiveCreate",
+  "proactiveUpdate",
+  "proactiveDelete",
+  "proactiveRun",
+  "proactiveNotification",
+  "proactiveScheduler",
 ].sort();
 
 describe("tauri bridge", () => {
@@ -125,6 +132,63 @@ describe("tauri bridge", () => {
     ]);
     for (const key of keys) expect(key).not.toMatch(/endpoint|url|token|api_?key|model|cost|billing|paid|principal|scope|risk/i);
     expect(invoke.mock.calls.at(-1)).toEqual(["sam_chat", { message: "hi", language: "auto", privacy: "private" }]);
+  });
+
+  it("proactive commands carry only the owner's task data: never a command, provider, permission or future confirmation", async () => {
+    invoke.mockResolvedValue({});
+    const schedule = {
+      timezone: "Europe/London",
+      startDate: "2026-01-06",
+      timeOfDay: "15:00",
+      daypart: null,
+      frequency: "daily" as const,
+      interval: 1,
+      weekdays: [],
+      until: null,
+      maxRuns: null,
+    };
+    await tauriBridge.proactiveOverview();
+    await tauriBridge.proactiveCreate({
+      title: "Call the lab",
+      taskType: "recurring",
+      timingMode: "exact_schedule",
+      action: "reminder",
+      schedule,
+      conditionId: null,
+      conditionParams: {},
+      semantics: "becomes_true",
+      instruction: "",
+      privacyClass: "personal",
+      notificationLevel: "notify_owner",
+      proposedAction: "none",
+      cooldownHours: 24,
+      enabled: true,
+    });
+    await tauriBridge.proactiveUpdate({ taskId: "t1", enabled: false });
+    await tauriBridge.proactiveDelete("t1", "conf-1");
+    await tauriBridge.proactiveRun("t1");
+    await tauriBridge.proactiveNotification("n1", "read");
+    await tauriBridge.proactiveScheduler(true);
+    const calls = invoke.mock.calls.filter((call) => /^sam_proactive_/.test(String(call[0])));
+    expect(calls.map((call) => call[0])).toEqual([
+      "sam_proactive_overview",
+      "sam_proactive_create",
+      "sam_proactive_update",
+      "sam_proactive_delete",
+      "sam_proactive_run",
+      "sam_proactive_notification",
+      "sam_proactive_scheduler",
+    ]);
+    expect(calls[6]?.[1]).toEqual({ enabled: true });
+    expect(Object.keys((calls[4]?.[1] ?? {}) as object)).toEqual(["taskId"]);
+    expect(Object.keys((calls[1]?.[1] as { schedule: object }).schedule).sort()).toEqual(
+      ["daypart", "frequency", "interval", "maxRuns", "startDate", "timeOfDay", "timezone", "until", "weekdays"].sort(),
+    );
+    for (const [, args] of calls) {
+      for (const key of Object.keys((args ?? {}) as object)) {
+        expect(key).not.toMatch(/path|principal|permission|scope|risk|endpoint|url|token|provider|command|script|code|cron|approve/i);
+      }
+    }
   });
 
   it("professional commands carry only the owner's selection: never a path, identity, verification or decision", async () => {

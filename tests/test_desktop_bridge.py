@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 from sam.agent.errors import AgentError
 from sam.desktop import api as desktop_api
 from sam.desktop.models import ChatRequest
+from sam.permissions.models import PermissionAction, PermissionResource, RiskLevel
+from sam.permissions.policy import classify
 from sam.tts.provider import FakeSpeechSynthesisProvider
 from sam.voice.transcription import FakeTranscriptionProvider
 from tests.desktop_support import HEADERS, TOKEN, Bridge, StubAgent, b64, wav_b64
@@ -376,8 +378,8 @@ def test_permissions_list_and_revoke_only() -> None:
     grants = bridge.get("/permissions").json()["grants"]
     assert grants and all(g["status"] == "active" for g in grants)
     assert not any(g["scope"] == "*" for g in grants)
-    # Phase 14 adds the distinct PROFESSIONAL resource; nothing else.
-    assert {g["resource"] for g in grants} == {"knowledge", "professional"}
+    # Phase 14 adds PROFESSIONAL and Phase 15 PROACTIVE; nothing else.
+    assert {g["resource"] for g in grants} == {"knowledge", "professional", "proactive"}
     ident = next(
         g["grant_id"]
         for g in grants
@@ -528,11 +530,71 @@ def test_no_bootstrap_grant_silently_authorizes_a_consequential_action() -> None
         "update",
         "delete",
         "send",
+        "execute",
     }
     for g in grants:
-        assert g["action"] not in {"publish", "execute", "approve"}
+        assert g["action"] not in {"publish", "approve"}
+        # The ONLY execute grant is the owner's own proactive tasks (MEDIUM: a
+        # run reads and notifies; every side effect needs its own permission).
+        if g["action"] == "execute":
+            assert g["resource"] == "proactive", g
+            entry = classify(PermissionResource.PROACTIVE, PermissionAction.EXECUTE)
+            assert entry is not None and entry.risk is RiskLevel.MEDIUM
         if g["action"] in {"send", "delete"}:
             assert g["requires_confirmation"] is True, g
+
+
+def test_the_bootstrap_proactive_execute_grant_authorizes_only_proactive_runs() -> None:
+    """Stronger replacement for the narrowed invariant above: the ONE bootstrap
+    execute grant can authorize only a proactive run (observation, evaluation,
+    local notification), never an external or mutating action."""
+
+    from sam.permissions.audit import InMemoryAuditSink
+    from sam.permissions.confirmation import InMemoryConfirmationProvider
+    from sam.permissions.engine import PermissionEngine
+    from sam.permissions.models import (
+        DecisionOutcome,
+        PermissionRequest,
+        PermissionScope,
+    )
+    from sam.permissions.policy import _POLICY
+    from sam.permissions.store import InMemoryPermissionStore
+
+    runtime = Bridge(
+        stt=FakeTranscriptionProvider(), tts=FakeSpeechSynthesisProvider()
+    ).runtime
+    executes = [
+        g
+        for g in runtime.grants.list_grants(runtime.principal)
+        if g.action is PermissionAction.EXECUTE
+    ]
+    (grant,) = executes  # exactly one execute grant exists at all
+    assert grant.resource is PermissionResource.PROACTIVE
+    only = InMemoryPermissionStore()
+    only.create_grant(grant)
+    engine = PermissionEngine(
+        store=only,
+        confirmation_provider=InMemoryConfirmationProvider(),
+        audit_sink=InMemoryAuditSink(),
+    )
+    for resource, action in _POLICY:
+        decision = engine.evaluate(
+            PermissionRequest(
+                principal=runtime.principal,
+                action=action,
+                resource=resource,
+                scope=PermissionScope.from_path("proactive/tasks/t1"),
+            )
+        )
+        allowed = decision.outcome is DecisionOutcome.ALLOW
+        expected = (
+            resource is PermissionResource.PROACTIVE
+            and action is PermissionAction.EXECUTE
+        )
+        assert allowed == expected, (resource, action)
+    # Every observer the runtime can use needs only a READ of its own resource.
+    for entry in runtime.proactive.policy.registry.entries():
+        assert entry.permission.action is PermissionAction.READ
 
 
 def test_tts_secret_text_is_refused() -> None:
@@ -598,6 +660,14 @@ def test_router_has_only_the_documented_routes() -> None:
             ("POST", "/desktop/v1/professional/review"),
             ("POST", "/desktop/v1/professional/remove"),
             ("POST", "/desktop/v1/professional/query"),
+            # Phase 15: Proactive Agent / Automations (owner-bound)
+            ("GET", "/desktop/v1/proactive/overview"),
+            ("POST", "/desktop/v1/proactive/create"),
+            ("POST", "/desktop/v1/proactive/update"),
+            ("POST", "/desktop/v1/proactive/delete"),
+            ("POST", "/desktop/v1/proactive/run"),
+            ("POST", "/desktop/v1/proactive/notification"),
+            ("POST", "/desktop/v1/proactive/scheduler"),
         ]
     )
 
@@ -756,6 +826,12 @@ def test_bootstrap_grants_are_exactly_the_documented_set_and_audited() -> None:
         ("professional", "write", "profile:ingest"),
         ("professional", "update", "profile:review"),
         ("professional", "delete", "profile"),
+        # Phase 15: the owner's own automations (delete always confirms).
+        ("proactive", "read", "proactive"),
+        ("proactive", "create", "proactive"),
+        ("proactive", "update", "proactive"),
+        ("proactive", "execute", "proactive"),
+        ("proactive", "delete", "proactive"),
     }
     bare = Bridge()
     got = {
@@ -780,6 +856,7 @@ def test_bootstrap_grants_are_exactly_the_documented_set_and_audited() -> None:
     assert {g["resource"] for g in grants} <= {
         "knowledge",
         "professional",
+        "proactive",
         "voice",
         "speech_synthesis",
     }

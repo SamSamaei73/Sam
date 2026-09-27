@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # desktop. Unset means CRITICAL actions cannot be approved from the UI at
     # all (fail closed: approve out-of-band or not at all).
     desktop_step_up_secret: SecretStr | None = None
+    # Proactive Agent (Phase 15). OFF by default (fail closed): no background
+    # scheduling runs until the owner turns it on, either here (trusted local
+    # configuration) or from the owner-only Automations switch, which resets to
+    # off on every restart. Turning it on grants no permission of any kind.
+    proactive_scheduler_enabled: bool = False
     # Owner voice identity (Phase 12). Off unless explicitly enabled; the local
     # models are set up explicitly and never downloaded during a request.
     voice_identity_enabled: bool = False

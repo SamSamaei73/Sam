@@ -17,6 +17,7 @@ from sam.core.logging import configure_logging
 from sam.desktop.api import router as desktop_router
 from sam.desktop.identity_api import router as desktop_identity_router
 from sam.desktop.models_api import router as desktop_models_router
+from sam.desktop.proactive_api import router as desktop_proactive_router
 from sam.desktop.professional_api import router as desktop_professional_router
 from sam.desktop.runtime import build_desktop_runtime
 from sam.models.adapter import RoutedLLMProvider
@@ -31,13 +32,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings: Settings = app.state.settings
     provider: RoutedLLMProvider | None = app.state.provider
+    runtime = app.state.desktop_runtime
+    scheduler = runtime.proactive.scheduler if runtime is not None else None
     configure_logging(settings.log_level)
     logger.info("Starting %s in %s environment", settings.app_name, settings.app_env)
     try:
         if provider is not None:
             provider.open()
+        # Proactive scheduling is off unless the owner's trusted local settings
+        # turn it on; the owner can also switch it from the Automations view.
+        if scheduler is not None and settings.proactive_scheduler_enabled:
+            scheduler.enable()
         yield
     finally:
+        if scheduler is not None:
+            scheduler.shutdown()
         if provider is not None:
             provider.close()
         logger.info("Stopping %s", settings.app_name)
@@ -82,6 +91,7 @@ def create_app(
     application.include_router(desktop_identity_router)
     application.include_router(desktop_models_router)
     application.include_router(desktop_professional_router)
+    application.include_router(desktop_proactive_router)
     application.add_exception_handler(AgentError, agent_error_handler)
     return application
 

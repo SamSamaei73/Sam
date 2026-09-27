@@ -62,11 +62,18 @@ pub enum Route {
     ProfessionalReview,
     ProfessionalRemove,
     ProfessionalQuery,
+    ProactiveOverview,
+    ProactiveCreate,
+    ProactiveUpdate,
+    ProactiveDelete,
+    ProactiveRun,
+    ProactiveNotification,
+    ProactiveScheduler,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 30] = [
+    pub const ALL: [Route; 37] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -97,6 +104,13 @@ impl Route {
         Route::ProfessionalReview,
         Route::ProfessionalRemove,
         Route::ProfessionalQuery,
+        Route::ProactiveOverview,
+        Route::ProactiveCreate,
+        Route::ProactiveUpdate,
+        Route::ProactiveDelete,
+        Route::ProactiveRun,
+        Route::ProactiveNotification,
+        Route::ProactiveScheduler,
     ];
 
     pub fn path(self) -> &'static str {
@@ -131,6 +145,13 @@ impl Route {
             Route::ProfessionalReview => "/desktop/v1/professional/review",
             Route::ProfessionalRemove => "/desktop/v1/professional/remove",
             Route::ProfessionalQuery => "/desktop/v1/professional/query",
+            Route::ProactiveOverview => "/desktop/v1/proactive/overview",
+            Route::ProactiveCreate => "/desktop/v1/proactive/create",
+            Route::ProactiveUpdate => "/desktop/v1/proactive/update",
+            Route::ProactiveDelete => "/desktop/v1/proactive/delete",
+            Route::ProactiveRun => "/desktop/v1/proactive/run",
+            Route::ProactiveNotification => "/desktop/v1/proactive/notification",
+            Route::ProactiveScheduler => "/desktop/v1/proactive/scheduler",
         }
     }
 
@@ -145,6 +166,7 @@ impl Route {
                 | Route::IdentityStatus
                 | Route::ModelsStatus
                 | Route::ProfessionalProfile
+                | Route::ProactiveOverview
         )
     }
 
@@ -377,7 +399,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 30);
+        assert_eq!(paths.len(), 37);
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));

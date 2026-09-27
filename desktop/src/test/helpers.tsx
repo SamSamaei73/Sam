@@ -5,6 +5,7 @@ import type { SamBridge } from "../bridge/bridge";
 import type {
   IdentityStatus,
   OperationResult,
+  ProactiveOverview,
   ProfessionalIngestResult,
   ProfessionalProfile,
   ProvidersStatus,
@@ -137,6 +138,30 @@ export const emptyProfessional: ProfessionalProfile = {
   counts: {},
 };
 
+export const emptyProactive: ProactiveOverview = {
+  ...ok,
+  tasks: [],
+  notifications: [],
+  history: [],
+  conditions: [
+    {
+      condition_id: "deadline_approaching",
+      label: "deadline",
+      required_params: ["date"],
+      optional_params: ["lead_hours", "time", "timezone"],
+    },
+  ],
+  limits: {
+    min_interval_hours: 1,
+    max_tasks: 100,
+    max_enabled_tasks: 50,
+    max_title_chars: 120,
+    max_instruction_chars: 1000,
+  },
+  live_runs: 0,
+  scheduler_enabled: false,
+};
+
 export const emptyIngest: ProfessionalIngestResult = {
   ...ok,
   source_id: null,
@@ -207,6 +232,13 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
     setProviderPreferences: vi.fn(async () => baseProviders),
     professionalProfile: vi.fn(async () => emptyProfessional),
     professionalIngest: vi.fn(async () => ({ ...emptyIngest, ingest_status: "ingested" })),
+    proactiveOverview: vi.fn(async () => emptyProactive),
+    proactiveCreate: vi.fn(async () => ({ ...ok, task: null })),
+    proactiveUpdate: vi.fn(async () => ({ ...ok, task: null })),
+    proactiveDelete: vi.fn(async () => ok),
+    proactiveRun: vi.fn(async () => ok),
+    proactiveNotification: vi.fn(async () => ok),
+    proactiveScheduler: vi.fn(async (enabled: boolean) => ({ ...ok, scheduler_enabled: enabled })),
     professionalReview: vi.fn(async () => ok),
     professionalRemove: vi.fn(async () => ok),
     professionalQuery: vi.fn(async (mode: "search" | "evidence_for") => ({

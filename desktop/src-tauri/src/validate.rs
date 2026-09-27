@@ -10,6 +10,11 @@ pub const MAX_QUERY_CHARS: usize = 1_000;
 /// Matches the backend's professional query bound.
 pub const MAX_PROFESSIONAL_QUERY_CHARS: usize = 300;
 pub const MAX_NAME_CHARS: usize = 200;
+/// Matches the backend's proactive bounds.
+pub const MAX_TASK_TITLE_CHARS: usize = 200;
+pub const MAX_TASK_INSTRUCTION_CHARS: usize = 2_000;
+const MAX_CONDITION_PARAMS: usize = 8;
+const MAX_CONDITION_PARAM_CHARS: usize = 200;
 pub const MAX_ID_CHARS: usize = 100;
 pub const MAX_DOCUMENT_BASE64: usize = 28_000_000;
 pub const MAX_AUDIO_BASE64: usize = 11_500_000;
@@ -198,6 +203,188 @@ pub fn professional_query_mode(value: &str) -> Result<(), BridgeError> {
         "search" | "evidence_for" => Ok(()),
         _ => Err(BridgeError::Invalid),
     }
+}
+
+// ------------------------------------------------------------ proactive
+
+fn one_of(value: &str, allowed: &[&str]) -> Result<(), BridgeError> {
+    if allowed.contains(&value) {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+pub fn proactive_task_type(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["one_time", "recurring", "condition_watch"])
+}
+
+pub fn proactive_timing(value: &str) -> Result<(), BridgeError> {
+    one_of(
+        value,
+        &["exact_schedule", "flexible_schedule", "condition_watch"],
+    )
+}
+
+/// What a run may do: a closed set. There is no "shell", "script" or "tool".
+pub fn proactive_action(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["reminder", "summary", "watch"])
+}
+
+/// There is deliberately no minutely or secondly frequency.
+pub fn proactive_frequency(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["none", "hourly", "daily", "weekly"])
+}
+
+pub fn optional_daypart(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), |v| one_of(v, &["morning", "afternoon", "evening"]))
+}
+
+pub fn proactive_semantics(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["becomes_true", "on_change", "repeat_while_true"])
+}
+
+pub fn proactive_level(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["silent", "notify_owner", "requires_attention"])
+}
+
+pub fn optional_proactive_level(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), proactive_level)
+}
+
+/// A suggested next action is a label for the owner, never something to run.
+pub fn proactive_proposed(value: &str) -> Result<(), BridgeError> {
+    one_of(
+        value,
+        &[
+            "none",
+            "review_in_sam",
+            "open_professional",
+            "open_model_settings",
+            "review_deadline",
+        ],
+    )
+}
+
+/// The inbox can only mark read or dismiss: it never executes anything.
+pub fn notification_action(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["read", "dismiss"])
+}
+
+/// An IANA timezone name shape (the backend checks it exists).
+pub fn timezone(value: &str) -> Result<(), BridgeError> {
+    let ok = !value.is_empty()
+        && value.len() <= 64
+        && !value.contains("..")
+        && !value.starts_with('/')
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-' | b'/'));
+    if ok {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+/// YYYY-MM-DD.
+pub fn iso_date(value: &str) -> Result<(), BridgeError> {
+    let bytes = value.as_bytes();
+    let ok = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit());
+    if ok {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+pub fn optional_iso_date(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), iso_date)
+}
+
+/// HH:MM, minute precision.
+pub fn optional_time_of_day(value: Option<&str>) -> Result<(), BridgeError> {
+    let Some(value) = value else { return Ok(()) };
+    let bytes = value.as_bytes();
+    let digits = |a: u8, b: u8| u32::from(a - b'0') * 10 + u32::from(b - b'0');
+    let ok = bytes.len() == 5
+        && bytes[2] == b':'
+        && [0, 1, 3, 4].iter().all(|&i| bytes[i].is_ascii_digit())
+        && digits(bytes[0], bytes[1]) < 24
+        && digits(bytes[3], bytes[4]) < 60;
+    if ok {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+pub fn bounded_number(value: u32, min: u32, max: u32) -> Result<(), BridgeError> {
+    if (min..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+pub fn weekdays(values: &[u8]) -> Result<(), BridgeError> {
+    let mut seen = [false; 7];
+    if values.len() > 7 {
+        return Err(BridgeError::Invalid);
+    }
+    for &day in values {
+        if day > 6 || seen[usize::from(day)] {
+            return Err(BridgeError::Invalid);
+        }
+        seen[usize::from(day)] = true;
+    }
+    Ok(())
+}
+
+/// A trusted condition id: a simple identifier, never a path or module.
+pub fn optional_condition_id(value: Option<&str>) -> Result<(), BridgeError> {
+    let Some(value) = value else { return Ok(()) };
+    let ok = (2..=48).contains(&value.len())
+        && value.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if ok {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+pub fn condition_params(
+    params: &std::collections::BTreeMap<String, String>,
+) -> Result<(), BridgeError> {
+    if params.len() > MAX_CONDITION_PARAMS {
+        return Err(BridgeError::Invalid);
+    }
+    for (key, value) in params {
+        let key_ok = (1..=32).contains(&key.len())
+            && key.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+            && key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        let value_ok = value.chars().count() <= MAX_CONDITION_PARAM_CHARS
+            && !value.chars().any(char::is_control);
+        if !key_ok || !value_ok {
+            return Err(BridgeError::Invalid);
+        }
+    }
+    Ok(())
 }
 
 pub fn base64_payload(value: &str, max: usize) -> Result<(), BridgeError> {
@@ -419,6 +606,83 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn proactive_closed_sets_reject_everything_else() {
+        assert!(proactive_task_type("recurring").is_ok());
+        assert!(proactive_timing("flexible_schedule").is_ok());
+        assert!(proactive_action("watch").is_ok());
+        for bad in ["shell", "script", "tool", "execute", "", "REMINDER"] {
+            assert_eq!(proactive_action(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        for bad in ["minutely", "secondly", "* * * * *", "FREQ=SECONDLY", ""] {
+            assert_eq!(proactive_frequency(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        assert!(optional_daypart(None).is_ok());
+        assert_eq!(optional_daypart(Some("night")), Err(BridgeError::Invalid));
+        assert!(proactive_semantics("on_change").is_ok());
+        assert!(proactive_level("requires_attention").is_ok());
+        assert!(proactive_proposed("review_deadline").is_ok());
+        for bad in ["send_email", "apply_for_job", "delete", "run"] {
+            assert_eq!(proactive_proposed(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        assert!(notification_action("dismiss").is_ok());
+        for bad in ["execute", "approve", "run", ""] {
+            assert_eq!(notification_action(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+    }
+
+    #[test]
+    fn proactive_shapes_are_bounded() {
+        for ok in [
+            "Europe/London",
+            "UTC",
+            "America/Argentina/Buenos_Aires",
+            "Etc/GMT+3",
+        ] {
+            assert!(timezone(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "../etc/passwd",
+            "/etc/localtime",
+            "Europe/../x",
+            "a b",
+            "9Zone",
+        ] {
+            assert_eq!(timezone(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        assert!(iso_date("2026-03-29").is_ok());
+        for bad in ["2026-3-29", "tomorrow", "2026/03/29", ""] {
+            assert_eq!(iso_date(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        assert!(optional_time_of_day(Some("23:59")).is_ok());
+        for bad in ["24:00", "10:60", "10:00:30", "1000", "ab:cd"] {
+            assert_eq!(
+                optional_time_of_day(Some(bad)),
+                Err(BridgeError::Invalid),
+                "{bad}"
+            );
+        }
+        assert!(weekdays(&[0, 2, 6]).is_ok());
+        assert_eq!(weekdays(&[7]), Err(BridgeError::Invalid));
+        assert_eq!(weekdays(&[1, 1]), Err(BridgeError::Invalid));
+        assert!(bounded_number(1, 1, 365).is_ok());
+        assert_eq!(bounded_number(0, 1, 365), Err(BridgeError::Invalid));
+        assert!(optional_condition_id(Some("deadline_approaching")).is_ok());
+        for bad in ["os.system", "subprocess:run", "../x", "Flag", "x"] {
+            assert_eq!(
+                optional_condition_id(Some(bad)),
+                Err(BridgeError::Invalid),
+                "{bad}"
+            );
+        }
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("date".to_string(), "2026-01-07".to_string());
+        assert!(condition_params(&params).is_ok());
+        params.insert("Bad-Key".to_string(), "x".to_string());
+        assert_eq!(condition_params(&params), Err(BridgeError::Invalid));
     }
 
     #[test]

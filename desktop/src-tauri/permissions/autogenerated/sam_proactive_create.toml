@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-proactive-create"
+description = "Enables the sam_proactive_create command without any pre-configured scope."
+commands.allow = ["sam_proactive_create"]
+
+[[permission]]
+identifier = "deny-sam-proactive-create"
+description = "Denies the sam_proactive_create command without any pre-configured scope."
+commands.deny = ["sam_proactive_create"]

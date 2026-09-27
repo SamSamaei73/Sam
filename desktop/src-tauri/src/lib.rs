@@ -14,7 +14,10 @@ mod backend;
 mod config_tests;
 mod validate;
 
+use std::collections::BTreeMap;
+
 use backend::{Backend, BridgeError, Route};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -413,6 +416,214 @@ fn sam_professional_query(state: State<'_, AppState>, mode: String, text: String
     )
 }
 
+/// A proactive schedule: typed, closed and bounded. Unknown fields (a cron
+/// string, an RRULE, a command) are refused by deserialization.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ScheduleArgs {
+    timezone: String,
+    start_date: String,
+    time_of_day: Option<String>,
+    daypart: Option<String>,
+    frequency: String,
+    interval: u32,
+    weekdays: Vec<u8>,
+    until: Option<String>,
+    max_runs: Option<u32>,
+}
+
+fn schedule_json(schedule: &ScheduleArgs) -> Result<Value, String> {
+    invalid(validate::timezone(&schedule.timezone))?;
+    invalid(validate::iso_date(&schedule.start_date))?;
+    invalid(validate::optional_time_of_day(
+        schedule.time_of_day.as_deref(),
+    ))?;
+    invalid(validate::optional_daypart(schedule.daypart.as_deref()))?;
+    invalid(validate::proactive_frequency(&schedule.frequency))?;
+    invalid(validate::bounded_number(schedule.interval, 1, 365))?;
+    invalid(validate::weekdays(&schedule.weekdays))?;
+    invalid(validate::optional_iso_date(schedule.until.as_deref()))?;
+    if let Some(max_runs) = schedule.max_runs {
+        invalid(validate::bounded_number(max_runs, 1, 1_000))?;
+    }
+    Ok(json!({
+        "timezone": schedule.timezone,
+        "start_date": schedule.start_date,
+        "time_of_day": schedule.time_of_day,
+        "daypart": schedule.daypart,
+        "frequency": schedule.frequency,
+        "interval": schedule.interval,
+        "weekdays": schedule.weekdays,
+        "until": schedule.until,
+        "max_runs": schedule.max_runs,
+    }))
+}
+
+#[tauri::command]
+fn sam_proactive_overview(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::ProactiveOverview, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_proactive_create(
+    state: State<'_, AppState>,
+    title: String,
+    task_type: String,
+    timing_mode: String,
+    action: String,
+    schedule: ScheduleArgs,
+    condition_id: Option<String>,
+    condition_params: BTreeMap<String, String>,
+    semantics: String,
+    instruction: String,
+    privacy_class: String,
+    notification_level: String,
+    proposed_action: String,
+    cooldown_hours: u32,
+    enabled: bool,
+) -> CommandResult {
+    invalid(validate::text(&title, validate::MAX_TASK_TITLE_CHARS))?;
+    invalid(validate::proactive_task_type(&task_type))?;
+    invalid(validate::proactive_timing(&timing_mode))?;
+    invalid(validate::proactive_action(&action))?;
+    let schedule = schedule_json(&schedule)?;
+    invalid(validate::optional_condition_id(condition_id.as_deref()))?;
+    invalid(validate::condition_params(&condition_params))?;
+    invalid(validate::proactive_semantics(&semantics))?;
+    invalid(validate::text_allow_empty(
+        &instruction,
+        validate::MAX_TASK_INSTRUCTION_CHARS,
+    ))?;
+    invalid(validate::professional_privacy(&privacy_class))?;
+    invalid(validate::proactive_level(&notification_level))?;
+    invalid(validate::proactive_proposed(&proposed_action))?;
+    invalid(validate::bounded_number(cooldown_hours, 1, 720))?;
+    run(
+        &state,
+        Route::ProactiveCreate,
+        Some(json!({
+            "title": title,
+            "task_type": task_type,
+            "timing_mode": timing_mode,
+            "action": action,
+            "schedule": schedule,
+            "condition_id": condition_id,
+            "condition_params": condition_params,
+            "semantics": semantics,
+            "instruction": instruction,
+            "privacy_class": privacy_class,
+            "notification_level": notification_level,
+            "proposed_action": proposed_action,
+            "cooldown_hours": cooldown_hours,
+            "enabled": enabled,
+        })),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_proactive_update(
+    state: State<'_, AppState>,
+    task_id: String,
+    enabled: Option<bool>,
+    title: Option<String>,
+    schedule: Option<ScheduleArgs>,
+    instruction: Option<String>,
+    privacy_class: Option<String>,
+    notification_level: Option<String>,
+    cooldown_hours: Option<u32>,
+) -> CommandResult {
+    invalid(validate::id(&task_id))?;
+    if let Some(title) = &title {
+        invalid(validate::text(title, validate::MAX_TASK_TITLE_CHARS))?;
+    }
+    let schedule = match &schedule {
+        Some(schedule) => Some(schedule_json(schedule)?),
+        None => None,
+    };
+    if let Some(instruction) = &instruction {
+        invalid(validate::text_allow_empty(
+            instruction,
+            validate::MAX_TASK_INSTRUCTION_CHARS,
+        ))?;
+    }
+    invalid(validate::optional_professional_privacy(
+        privacy_class.as_deref(),
+    ))?;
+    invalid(validate::optional_proactive_level(
+        notification_level.as_deref(),
+    ))?;
+    if let Some(hours) = cooldown_hours {
+        invalid(validate::bounded_number(hours, 1, 720))?;
+    }
+    run(
+        &state,
+        Route::ProactiveUpdate,
+        Some(json!({
+            "task_id": task_id,
+            "enabled": enabled,
+            "title": title,
+            "schedule": schedule,
+            "instruction": instruction,
+            "privacy_class": privacy_class,
+            "notification_level": notification_level,
+            "cooldown_hours": cooldown_hours,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_proactive_delete(
+    state: State<'_, AppState>,
+    task_id: String,
+    confirmation_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::id(&task_id))?;
+    invalid(validate::optional_id(confirmation_id.as_deref()))?;
+    run(
+        &state,
+        Route::ProactiveDelete,
+        Some(json!({ "task_id": task_id, "confirmation_id": confirmation_id })),
+    )
+}
+
+#[tauri::command]
+fn sam_proactive_run(state: State<'_, AppState>, task_id: String) -> CommandResult {
+    invalid(validate::id(&task_id))?;
+    run(
+        &state,
+        Route::ProactiveRun,
+        Some(json!({ "task_id": task_id })),
+    )
+}
+
+#[tauri::command]
+fn sam_proactive_notification(
+    state: State<'_, AppState>,
+    notification_id: String,
+    action: String,
+) -> CommandResult {
+    invalid(validate::id(&notification_id))?;
+    invalid(validate::notification_action(&action))?;
+    run(
+        &state,
+        Route::ProactiveNotification,
+        Some(json!({ "notification_id": notification_id, "action": action })),
+    )
+}
+
+/// The owner's switch for background scheduling: a single boolean, nothing
+/// else. The backend refuses it in Guest Mode and requires PROACTIVE/UPDATE.
+#[tauri::command]
+fn sam_proactive_scheduler(state: State<'_, AppState>, enabled: bool) -> CommandResult {
+    run(
+        &state,
+        Route::ProactiveScheduler,
+        Some(json!({ "enabled": enabled })),
+    )
+}
+
 #[tauri::command]
 fn sam_models_status(state: State<'_, AppState>) -> CommandResult {
     run(&state, Route::ModelsStatus, None)
@@ -494,6 +705,13 @@ pub fn run_app() {
             sam_professional_review,
             sam_professional_remove,
             sam_professional_query,
+            sam_proactive_overview,
+            sam_proactive_create,
+            sam_proactive_update,
+            sam_proactive_delete,
+            sam_proactive_run,
+            sam_proactive_notification,
+            sam_proactive_scheduler,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sam desktop");

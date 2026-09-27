@@ -52,7 +52,7 @@ describe("static security checks (production sources)", () => {
     expect(users.map((f) => relative(ROOT, f))).toEqual(["src/bridge/tauri.ts"]);
     const text = read(join(SRC, "bridge", "tauri.ts"));
     const commands = [...text.matchAll(/call(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(commands.length).toBe(30);
+    expect(commands.length).toBe(37);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
   });
 

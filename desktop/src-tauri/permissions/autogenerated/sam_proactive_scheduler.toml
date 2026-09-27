@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-proactive-scheduler"
+description = "Enables the sam_proactive_scheduler command without any pre-configured scope."
+commands.allow = ["sam_proactive_scheduler"]
+
+[[permission]]
+identifier = "deny-sam-proactive-scheduler"
+description = "Denies the sam_proactive_scheduler command without any pre-configured scope."
+commands.deny = ["sam_proactive_scheduler"]

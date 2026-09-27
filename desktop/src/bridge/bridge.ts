@@ -13,6 +13,11 @@ import type {
   ProfessionalQueryResult,
   ProfessionalReviewInput,
   ProfessionalSourceType,
+  ProactiveCreateInput,
+  ProactiveOverview,
+  ProactiveSchedulerResult,
+  ProactiveTaskResult,
+  ProactiveUpdateInput,
   ProviderPreferencesInput,
   ProvidersStatus,
   LanguageChoice,
@@ -117,6 +122,19 @@ export interface SamBridge {
   professionalReview(input: ProfessionalReviewInput): Promise<OperationResult>;
   professionalRemove(sourceId: string, confirmationId?: string): Promise<OperationResult>;
   professionalQuery(mode: "search" | "evidence_for", text: string): Promise<ProfessionalQueryResult>;
+
+  // Proactive Agent (Automations): the owner's own reminders, summaries and
+  // condition watches, plus the in-app notification inbox. Nothing here accepts
+  // a command, code, a provider, a permission or a confirmation for a future
+  // run, and a notification's suggested action is never executed.
+  proactiveOverview(): Promise<ProactiveOverview>;
+  proactiveCreate(input: ProactiveCreateInput): Promise<ProactiveTaskResult>;
+  proactiveUpdate(input: ProactiveUpdateInput): Promise<ProactiveTaskResult>;
+  proactiveDelete(taskId: string, confirmationId?: string): Promise<OperationResult>;
+  proactiveRun(taskId: string): Promise<OperationResult>;
+  proactiveNotification(notificationId: string, action: "read" | "dismiss"): Promise<OperationResult>;
+  /** The owner's switch for background scheduling. Turning it on grants nothing. */
+  proactiveScheduler(enabled: boolean): Promise<ProactiveSchedulerResult>;
 }
 
 /** A failure the UI may show. Contains no backend body, path or secret. */

@@ -517,3 +517,169 @@ export interface ProfessionalReviewInput {
   sourceId?: string;
   privacyClass?: ProfessionalPrivacy;
 }
+
+// ---- Proactive Agent / Automations (Phase 15) ----
+
+export type ProactiveTaskType = "one_time" | "recurring" | "condition_watch";
+export type ProactiveTiming = "exact_schedule" | "flexible_schedule" | "condition_watch";
+export type ProactiveAction = "reminder" | "summary" | "watch";
+export type ProactiveFrequency = "none" | "hourly" | "daily" | "weekly";
+export type ProactiveDaypart = "morning" | "afternoon" | "evening";
+export type ProactiveSemantics = "becomes_true" | "on_change" | "repeat_while_true";
+export type ProactiveLevel = "silent" | "notify_owner" | "requires_attention";
+/** A label for what the owner might do next. The app never executes it. */
+export type ProactiveProposed =
+  | "none"
+  | "review_in_sam"
+  | "open_professional"
+  | "open_model_settings"
+  | "review_deadline";
+export type ProactivePrivacy = "public" | "personal" | "private";
+export type ProactiveStatus = "active" | "completed" | "missed" | "expired" | "invalid";
+
+/** A deterministic schedule. The timezone is explicit and separate from the
+ * local time. There is no cron string, RRULE text or command. */
+export interface ProactiveScheduleInput {
+  timezone: string;
+  startDate: string;
+  timeOfDay: string | null;
+  daypart: ProactiveDaypart | null;
+  frequency: ProactiveFrequency;
+  interval: number;
+  weekdays: number[];
+  until: string | null;
+  maxRuns: number | null;
+}
+
+export interface ProSchedule {
+  timezone: string;
+  start_date: string;
+  time_of_day: string | null;
+  daypart: ProactiveDaypart | null;
+  frequency: ProactiveFrequency;
+  interval: number;
+  weekdays: number[];
+  until: string | null;
+  max_runs: number | null;
+}
+
+export interface ProTask {
+  task_id: string;
+  title: string;
+  task_type: ProactiveTaskType;
+  timing_mode: ProactiveTiming;
+  action: ProactiveAction;
+  schedule: ProSchedule;
+  condition_id: string | null;
+  condition_params: Record<string, string>;
+  semantics: ProactiveSemantics | null;
+  instruction: string;
+  privacy_class: ProactivePrivacy;
+  notification_level: ProactiveLevel;
+  proposed_action: ProactiveProposed;
+  cooldown_hours: number;
+  enabled: boolean;
+  status: ProactiveStatus;
+  expires_at: string | null;
+  created_at: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_result: string | null;
+  last_failure: string | null;
+  last_reason: string | null;
+  running: boolean;
+  version: number;
+}
+
+export interface ProNotification {
+  notification_id: string;
+  task_id: string;
+  title: string;
+  summary: string;
+  created_at: string;
+  reason_code: string;
+  importance: "info" | "attention";
+  source_label: string;
+  proposed_action: ProactiveProposed;
+  /** Can be stricter than the task's class: privacy only ever tightens. */
+  privacy_class: ProactivePrivacy | "normal" | "secret";
+  read: boolean;
+}
+
+export interface ProHistory {
+  record_id: string;
+  task_id: string;
+  kind: string;
+  trigger: string | null;
+  started_at: string;
+  completed_at: string | null;
+  result: string | null;
+  failure: string | null;
+  change: string | null;
+  reason_code: string | null;
+  notification_created: boolean;
+  provider_id: string | null;
+}
+
+export interface ProCondition {
+  condition_id: string;
+  label: string;
+  required_params: string[];
+  optional_params: string[];
+}
+
+export interface ProLimits {
+  min_interval_hours: number;
+  max_tasks: number;
+  max_enabled_tasks: number;
+  max_title_chars: number;
+  max_instruction_chars: number;
+}
+
+export interface ProactiveOverview extends OperationResult {
+  tasks: ProTask[];
+  notifications: ProNotification[];
+  history: ProHistory[];
+  conditions: ProCondition[];
+  limits: ProLimits | null;
+  live_runs: number;
+  /** Background scheduling is off by default and after every restart. */
+  scheduler_enabled: boolean;
+}
+
+export interface ProactiveSchedulerResult extends OperationResult {
+  scheduler_enabled: boolean;
+}
+
+export interface ProactiveTaskResult extends OperationResult {
+  task: ProTask | null;
+}
+
+export interface ProactiveCreateInput {
+  title: string;
+  taskType: ProactiveTaskType;
+  timingMode: ProactiveTiming;
+  action: ProactiveAction;
+  schedule: ProactiveScheduleInput;
+  conditionId: string | null;
+  conditionParams: Record<string, string>;
+  semantics: ProactiveSemantics;
+  instruction: string;
+  privacyClass: ProactivePrivacy;
+  notificationLevel: ProactiveLevel;
+  proposedAction: ProactiveProposed;
+  cooldownHours: number;
+  enabled: boolean;
+}
+
+/** Trusted task management by the owner. Omitted fields stay as they are. */
+export interface ProactiveUpdateInput {
+  taskId: string;
+  enabled?: boolean;
+  title?: string;
+  schedule?: ProactiveScheduleInput;
+  instruction?: string;
+  privacyClass?: ProactivePrivacy;
+  notificationLevel?: ProactiveLevel;
+  cooldownHours?: number;
+}

@@ -31,6 +31,13 @@ const COMMANDS: &[&str] = &[
     "sam_professional_review",
     "sam_professional_remove",
     "sam_professional_query",
+    "sam_proactive_overview",
+    "sam_proactive_create",
+    "sam_proactive_update",
+    "sam_proactive_delete",
+    "sam_proactive_run",
+    "sam_proactive_notification",
+    "sam_proactive_scheduler",
 ];
 
 fn main() {

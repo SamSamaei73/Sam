@@ -35,6 +35,13 @@
     "allow-sam-professional-ingest",
     "allow-sam-professional-review",
     "allow-sam-professional-remove",
-    "allow-sam-professional-query"
+    "allow-sam-professional-query",
+    "allow-sam-proactive-overview",
+    "allow-sam-proactive-create",
+    "allow-sam-proactive-update",
+    "allow-sam-proactive-delete",
+    "allow-sam-proactive-run",
+    "allow-sam-proactive-notification",
+    "allow-sam-proactive-scheduler"
   ]
 }

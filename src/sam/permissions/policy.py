@@ -148,6 +148,22 @@ _POLICY: dict[tuple[PermissionResource, PermissionAction], PolicyEntry] = {
     (_R.PROFESSIONAL, _A.WRITE): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.PROFESSIONAL, _A.UPDATE): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.PROFESSIONAL, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
+    # --- proactive (Phase 15) --------------------------------------------
+    # sam.proactive runs owner-defined reminders, summaries and condition
+    # watches. Its own resource, never another domain's: listing tasks and
+    # reading notifications is READ/LOW; creating a task is CREATE/MEDIUM;
+    # editing, enabling/disabling or marking a notification read is
+    # UPDATE/MEDIUM; running a task (on schedule or "run now") is
+    # EXECUTE/MEDIUM and is evaluated again on EVERY run; deleting a task is
+    # DELETE/HIGH and always requires confirmation. None of these rows ever
+    # authorizes a side effect in another domain: a task that wants to read
+    # a source needs that domain's own permission on every run, and a
+    # proactive run never performs a HIGH/CRITICAL action.
+    (_R.PROACTIVE, _A.READ): PolicyEntry(RiskLevel.LOW, False),
+    (_R.PROACTIVE, _A.CREATE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.PROACTIVE, _A.UPDATE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.PROACTIVE, _A.EXECUTE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.PROACTIVE, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
     # --- voice (Phase 9) -------------------------------------------------
     # sam.voice maps its three explicit operations onto these rows (never a
     # new PermissionAction): opening an in-memory voice session is

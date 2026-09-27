@@ -55,6 +55,14 @@ from sam.permissions.models import (
     utc_now,
 )
 from sam.permissions.store import InMemoryPermissionStore
+from sam.proactive.audit import InMemoryProactiveAuditSink
+from sam.proactive.conditions import ConditionEntry, ConditionRegistry
+from sam.proactive.observers import (
+    deadline_entry,
+    professional_conflicts_entry,
+    provider_status_entry,
+)
+from sam.proactive.service import ProactiveService
 from sam.professional.audit import InMemoryProfessionalAuditSink
 from sam.professional.candidates import RouterCandidateExtractor
 from sam.professional.identity import OwnerProfessionalIdentity
@@ -174,6 +182,19 @@ class DesktopRuntime:
                 else None
             ),
             owner_identity=_owner_identity(settings),
+            clock=clock,
+        )
+        # Proactive Agent (Phase 15): owner-defined reminders, summaries and
+        # condition watches. In-memory only. Every run is authorized by the
+        # PermissionEngine at run time; summaries go through the Phase 13 router;
+        # observers only READ, each under its own permission. The scheduler thread
+        # is started by the application lifespan, never here.
+        self.proactive_audit = InMemoryProactiveAuditSink()
+        self.proactive = ProactiveService(
+            permission_engine=self.permissions,
+            registry=_proactive_registry(self),
+            router=model_router,
+            audit_sink=self.proactive_audit,
             clock=clock,
         )
         self.memory = MemoryEngine(
@@ -337,13 +358,35 @@ def _owner_identity(settings: Settings) -> OwnerProfessionalIdentity | None:
         return None
 
 
+def _proactive_registry(runtime: DesktopRuntime) -> ConditionRegistry:
+    """The trusted conditions a watch may name. Built here, once, by Sam's code.
+
+    Cross-domain signals are READ-only callables; the professional one goes
+    through ``ProfessionalService`` (its own PROFESSIONAL/READ check) after the
+    proactive runner has asked for that permission itself."""
+
+    def open_conflicts(principal: Principal) -> int | None:
+        result = runtime.professional.get_conflicts(principal)
+        return len(result.data) if result.ok and result.data is not None else None
+
+    entries: list[ConditionEntry] = [
+        deadline_entry(),
+        professional_conflicts_entry(open_conflicts),
+    ]
+    if runtime.model_router is not None:
+        entries.append(provider_status_entry(runtime.model_router.provider_state))
+    return ConditionRegistry.of(entries)
+
+
 def bootstrap_grants(runtime: DesktopRuntime) -> None:
     """Create the trusted local defaults — the ONLY place grants are made.
 
     Scope is deliberately narrow: the single ``default`` Knowledge collection
     (delete still requires a confirmation by policy), the Phase 9 voice
-    session operations (only if voice input is configured), and speech
-    synthesis for exactly the configured profile(s). Nothing is created for
+    session operations (only if voice input is configured), speech synthesis
+    for exactly the configured profile(s), the owner's Professional profile and
+    the owner's own proactive tasks (``proactive``; deleting a task still
+    requires a confirmation by policy). Nothing is created for
     MCP, computer control, coding, Memory writes, or any other resource, and
     nothing is wildcard/root. Each grant is tagged so the Permissions view can
     say where it came from.
@@ -426,6 +469,21 @@ def bootstrap_grants(runtime: DesktopRuntime) -> None:
         PermissionAction.DELETE,
         PermissionScope.from_path("profile"),
     )
+    # Proactive Agent: the owner may manage and run their own automations. Each
+    # scheduled run is still evaluated against these grants at run time (revoking
+    # EXECUTE stops them), and deleting a task always asks for a confirmation.
+    for action in (
+        PermissionAction.READ,
+        PermissionAction.CREATE,
+        PermissionAction.UPDATE,
+        PermissionAction.EXECUTE,
+        PermissionAction.DELETE,
+    ):
+        grant(
+            PermissionResource.PROACTIVE,
+            action,
+            PermissionScope.from_path("proactive"),
+        )
     if runtime.voice_gateway is not None:
         for action in (
             PermissionAction.CREATE,

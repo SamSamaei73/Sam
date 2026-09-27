@@ -442,10 +442,25 @@
         "notifications",
         "monitoring",
         "background tasks",
-        "conditional automation"
+        "conditional automation",
+        "one-time, recurring and condition-watch task types",
+        "bounded Sam-owned scheduler with deterministic clock and scheduling",
+        "condition watches with deduplication and cooldown",
+        "local in-app notification inbox",
+        "PermissionResource.PROACTIVE with runtime permission re-evaluation",
+        "confirmation non-reuse",
+        "scheduler default OFF with owner-only enablement",
+        "privacy re-evaluation on every run",
+        "provenance-based notification privacy",
+        "PRIVATE summary tasks unsupported",
+        "SECRET zero-provider rule",
+        "in-memory repository only",
+        "bounded concurrency and supervisor-owned timeouts",
+        "no side-effect execution"
       ],
       "rule": "Proactive behavior must respect the same permission engine as interactive behavior.",
-      "status": "not_started"
+      "status": "approved",
+      "scope_note": "Phase 15 adds Sam's Proactive Agent foundation (src/sam/proactive/): owner-defined ONE_TIME and RECURRING reminders and summaries and CONDITION_WATCH tasks, with explicit EXACT_SCHEDULE / FLEXIBLE_SCHEDULE / CONDITION_WATCH timing. Schedules are a deterministic Sam-owned model (explicit IANA timezone stored apart from wall-clock time; nonexistent DST times shift forward once, ambiguous ones use the first occurrence; no cron, RRULE text or code), with a one-hour minimum interval. A bounded in-process scheduler (fixed worker pool, per-tick dispatch cap, backpressure, no overlapping runs, run timeouts, clean shutdown) uses an injected Clock; missed recurring runs SKIP_TO_NEXT and are never replayed. Proactive is not autonomous authority: every run is authorized by the PermissionEngine at run time under a distinct PermissionResource.PROACTIVE (READ low, CREATE/UPDATE/EXECUTE medium, DELETE high + confirmation); task text is data; runs never pass or store a confirmation and never perform a HIGH/CRITICAL action; observers need their own domain permission on every run. Condition watches name a trusted registry entry only and use a deterministic state machine with Sam-owned deduplication and cooldown. Summaries go through the Phase 13 ModelRouter with the task's current privacy class on every run (SECRET: zero provider calls; PRIVATE: no Gemini free tier by default; paid fallback OFF; a refusal is never re-routed; no automatic retry). Notifications are bounded, content-safe inbox entries and a suggested action is only a label. Model proposals become disabled drafts only. In-memory repository only; owner-only desktop Automations section (Guest Mode refused before the body is processed); in-app inbox only (no native OS notifications); metadata-only audit. Not the Career and PhD agent (Phase 16). Independent-review remediation: background scheduling is OFF by default and only the owner's trusted switch (PROACTIVE/UPDATE, Guest refused, resets to off on restart) or explicit local config enables it; a timed-out run is cancelled cooperatively and stays in flight, holding its concurrency slot until its worker thread really exits, and every late result is discarded; every observer and the router's worst case must fit the run budget; PROACTIVE EXECUTE authorizes only evaluation, READ observation, a routed summary and a local notification (runs can request nothing but their own EXECUTE and READs); notification privacy is provenance-based (task, observer registration and observation classes; the strictest wins and text can only raise it): SECRET becomes a fixed notice, PRIVATE a fixed template with no raw text (private summaries are not supported), and pattern detection is defence in depth; the supervising scheduler records a timeout exactly once and discards any late worker outcome; the one-time overdue threshold is exactly one hour. Approved after independent review (M1-M22 mutations caught). Known limitations: in-memory only; scheduler off by default; PRIVATE summaries unsupported; in-app notifications only; Python cannot forcibly terminate a hung worker thread, so a dependency that violates its own timeout keeps its task in flight and its concurrency slot occupied until restart (fail-closed availability degradation, not authorization escalation). PROACTIVE EXECUTE is bootstrapped only for Phase-15-safe evaluation, READ observation, routed summarization and local notification; Phase 16 MUST NOT reuse it as authorization for any career, job or PhD side effect."
     },
     {
       "id": 16,
@@ -741,9 +756,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 14,
+    "phase": 15,
     "status": "approved",
-    "next_phase": 15,
+    "next_phase": 16,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {

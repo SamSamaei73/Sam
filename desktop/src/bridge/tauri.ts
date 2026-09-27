@@ -100,4 +100,39 @@ export const tauriBridge: SamBridge = {
   professionalRemove: (sourceId, confirmationId) =>
     call("sam_professional_remove", { sourceId, confirmationId: confirmationId ?? null }),
   professionalQuery: (mode, text) => call("sam_professional_query", { mode, text }),
+  proactiveOverview: () => call("sam_proactive_overview"),
+  proactiveCreate: (input) =>
+    call("sam_proactive_create", {
+      title: input.title,
+      taskType: input.taskType,
+      timingMode: input.timingMode,
+      action: input.action,
+      schedule: input.schedule,
+      conditionId: input.conditionId,
+      conditionParams: input.conditionParams,
+      semantics: input.semantics,
+      instruction: input.instruction,
+      privacyClass: input.privacyClass,
+      notificationLevel: input.notificationLevel,
+      proposedAction: input.proposedAction,
+      cooldownHours: input.cooldownHours,
+      enabled: input.enabled,
+    }),
+  proactiveUpdate: (input) =>
+    call("sam_proactive_update", {
+      taskId: input.taskId,
+      enabled: input.enabled ?? null,
+      title: input.title ?? null,
+      schedule: input.schedule ?? null,
+      instruction: input.instruction ?? null,
+      privacyClass: input.privacyClass ?? null,
+      notificationLevel: input.notificationLevel ?? null,
+      cooldownHours: input.cooldownHours ?? null,
+    }),
+  proactiveDelete: (taskId, confirmationId) =>
+    call("sam_proactive_delete", { taskId, confirmationId: confirmationId ?? null }),
+  proactiveRun: (taskId) => call("sam_proactive_run", { taskId }),
+  proactiveNotification: (notificationId, action) =>
+    call("sam_proactive_notification", { notificationId, action }),
+  proactiveScheduler: (enabled) => call("sam_proactive_scheduler", { enabled }),
 };
