@@ -12,6 +12,7 @@ const en = {
   // navigation
   "nav.chat": "Chat",
   "nav.knowledge": "Knowledge",
+  "nav.professional": "Professional",
   "nav.memory": "Memory",
   "nav.tools": "Tools",
   "nav.permissions": "Permissions",
@@ -213,6 +214,7 @@ export type StringKey = keyof typeof en;
 const fa: Record<StringKey, string> = {
   "nav.chat": "گفتگو",
   "nav.knowledge": "دانش",
+  "nav.professional": "حرفه‌ای",
   "nav.memory": "حافظه",
   "nav.tools": "ابزارها",
   "nav.permissions": "مجوزها",

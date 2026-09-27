@@ -78,4 +78,26 @@ export const tauriBridge: SamBridge = {
       topicBlocklist: input.topic_blocklist,
       stepUp: input.stepUp ?? null,
     }),
+  professionalProfile: () => call("sam_professional_profile"),
+  professionalIngest: ({ name, sourceType, privacyClass, resourceType, contentBase64, useCandidates }) =>
+    call("sam_professional_ingest", {
+      name,
+      sourceType,
+      privacyClass,
+      resourceType,
+      contentBase64,
+      useCandidates,
+    }),
+  professionalReview: (input) =>
+    call("sam_professional_review", {
+      action: input.action,
+      claimId: input.claimId ?? null,
+      conflictId: input.conflictId ?? null,
+      optionId: input.optionId ?? null,
+      sourceId: input.sourceId ?? null,
+      privacyClass: input.privacyClass ?? null,
+    }),
+  professionalRemove: (sourceId, confirmationId) =>
+    call("sam_professional_remove", { sourceId, confirmationId: confirmationId ?? null }),
+  professionalQuery: (mode, text) => call("sam_professional_query", { mode, text }),
 };

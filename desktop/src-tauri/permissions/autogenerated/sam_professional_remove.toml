@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-professional-remove"
+description = "Enables the sam_professional_remove command without any pre-configured scope."
+commands.allow = ["sam_professional_remove"]
+
+[[permission]]
+identifier = "deny-sam-professional-remove"
+description = "Denies the sam_professional_remove command without any pre-configured scope."
+commands.deny = ["sam_professional_remove"]

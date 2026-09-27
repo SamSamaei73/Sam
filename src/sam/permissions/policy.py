@@ -136,6 +136,18 @@ _POLICY: dict[tuple[PermissionResource, PermissionAction], PolicyEntry] = {
     (_R.KNOWLEDGE, _A.WRITE): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.KNOWLEDGE, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
     (_R.KNOWLEDGE, _A.EXECUTE): PolicyEntry(RiskLevel.HIGH, True),
+    # --- professional (Phase 14) -----------------------------------------
+    # sam.professional is the owner's professional-evidence domain. It is a
+    # distinct resource, deliberately NOT folded into KNOWLEDGE: reading/
+    # listing/searching evidence is READ/LOW; ingesting or refreshing an
+    # owner-selected source is WRITE/MEDIUM (reversible); confirming or
+    # rejecting a candidate and resolving a conflict is UPDATE/MEDIUM; removing
+    # a source and its derived evidence is DELETE/HIGH and always requires
+    # confirmation. No other action is classified, so none can be requested.
+    (_R.PROFESSIONAL, _A.READ): PolicyEntry(RiskLevel.LOW, False),
+    (_R.PROFESSIONAL, _A.WRITE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.PROFESSIONAL, _A.UPDATE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.PROFESSIONAL, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
     # --- voice (Phase 9) -------------------------------------------------
     # sam.voice maps its three explicit operations onto these rows (never a
     # new PermissionAction): opening an in-memory voice session is

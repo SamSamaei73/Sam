@@ -376,7 +376,8 @@ def test_permissions_list_and_revoke_only() -> None:
     grants = bridge.get("/permissions").json()["grants"]
     assert grants and all(g["status"] == "active" for g in grants)
     assert not any(g["scope"] == "*" for g in grants)
-    assert {g["resource"] for g in grants} == {"knowledge"}
+    # Phase 14 adds the distinct PROFESSIONAL resource; nothing else.
+    assert {g["resource"] for g in grants} == {"knowledge", "professional"}
     ident = next(
         g["grant_id"]
         for g in grants
@@ -591,6 +592,12 @@ def test_router_has_only_the_documented_routes() -> None:
             # Phase 13: AI provider status and owner routing/privacy preferences
             ("GET", "/desktop/v1/models"),
             ("POST", "/desktop/v1/models/preferences"),
+            # Phase 14: Professional Intelligence (owner-bound)
+            ("GET", "/desktop/v1/professional/profile"),
+            ("POST", "/desktop/v1/professional/ingest"),
+            ("POST", "/desktop/v1/professional/review"),
+            ("POST", "/desktop/v1/professional/remove"),
+            ("POST", "/desktop/v1/professional/query"),
         ]
     )
 
@@ -739,26 +746,27 @@ def test_non_critical_confirmations_do_not_use_step_up() -> None:
 def test_bootstrap_grants_are_exactly_the_documented_set_and_audited() -> None:
     """Exhaustive review of what authority the desktop starts with."""
 
+    baseline = {
+        ("knowledge", "write", "default:ingest"),
+        ("knowledge", "read", "default:list"),
+        ("knowledge", "read", "default:retrieve"),
+        ("knowledge", "delete", "default"),
+        # Phase 14: exactly four PROFESSIONAL grants (delete always confirms).
+        ("professional", "read", "profile:read"),
+        ("professional", "write", "profile:ingest"),
+        ("professional", "update", "profile:review"),
+        ("professional", "delete", "profile"),
+    }
     bare = Bridge()
     got = {
         (g["resource"], g["action"], g["scope"])
         for g in bare.get("/permissions").json()["grants"]
     }
-    assert got == {
-        ("knowledge", "write", "default:ingest"),
-        ("knowledge", "read", "default:list"),
-        ("knowledge", "read", "default:retrieve"),
-        ("knowledge", "delete", "default"),
-    }
+    assert got == baseline
     full = Bridge(stt=FakeTranscriptionProvider(), tts=FakeSpeechSynthesisProvider())
     grants = full.get("/permissions").json()["grants"]
     got = {(g["resource"], g["action"], g["scope"]) for g in grants}
-    assert got - {
-        ("knowledge", "write", "default:ingest"),
-        ("knowledge", "read", "default:list"),
-        ("knowledge", "read", "default:retrieve"),
-        ("knowledge", "delete", "default"),
-    } == {
+    assert got - baseline == {
         ("voice", "create", "session"),
         ("voice", "read", "session"),
         ("voice", "update", "session"),
@@ -769,7 +777,12 @@ def test_bootstrap_grants_are_exactly_the_documented_set_and_audited() -> None:
         assert g["expires_at"] is None and g["status"] == "active"
         assert "*" not in g["scope"] and g["scope"] != ""
     # Nothing for MCP/computer/coding/memory/email/etc.
-    assert {g["resource"] for g in grants} <= {"knowledge", "voice", "speech_synthesis"}
+    assert {g["resource"] for g in grants} <= {
+        "knowledge",
+        "professional",
+        "voice",
+        "speech_synthesis",
+    }
     # One content-free audit label per grant, visible in Activity.
     labels = [
         i["label"]

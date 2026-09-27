@@ -26,6 +26,11 @@ const COMMANDS: &[&str] = &[
     "sam_guest_end",
     "sam_models_status",
     "sam_models_preferences",
+    "sam_professional_profile",
+    "sam_professional_ingest",
+    "sam_professional_review",
+    "sam_professional_remove",
+    "sam_professional_query",
 ];
 
 fn main() {

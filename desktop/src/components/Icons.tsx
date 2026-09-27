@@ -37,6 +37,12 @@ export const IconKnowledge = () => (
     <path d="M5 18a2 2 0 0 1 2-2h10.5M9 8.5h5" />
   </Base>
 );
+export const IconProfessional = () => (
+  <Base>
+    <path d="M4 8h16v10.5H4z" />
+    <path d="M9 8V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v2M4 13h16" />
+  </Base>
+);
 export const IconMemory = () => (
   <Base>
     <circle cx="12" cy="12" r="3" />

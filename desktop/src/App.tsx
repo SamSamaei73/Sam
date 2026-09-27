@@ -6,6 +6,7 @@ import {
   IconKnowledge,
   IconMemory,
   IconPanelLeft,
+  IconProfessional,
   IconSettings,
   IconShield,
   IconTools,
@@ -21,15 +22,25 @@ import { ActivityView } from "./views/ActivityView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { MemoryView } from "./views/MemoryView";
 import { PermissionsView } from "./views/PermissionsView";
+import { ProfessionalView } from "./views/ProfessionalView";
 import { SamView } from "./views/SamView";
 import { SettingsView } from "./views/SettingsView";
 import { ToolsView } from "./views/ToolsView";
 
-export type ViewId = "sam" | "knowledge" | "memory" | "tools" | "permissions" | "activity" | "settings";
+export type ViewId =
+  | "sam"
+  | "knowledge"
+  | "professional"
+  | "memory"
+  | "tools"
+  | "permissions"
+  | "activity"
+  | "settings";
 
 const NAV_ICONS: Record<ViewId, ReactNode> = {
   sam: <IconChat />,
   knowledge: <IconKnowledge />,
+  professional: <IconProfessional />,
   memory: <IconMemory />,
   tools: <IconTools />,
   permissions: <IconShield />,
@@ -39,13 +50,23 @@ const NAV_ICONS: Record<ViewId, ReactNode> = {
 const NAV_KEYS = {
   sam: "nav.chat",
   knowledge: "nav.knowledge",
+  professional: "nav.professional",
   memory: "nav.memory",
   tools: "nav.tools",
   permissions: "nav.permissions",
   activity: "nav.activity",
   settings: "nav.settings",
 } as const;
-const VIEW_ORDER: ViewId[] = ["sam", "knowledge", "memory", "tools", "permissions", "activity", "settings"];
+const VIEW_ORDER: ViewId[] = [
+  "sam",
+  "knowledge",
+  "professional",
+  "memory",
+  "tools",
+  "permissions",
+  "activity",
+  "settings",
+];
 
 interface Conversation {
   id: string;
@@ -170,6 +191,8 @@ function pageFor(view: ViewId): ReactNode {
   switch (view) {
     case "knowledge":
       return <KnowledgeView />;
+    case "professional":
+      return <ProfessionalView />;
     case "memory":
       return <MemoryView />;
     case "tools":

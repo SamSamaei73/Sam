@@ -298,3 +298,222 @@ export interface ProviderPreferencesInput extends ProviderPreferences {
   topic_blocklist: string[];
   stepUp?: string;
 }
+
+// ---- Professional Intelligence (Phase 14). Display data only: every fact carries
+// its provenance and a deterministic evidence strength. Nothing here can assert a
+// verification, a principal or a permission; the backend computes all of it.
+
+export type ProfessionalSourceType =
+  | "master_cv"
+  | "publication"
+  | "transcript"
+  | "project_documentation"
+  | "github"
+  | "linkedin_export"
+  | "owner_document";
+/** The owner's choice for a source. There is no "secret" (never ingested). */
+export type ProfessionalPrivacy = "public" | "personal" | "private";
+/** Documentary support only, counted in independent source families. */
+export type EvidenceStrength = "none" | "single_source" | "corroborated";
+/** The owner's decision: independent of documentary strength. */
+export type ReviewState = "unreviewed" | "owner_confirmed" | "owner_rejected";
+export type EvidenceNature = "explicit_source" | "inferred_relationship" | "owner_attestation" | "model_candidate";
+export type Sensitivity = "public" | "normal" | "personal" | "private";
+export type MatchStatus = "matched" | "partially_supported" | "not_supported" | "unknown";
+
+export interface ProEvidence {
+  evidence_id: string;
+  source_id: string;
+  source_label: string;
+  source_type: ProfessionalSourceType;
+  source_family_id: string;
+  nature: EvidenceNature;
+  page_number: number | null;
+  section_title: string | null;
+  paragraph_index: number | null;
+  character_start: number | null;
+  character_end: number | null;
+  reference: string;
+  context_claim_id: string | null;
+  context_statement: string | null;
+  basis_evidence_id: string | null;
+}
+
+export interface ProClaim {
+  claim_id: string;
+  category: string;
+  statement: string;
+  strength: EvidenceStrength;
+  review: ReviewState;
+  accepted: boolean;
+  inferred: boolean;
+  candidate: boolean;
+  sensitivity: Sensitivity;
+  attributes: Record<string, string>;
+  conflicted_attributes: string[];
+  source_count: number;
+  source_family_count: number;
+  canonical: boolean;
+  evidence: ProEvidence[];
+}
+
+export interface ProPublication {
+  claim_id: string;
+  strength: EvidenceStrength;
+  review: ReviewState;
+  accepted: boolean;
+  sensitivity: Sensitivity;
+  title: string;
+  authors: string[];
+  owner_author_position: number | null;
+  venue: string | null;
+  year: string | null;
+  doi: string | null;
+  abstract: string | null;
+  methods: string | null;
+  models: string[];
+  datasets: string | null;
+  findings: string | null;
+  limitations: string | null;
+  topics: string[];
+  owner_contribution: string | null;
+  evidence: ProEvidence[];
+  conflicted_attributes: string[];
+}
+
+export interface ProEducation {
+  claim_id: string;
+  strength: EvidenceStrength;
+  review: ReviewState;
+  accepted: boolean;
+  sensitivity: Sensitivity;
+  institution: string | null;
+  degree: string;
+  subject: string;
+  classification: string | null;
+  start: string | null;
+  end: string | null;
+  modules: string[];
+  dissertation: string | null;
+  evidence: ProEvidence[];
+  conflicted_attributes: string[];
+}
+
+export interface ProTimelineEntry {
+  claim_id: string;
+  employer: string;
+  title: string;
+  start: string | null;
+  end: string | null;
+  status: "resolved" | "conflicted" | "incomplete";
+  months: number;
+  approximate: boolean;
+}
+
+export interface ProExperience {
+  entries: ProTimelineEntry[];
+  total_months: number;
+  total_years: number;
+  remainder_months: number;
+  conservative_months: number;
+  excluded_conflicted: number;
+  excluded_incomplete: number;
+  gaps: string[];
+}
+
+export interface ProConflictOption {
+  option_id: string;
+  value: string;
+  claim_id: string | null;
+  source_ids: string[];
+}
+
+export interface ProConflict {
+  conflict_id: string;
+  kind: "attribute" | "role_overlap";
+  attribute: string;
+  claim_ids: string[];
+  options: ProConflictOption[];
+  resolved: boolean;
+  resolved_value: string | null;
+}
+
+export interface ProGap {
+  kind: string;
+  detail: string;
+  claim_id: string | null;
+  source_id: string | null;
+}
+
+export interface ProSource {
+  source_id: string;
+  label: string;
+  source_type: ProfessionalSourceType;
+  source_family_id: string;
+  version: number;
+  privacy_class: ProfessionalPrivacy;
+  freshness: "fresh" | "aging" | "stale";
+  ingested_at: string;
+  refreshed_at: string;
+  resource_type: string;
+  accepted_claims: number;
+  pending_candidates: number;
+  conflicts: number;
+  candidate_extraction: string;
+}
+
+export interface ProfessionalProfile extends OperationResult {
+  claims: ProClaim[];
+  publications: ProPublication[];
+  education: ProEducation[];
+  experience: ProExperience | null;
+  conflicts: ProConflict[];
+  gaps: ProGap[];
+  sources: ProSource[];
+  counts: Record<string, number>;
+}
+
+export interface ProfessionalIngestResult extends OperationResult {
+  source_id: string | null;
+  ingest_status: string | null;
+  claims_created: number;
+  claims_updated: number;
+  claims_skipped_rejected: number;
+  evidence_added: number;
+  conflicts_open: number;
+  candidate_extraction: string;
+  candidates_proposed: number;
+  candidates_accepted: number;
+  candidates_rejected: number;
+  unmapped_skills: number;
+}
+
+export interface ProRequirement {
+  status: MatchStatus;
+  normalized_requirement: string;
+  skills: ProClaim[];
+  inferred_skills: ProClaim[];
+  projects: ProClaim[];
+  employment: ProClaim[];
+  research: ProClaim[];
+  education: ProClaim[];
+  unsupported_aspects: string[];
+  notes: string[];
+}
+
+export interface ProfessionalQueryResult extends OperationResult {
+  mode: "search" | "evidence_for" | null;
+  claims: ProClaim[];
+  requirement: ProRequirement | null;
+}
+
+/** The owner's review answers. There is no "verify": only confirm/reject a
+ * candidate, choose among conflicting values, or set a source's privacy class. */
+export interface ProfessionalReviewInput {
+  action: "confirm" | "reject" | "resolve" | "set_privacy";
+  claimId?: string;
+  conflictId?: string;
+  optionId?: string;
+  sourceId?: string;
+  privacyClass?: ProfessionalPrivacy;
+}

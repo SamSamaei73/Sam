@@ -7,6 +7,12 @@ import type {
   EnrollProgressResponse,
   IdentityStatus,
   ChatPrivacy,
+  ProfessionalIngestResult,
+  ProfessionalPrivacy,
+  ProfessionalProfile,
+  ProfessionalQueryResult,
+  ProfessionalReviewInput,
+  ProfessionalSourceType,
   ProviderPreferencesInput,
   ProvidersStatus,
   LanguageChoice,
@@ -95,6 +101,22 @@ export interface SamBridge {
   // preferences: nothing here can enable a paid provider or carry a credential.
   providersStatus(): Promise<ProvidersStatus>;
   setProviderPreferences(input: ProviderPreferencesInput): Promise<ProvidersStatus>;
+
+  // Professional Intelligence: the owner's evidence-backed professional profile.
+  // The owner selects a file's bytes, a source type and a privacy class; nothing
+  // here accepts a path, a verification state, an identity or a decision.
+  professionalProfile(): Promise<ProfessionalProfile>;
+  professionalIngest(input: {
+    name: string;
+    sourceType: ProfessionalSourceType;
+    privacyClass: ProfessionalPrivacy;
+    resourceType: ResourceKind;
+    contentBase64: string;
+    useCandidates: boolean;
+  }): Promise<ProfessionalIngestResult>;
+  professionalReview(input: ProfessionalReviewInput): Promise<OperationResult>;
+  professionalRemove(sourceId: string, confirmationId?: string): Promise<OperationResult>;
+  professionalQuery(mode: "search" | "evidence_for", text: string): Promise<ProfessionalQueryResult>;
 }
 
 /** A failure the UI may show. Contains no backend body, path or secret. */

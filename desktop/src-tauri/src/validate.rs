@@ -7,6 +7,8 @@ use crate::backend::BridgeError;
 pub const MAX_MESSAGE_CHARS: usize = 100_000;
 pub const MAX_SPEAK_CHARS: usize = 20_000;
 pub const MAX_QUERY_CHARS: usize = 1_000;
+/// Matches the backend's professional query bound.
+pub const MAX_PROFESSIONAL_QUERY_CHARS: usize = 300;
 pub const MAX_NAME_CHARS: usize = 200;
 pub const MAX_ID_CHARS: usize = 100;
 pub const MAX_DOCUMENT_BASE64: usize = 28_000_000;
@@ -151,6 +153,49 @@ pub fn profile_id(value: &str) -> Result<(), BridgeError> {
 pub fn resource_type(value: &str) -> Result<(), BridgeError> {
     match value {
         "pdf" | "txt" | "markdown" | "json" | "csv" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// The closed set of Professional Intelligence source types (never a path or URL).
+pub fn professional_source_type(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "master_cv"
+        | "publication"
+        | "transcript"
+        | "project_documentation"
+        | "github"
+        | "linkedin_export"
+        | "owner_document" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+/// The privacy class the owner selects for a professional source. There is
+/// deliberately no "secret" (never ingested) and no "normal" value here.
+pub fn professional_privacy(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "public" | "personal" | "private" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+pub fn optional_professional_privacy(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), professional_privacy)
+}
+
+/// The owner's review actions. There is no "verify" or "delete" here: verifying
+/// is not something the UI can assert, and removal is its own confirmed command.
+pub fn professional_review_action(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "confirm" | "reject" | "resolve" | "set_privacy" => Ok(()),
+        _ => Err(BridgeError::Invalid),
+    }
+}
+
+pub fn professional_query_mode(value: &str) -> Result<(), BridgeError> {
+    match value {
+        "search" | "evidence_for" => Ok(()),
         _ => Err(BridgeError::Invalid),
     }
 }
@@ -309,6 +354,70 @@ mod tests {
         }
         for bad in ["exe", "PDF", "", "../pdf"] {
             assert!(resource_type(bad).is_err());
+        }
+    }
+
+    #[test]
+    fn professional_closed_sets_reject_everything_else() {
+        for ok in [
+            "master_cv",
+            "publication",
+            "transcript",
+            "project_documentation",
+            "github",
+            "linkedin_export",
+            "owner_document",
+        ] {
+            assert!(professional_source_type(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "MASTER_CV",
+            "cv",
+            "../cv",
+            "file:///etc/passwd",
+            "arbitrary_file",
+        ] {
+            assert_eq!(
+                professional_source_type(bad),
+                Err(BridgeError::Invalid),
+                "{bad}"
+            );
+        }
+        for ok in ["public", "personal", "private"] {
+            assert!(professional_privacy(ok).is_ok());
+        }
+        for bad in ["secret", "normal", "PUBLIC", "", "restricted"] {
+            assert_eq!(
+                professional_privacy(bad),
+                Err(BridgeError::Invalid),
+                "{bad}"
+            );
+        }
+        assert!(optional_professional_privacy(None).is_ok());
+        assert!(optional_professional_privacy(Some("private")).is_ok());
+        assert_eq!(
+            optional_professional_privacy(Some("secret")),
+            Err(BridgeError::Invalid)
+        );
+        for ok in ["confirm", "reject", "resolve", "set_privacy"] {
+            assert!(professional_review_action(ok).is_ok());
+        }
+        for bad in ["verify", "delete", "remove", "approve", "", "Confirm"] {
+            assert_eq!(
+                professional_review_action(bad),
+                Err(BridgeError::Invalid),
+                "{bad}"
+            );
+        }
+        assert!(professional_query_mode("search").is_ok());
+        assert!(professional_query_mode("evidence_for").is_ok());
+        for bad in ["sql", "path", "", "SEARCH", "evidence"] {
+            assert_eq!(
+                professional_query_mode(bad),
+                Err(BridgeError::Invalid),
+                "{bad}"
+            );
         }
     }
 

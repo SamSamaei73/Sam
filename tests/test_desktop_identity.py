@@ -561,6 +561,7 @@ def test_guest_gets_no_grants_and_owner_permissions_are_unchanged() -> None:
     assert "guest" not in text
     assert {g["resource"] for g in after["grants"]} <= {
         "knowledge",
+        "professional",
         "voice",
         "speech_synthesis",
     }

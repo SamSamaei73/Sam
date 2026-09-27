@@ -38,6 +38,11 @@ const METHODS = [
   "guestEnd",
   "providersStatus",
   "setProviderPreferences",
+  "professionalProfile",
+  "professionalIngest",
+  "professionalReview",
+  "professionalRemove",
+  "professionalQuery",
 ].sort();
 
 describe("tauri bridge", () => {
@@ -120,6 +125,41 @@ describe("tauri bridge", () => {
     ]);
     for (const key of keys) expect(key).not.toMatch(/endpoint|url|token|api_?key|model|cost|billing|paid|principal|scope|risk/i);
     expect(invoke.mock.calls.at(-1)).toEqual(["sam_chat", { message: "hi", language: "auto", privacy: "private" }]);
+  });
+
+  it("professional commands carry only the owner's selection: never a path, identity, verification or decision", async () => {
+    invoke.mockResolvedValue({});
+    await tauriBridge.professionalProfile();
+    await tauriBridge.professionalIngest({
+      name: "cv.txt",
+      sourceType: "master_cv",
+      privacyClass: "personal",
+      resourceType: "txt",
+      contentBase64: "aGk=",
+      useCandidates: false,
+    });
+    await tauriBridge.professionalReview({ action: "confirm", claimId: "c1" });
+    await tauriBridge.professionalRemove("s1", "conf-1");
+    await tauriBridge.professionalQuery("evidence_for", "production RAG");
+    const calls = invoke.mock.calls.filter((call) => /^sam_professional_/.test(String(call[0])));
+    expect(calls.map((call) => call[0])).toEqual([
+      "sam_professional_profile",
+      "sam_professional_ingest",
+      "sam_professional_review",
+      "sam_professional_remove",
+      "sam_professional_query",
+    ]);
+    expect(Object.keys((calls[1]?.[1] ?? {}) as object).sort()).toEqual(
+      ["contentBase64", "name", "privacyClass", "resourceType", "sourceType", "useCandidates"].sort(),
+    );
+    expect(Object.keys((calls[2]?.[1] ?? {}) as object).sort()).toEqual(
+      ["action", "claimId", "conflictId", "optionId", "privacyClass", "sourceId"].sort(),
+    );
+    for (const [, args] of calls) {
+      for (const key of Object.keys((args ?? {}) as object)) {
+        expect(key).not.toMatch(/path|principal|verif|permission|scope|risk|endpoint|url|token|owner|state|decision/i);
+      }
+    }
   });
 
   it("turns any backend failure into a safe, generic error", async () => {

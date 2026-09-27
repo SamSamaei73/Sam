@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     # pinned in sam.tts.gemini_tts. Free-tier only; Sam never enables billing
     # and never falls back to another (paid) provider.
     gemini_api_key: SecretStr | None = None
+    # Phase 14: the owner's professional identity (sam.professional.identity).
+    # Trusted LOCAL configuration only, never taken from a document, a model or
+    # a request: the canonical name as it appears in author lists, plus any
+    # aliases the owner explicitly approves (";"-separated, e.g. "J. Example").
+    # Matching is exact (no surname-only, no guessed initials, no fuzzy match);
+    # every name needs at least two words. Unset: no author position recorded.
+    owner_name: str | None = Field(default=None, min_length=2, max_length=100)
+    owner_name_aliases: str | None = Field(default=None, max_length=1_000)
     gemini_tts_voice: str = Field(default="Kore", min_length=1, max_length=24)
     # Multi-model router (Phase 13). The Claude provider uses the owner's own
     # Claude Code SUBSCRIPTION login, never an API key; there is deliberately no

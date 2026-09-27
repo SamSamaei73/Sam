@@ -57,11 +57,16 @@ pub enum Route {
     GuestEnd,
     ModelsStatus,
     ModelsPreferences,
+    ProfessionalProfile,
+    ProfessionalIngest,
+    ProfessionalReview,
+    ProfessionalRemove,
+    ProfessionalQuery,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 25] = [
+    pub const ALL: [Route; 30] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -87,6 +92,11 @@ impl Route {
         Route::GuestEnd,
         Route::ModelsStatus,
         Route::ModelsPreferences,
+        Route::ProfessionalProfile,
+        Route::ProfessionalIngest,
+        Route::ProfessionalReview,
+        Route::ProfessionalRemove,
+        Route::ProfessionalQuery,
     ];
 
     pub fn path(self) -> &'static str {
@@ -116,6 +126,11 @@ impl Route {
             Route::GuestEnd => "/desktop/v1/voice/guest/end",
             Route::ModelsStatus => "/desktop/v1/models",
             Route::ModelsPreferences => "/desktop/v1/models/preferences",
+            Route::ProfessionalProfile => "/desktop/v1/professional/profile",
+            Route::ProfessionalIngest => "/desktop/v1/professional/ingest",
+            Route::ProfessionalReview => "/desktop/v1/professional/review",
+            Route::ProfessionalRemove => "/desktop/v1/professional/remove",
+            Route::ProfessionalQuery => "/desktop/v1/professional/query",
         }
     }
 
@@ -129,6 +144,7 @@ impl Route {
                 | Route::Activity
                 | Route::IdentityStatus
                 | Route::ModelsStatus
+                | Route::ProfessionalProfile
         )
     }
 
@@ -138,6 +154,7 @@ impl Route {
             | Route::VoiceUtterance
             | Route::Speak
             | Route::KnowledgeIngest
+            | Route::ProfessionalIngest
             | Route::IdentityEnrollSample
             | Route::GuestStart => LONG_TIMEOUT,
             _ => SHORT_TIMEOUT,
@@ -360,7 +377,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 25);
+        assert_eq!(paths.len(), 30);
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));

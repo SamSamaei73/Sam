@@ -1017,3 +1017,20 @@
   background: rgba(63, 125, 255, 0.12);
   box-shadow: 0 0 26px rgba(42, 77, 255, 0.35);
 }
+
+/* Professional Intelligence (Phase 14) */
+.evidence-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.evidence-list li {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+}
+.chip[data-active="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+}

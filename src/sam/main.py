@@ -17,6 +17,7 @@ from sam.core.logging import configure_logging
 from sam.desktop.api import router as desktop_router
 from sam.desktop.identity_api import router as desktop_identity_router
 from sam.desktop.models_api import router as desktop_models_router
+from sam.desktop.professional_api import router as desktop_professional_router
 from sam.desktop.runtime import build_desktop_runtime
 from sam.models.adapter import RoutedLLMProvider
 from sam.models.factory import build_model_router
@@ -80,6 +81,7 @@ def create_app(
     application.include_router(desktop_router)
     application.include_router(desktop_identity_router)
     application.include_router(desktop_models_router)
+    application.include_router(desktop_professional_router)
     application.add_exception_handler(AgentError, agent_error_handler)
     return application
 

@@ -419,9 +419,20 @@
       "id": 14,
       "name": "professional_intelligence",
       "scope": [
-        "professional intelligence"
+        "professional intelligence",
+        "evidence and provenance architecture",
+        "source independence",
+        "atomic source refresh",
+        "owner professional identity",
+        "deterministic timeline",
+        "claim safety",
+        "requirement matching",
+        "privacy integration",
+        "PermissionResource.PROFESSIONAL",
+        "in-memory repository only"
       ],
-      "status": "not_started"
+      "status": "approved",
+      "scope_note": "Phase 14 adds Sam's Professional Intelligence domain (src/sam/professional/): an evidence-backed model of the owner's professional profile built ONLY from owner-selected sources (no prepopulated claims). A ProfessionalClaim has many EvidenceRefs (never one source_id). EvidenceNature (EXPLICIT_SOURCE, INFERRED_RELATIONSHIP, OWNER_ATTESTATION, MODEL_CANDIDATE), documentary EvidenceStrength (NONE, SINGLE_SOURCE, CORROBORATED) and ClaimReviewState (UNREVIEWED, OWNER_CONFIRMED, OWNER_REJECTED) are independent; strength counts only documentary evidence across deterministic, independent source families (versions/copies of one document are one family), owner confirmation is a separate attestation that never counts as a document, and no accepted claim rests on zero trusted evidence. A source's logical id is separate from its checksum/version, a refresh replaces all of that source's evidence atomically (rollback on failure), and deleting a source removes only its own evidence. Owner author positions come only from a trusted, exact OwnerProfessionalIdentity (canonical name + approved aliases; ambiguous or no match is UNKNOWN). It is a separate trust domain from Memory and Knowledge (it reuses only Knowledge's pure parsing pipeline), has its own PermissionResource.PROFESSIONAL (READ low, WRITE/UPDATE medium, DELETE high + confirmation), stores in an in-memory repository only, is owner-only (Guest Mode is refused before the body is processed), and exposes to a model only a read-only tool that withholds PRIVATE data. Model-suggested candidates are untrusted, must quote the source, and are never accepted without the owner's review; a dependency manifest never verifies a skill; conflicts are preserved for the owner to resolve; experience is computed by deterministic code and never rounded up. Not the career/application agent (Phase 16). Approved after independent review. Review remediation: evidence nature, documentary strength and owner review state were separated; corroboration requires independent source families; source refresh is atomic with rollback; owner author positions use the exact OwnerProfessionalIdentity. Remediation mutations M13-M17 (plus M14b) were rerun in the final verification and all were caught; the original M1-M12 mutations were not rerun in that session (their logs were gone) and rely on the passing focused and full test suites."
     },
     {
       "id": 15,
@@ -730,9 +741,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 13,
+    "phase": 14,
     "status": "approved",
-    "next_phase": 14,
+    "next_phase": 15,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {

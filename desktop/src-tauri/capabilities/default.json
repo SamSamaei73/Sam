@@ -30,6 +30,11 @@
     "allow-sam-guest-start",
     "allow-sam-guest-end",
     "allow-sam-models-status",
-    "allow-sam-models-preferences"
+    "allow-sam-models-preferences",
+    "allow-sam-professional-profile",
+    "allow-sam-professional-ingest",
+    "allow-sam-professional-review",
+    "allow-sam-professional-remove",
+    "allow-sam-professional-query"
   ]
 }

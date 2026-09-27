@@ -55,6 +55,11 @@ from sam.permissions.models import (
     utc_now,
 )
 from sam.permissions.store import InMemoryPermissionStore
+from sam.professional.audit import InMemoryProfessionalAuditSink
+from sam.professional.candidates import RouterCandidateExtractor
+from sam.professional.identity import OwnerProfessionalIdentity
+from sam.professional.repository import InMemoryProfessionalRepository
+from sam.professional.service import ProfessionalService
 from sam.tts.agent_boundary import TTSAgentBoundary
 from sam.tts.audit import InMemoryTTSAuditSink
 from sam.tts.credentials import (
@@ -153,6 +158,22 @@ class DesktopRuntime:
             index=InMemoryLexicalIndex(),
             permission_engine=self.permissions,
             audit_sink=InMemoryKnowledgeAuditSink(),
+            clock=clock,
+        )
+        # Professional Intelligence (Phase 14): a SEPARATE domain from Memory and
+        # Knowledge. In-memory only; model candidate extraction (optional, untrusted)
+        # goes through the Phase 13 router, so its privacy and cost policy apply.
+        self.professional_audit = InMemoryProfessionalAuditSink()
+        self.professional = ProfessionalService(
+            repository=InMemoryProfessionalRepository(),
+            permission_engine=self.permissions,
+            audit_sink=self.professional_audit,
+            candidate_extractor=(
+                RouterCandidateExtractor(model_router)
+                if model_router is not None
+                else None
+            ),
+            owner_identity=_owner_identity(settings),
             clock=clock,
         )
         self.memory = MemoryEngine(
@@ -301,6 +322,21 @@ class DesktopRuntime:
         return [p.profile_id for p in self.speech_profiles.list_profiles() if p.enabled]
 
 
+def _owner_identity(settings: Settings) -> OwnerProfessionalIdentity | None:
+    """The owner's professional identity from TRUSTED local settings only.
+
+    Invalid configuration (a one-word name or alias, too many aliases) fails
+    CLOSED: no identity, so no author position is ever recorded, rather than a
+    partial or loosened match."""
+
+    try:
+        return OwnerProfessionalIdentity.from_config(
+            settings.owner_name, settings.owner_name_aliases
+        )
+    except ValueError:
+        return None
+
+
 def bootstrap_grants(runtime: DesktopRuntime) -> None:
     """Create the trusted local defaults — the ONLY place grants are made.
 
@@ -367,6 +403,28 @@ def bootstrap_grants(runtime: DesktopRuntime) -> None:
         PermissionResource.KNOWLEDGE,
         PermissionAction.DELETE,
         PermissionScope.from_path(coll),
+    )
+    # Professional Intelligence: read, ingest and review are pre-authorized for the
+    # local owner; removal is HIGH and always asks for a confirmation by policy.
+    grant(
+        PermissionResource.PROFESSIONAL,
+        PermissionAction.READ,
+        PermissionScope.identifier("profile:read"),
+    )
+    grant(
+        PermissionResource.PROFESSIONAL,
+        PermissionAction.WRITE,
+        PermissionScope.identifier("profile:ingest"),
+    )
+    grant(
+        PermissionResource.PROFESSIONAL,
+        PermissionAction.UPDATE,
+        PermissionScope.identifier("profile:review"),
+    )
+    grant(
+        PermissionResource.PROFESSIONAL,
+        PermissionAction.DELETE,
+        PermissionScope.from_path("profile"),
     )
     if runtime.voice_gateway is not None:
         for action in (

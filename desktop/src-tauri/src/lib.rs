@@ -316,6 +316,104 @@ fn sam_guest_end(state: State<'_, AppState>) -> CommandResult {
 }
 
 #[tauri::command]
+fn sam_professional_profile(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::ProfessionalProfile, None)
+}
+
+#[tauri::command]
+fn sam_professional_ingest(
+    state: State<'_, AppState>,
+    name: String,
+    source_type: String,
+    privacy_class: String,
+    resource_type: String,
+    content_base64: String,
+    use_candidates: bool,
+) -> CommandResult {
+    invalid(validate::text(&name, validate::MAX_NAME_CHARS))?;
+    invalid(validate::professional_source_type(&source_type))?;
+    invalid(validate::professional_privacy(&privacy_class))?;
+    invalid(validate::resource_type(&resource_type))?;
+    invalid(validate::base64_payload(
+        &content_base64,
+        validate::MAX_DOCUMENT_BASE64,
+    ))?;
+    run(
+        &state,
+        Route::ProfessionalIngest,
+        Some(json!({
+            "name": name,
+            "source_type": source_type,
+            "privacy_class": privacy_class,
+            "resource_type": resource_type,
+            "content_base64": content_base64,
+            "use_candidates": use_candidates,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_professional_review(
+    state: State<'_, AppState>,
+    action: String,
+    claim_id: Option<String>,
+    conflict_id: Option<String>,
+    option_id: Option<String>,
+    source_id: Option<String>,
+    privacy_class: Option<String>,
+) -> CommandResult {
+    invalid(validate::professional_review_action(&action))?;
+    invalid(validate::optional_id(claim_id.as_deref()))?;
+    invalid(validate::optional_id(conflict_id.as_deref()))?;
+    invalid(validate::optional_id(option_id.as_deref()))?;
+    invalid(validate::optional_id(source_id.as_deref()))?;
+    invalid(validate::optional_professional_privacy(
+        privacy_class.as_deref(),
+    ))?;
+    run(
+        &state,
+        Route::ProfessionalReview,
+        Some(json!({
+            "action": action,
+            "claim_id": claim_id,
+            "conflict_id": conflict_id,
+            "option_id": option_id,
+            "source_id": source_id,
+            "privacy_class": privacy_class,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_professional_remove(
+    state: State<'_, AppState>,
+    source_id: String,
+    confirmation_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::id(&source_id))?;
+    invalid(validate::optional_id(confirmation_id.as_deref()))?;
+    run(
+        &state,
+        Route::ProfessionalRemove,
+        Some(json!({ "source_id": source_id, "confirmation_id": confirmation_id })),
+    )
+}
+
+#[tauri::command]
+fn sam_professional_query(state: State<'_, AppState>, mode: String, text: String) -> CommandResult {
+    invalid(validate::professional_query_mode(&mode))?;
+    invalid(validate::text(
+        &text,
+        validate::MAX_PROFESSIONAL_QUERY_CHARS,
+    ))?;
+    run(
+        &state,
+        Route::ProfessionalQuery,
+        Some(json!({ "mode": mode, "text": text })),
+    )
+}
+
+#[tauri::command]
 fn sam_models_status(state: State<'_, AppState>) -> CommandResult {
     run(&state, Route::ModelsStatus, None)
 }
@@ -391,6 +489,11 @@ pub fn run_app() {
             sam_guest_end,
             sam_models_status,
             sam_models_preferences,
+            sam_professional_profile,
+            sam_professional_ingest,
+            sam_professional_review,
+            sam_professional_remove,
+            sam_professional_query,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sam desktop");

@@ -17,6 +17,9 @@ import type {
   GrantInfo,
   KnowledgeHit,
   OperationResult,
+  ProClaim,
+  ProfessionalProfile,
+  ProSource,
   ResourceInfo,
 } from "./types";
 
@@ -417,5 +420,177 @@ export function demoBridge(): SamBridge {
       log("voice", "Guest mode revoked", "ok");
       return { ...empty, status: "ok" };
     },
+    // ---- Professional Intelligence (demo state only; synthetic content) ----
+    async professionalProfile() {
+      await wait(80);
+      return demoProfile(pro.sources);
+    },
+    async professionalIngest({ name, sourceType, privacyClass, resourceType }) {
+      await wait(200);
+      if (pro.sources.some((s) => s.label === name)) {
+        return { ...ingestEmpty, status: "rejected", reason_code: "duplicate_source", message: "That content is already in your profile." };
+      }
+      pro.sources.push({
+        source_id: `s_demo_${pro.sources.length + 1}`,
+        label: name,
+        source_type: sourceType,
+        source_family_id: `f_demo_${pro.sources.length + 1}`,
+        version: 1,
+        privacy_class: privacyClass,
+        freshness: "fresh",
+        ingested_at: iso(),
+        refreshed_at: iso(),
+        resource_type: resourceType,
+        accepted_claims: 3,
+        pending_candidates: 0,
+        conflicts: 0,
+        candidate_extraction: "off",
+      });
+      log("professional", "Professional source ingest", "ingested");
+      return { ...ingestEmpty, status: "ok", ingest_status: "ingested", claims_created: 3, evidence_added: 3 };
+    },
+    async professionalReview() {
+      await wait(80);
+      log("professional", "Professional review", "ok");
+      return { ...empty, status: "ok" };
+    },
+    async professionalRemove(sourceId, confirmationId) {
+      await wait(120);
+      if (!confirmationId) {
+        return {
+          ...empty,
+          status: "confirmation_required",
+          reason_code: "confirmation_required",
+          message: "This needs your confirmation.",
+        };
+      }
+      pro.sources = pro.sources.filter((s) => s.source_id !== sourceId);
+      log("professional", "Professional source removal", "allow");
+      return { ...empty, status: "ok" };
+    },
+    async professionalQuery(mode, text) {
+      await wait(100);
+      const hits = demoClaims.filter((c) => c.statement.toLowerCase().includes(text.toLowerCase()));
+      return {
+        ...empty,
+        status: "ok",
+        mode,
+        claims: mode === "search" ? hits : [],
+        requirement:
+          mode === "evidence_for"
+            ? {
+                status: hits.length ? "partially_supported" : "unknown",
+                normalized_requirement: hits.length ? text : "",
+                skills: hits,
+                inferred_skills: [],
+                projects: [],
+                employment: [],
+                research: [],
+                education: [],
+                unsupported_aspects: hits.length ? ["production use: demo data has no employment evidence"] : [],
+                notes: hits.length ? [] : ["no recognised skill or qualification in the requirement"],
+              }
+            : null,
+      };
+    },
+  };
+}
+
+const ingestEmpty = {
+  ...empty,
+  source_id: null,
+  ingest_status: null,
+  claims_created: 0,
+  claims_updated: 0,
+  claims_skipped_rejected: 0,
+  evidence_added: 0,
+  conflicts_open: 0,
+  candidate_extraction: "off",
+  candidates_proposed: 0,
+  candidates_accepted: 0,
+  candidates_rejected: 0,
+  unmapped_skills: 0,
+} as const;
+
+const pro: { sources: ProSource[] } = {
+  sources: [
+    {
+      source_id: "s_demo_1",
+      label: "demo-cv.txt",
+      source_type: "master_cv",
+      source_family_id: "f_demo_cv",
+      version: 1,
+      privacy_class: "personal",
+      freshness: "fresh",
+      ingested_at: new Date().toISOString(),
+      refreshed_at: new Date().toISOString(),
+      resource_type: "txt",
+      accepted_claims: 4,
+      pending_candidates: 0,
+      conflicts: 0,
+      candidate_extraction: "off",
+    },
+  ],
+};
+
+const demoClaims: ProClaim[] = [
+  {
+    claim_id: "c_demo_python",
+    category: "technology",
+    statement: "Technology: Python",
+    strength: "single_source",
+    review: "unreviewed",
+    accepted: true,
+    inferred: false,
+    candidate: false,
+    sensitivity: "personal",
+    attributes: { skill_id: "python", display: "Python" },
+    conflicted_attributes: [],
+    source_count: 1,
+    source_family_count: 1,
+    canonical: true,
+    evidence: [
+      {
+        evidence_id: "e_demo_1",
+        source_id: "s_demo_1",
+        source_label: "demo-cv.txt",
+        source_type: "master_cv",
+        source_family_id: "f_demo_cv",
+        nature: "explicit_source",
+        page_number: null,
+        section_title: "Skills",
+        paragraph_index: null,
+        character_start: 120,
+        character_end: 160,
+        reference: "Python, TypeScript, React (demo)",
+        context_claim_id: null,
+        context_statement: null,
+        basis_evidence_id: null,
+      },
+    ],
+  },
+];
+
+function demoProfile(sources: ProSource[]): ProfessionalProfile {
+  return {
+    ...empty,
+    status: "ok",
+    claims: demoClaims,
+    publications: [],
+    education: [],
+    experience: {
+      entries: [],
+      total_months: 0,
+      total_years: 0,
+      remainder_months: 0,
+      conservative_months: 0,
+      excluded_conflicted: 0,
+      excluded_incomplete: 0,
+      gaps: [],
+    },
+    conflicts: [],
+    gaps: [],
+    sources,
+    counts: { technology: 1 },
   };
 }

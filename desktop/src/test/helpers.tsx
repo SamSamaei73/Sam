@@ -2,7 +2,14 @@ import { render } from "@testing-library/react";
 import { vi } from "vitest";
 import { App } from "../App";
 import type { SamBridge } from "../bridge/bridge";
-import type { IdentityStatus, ProvidersStatus, OperationResult, StatusResponse } from "../bridge/types";
+import type {
+  IdentityStatus,
+  OperationResult,
+  ProfessionalIngestResult,
+  ProfessionalProfile,
+  ProvidersStatus,
+  StatusResponse,
+} from "../bridge/types";
 import type { AudioEnvironment } from "../lib/recorder";
 
 export const ok: OperationResult = {
@@ -109,6 +116,43 @@ export const baseProviders: ProvidersStatus = {
   max_provider_attempts: 2,
 };
 
+export const emptyProfessional: ProfessionalProfile = {
+  ...ok,
+  claims: [],
+  publications: [],
+  education: [],
+  experience: {
+    entries: [],
+    total_months: 0,
+    total_years: 0,
+    remainder_months: 0,
+    conservative_months: 0,
+    excluded_conflicted: 0,
+    excluded_incomplete: 0,
+    gaps: [],
+  },
+  conflicts: [],
+  gaps: [],
+  sources: [],
+  counts: {},
+};
+
+export const emptyIngest: ProfessionalIngestResult = {
+  ...ok,
+  source_id: null,
+  ingest_status: null,
+  claims_created: 0,
+  claims_updated: 0,
+  claims_skipped_rejected: 0,
+  evidence_added: 0,
+  conflicts_open: 0,
+  candidate_extraction: "off",
+  candidates_proposed: 0,
+  candidates_accepted: 0,
+  candidates_rejected: 0,
+  unmapped_skills: 0,
+};
+
 export type MockBridge = { [K in keyof SamBridge]: ReturnType<typeof vi.fn> } & SamBridge;
 
 export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
@@ -161,6 +205,16 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
     guestEnd: vi.fn(async () => ok),
     providersStatus: vi.fn(async () => baseProviders),
     setProviderPreferences: vi.fn(async () => baseProviders),
+    professionalProfile: vi.fn(async () => emptyProfessional),
+    professionalIngest: vi.fn(async () => ({ ...emptyIngest, ingest_status: "ingested" })),
+    professionalReview: vi.fn(async () => ok),
+    professionalRemove: vi.fn(async () => ok),
+    professionalQuery: vi.fn(async (mode: "search" | "evidence_for") => ({
+      ...ok,
+      mode,
+      claims: [],
+      requirement: null,
+    })),
   };
   return { ...base, ...overrides } as MockBridge;
 }
