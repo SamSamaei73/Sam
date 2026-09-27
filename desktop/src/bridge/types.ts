@@ -683,3 +683,232 @@ export interface ProactiveUpdateInput {
   notificationLevel?: ProactiveLevel;
   cooldownHours?: number;
 }
+
+// ---- Career & PhD Agent (Phase 16) ----
+
+export type CareerSourceKind =
+  | "official_career_page"
+  | "official_ats"
+  | "linkedin"
+  | "indeed"
+  | "glassdoor"
+  | "university_page"
+  | "funding_page"
+  | "supervisor_page"
+  | "academic_source"
+  | "other";
+export type CareerRole = "recruiter" | "hiring_manager" | "team_lead" | "professor" | "supervisor" | "research_group";
+export type CareerChannel = "email" | "recruiter_message" | "linkedin_connection_note" | "linkedin_message";
+export type CareerOutreachKind = "recruiter" | "hiring_manager" | "supervisor" | "phd_inquiry" | "follow_up";
+
+export interface CareerOpportunity {
+  opportunity_id: string;
+  type: "job" | "phd";
+  title: string;
+  organization: string;
+  location: string | null;
+  work_mode: "onsite" | "hybrid" | "remote" | "unknown";
+  source: string;
+  canonical_url: string;
+  source_count: number;
+  deadline: string | null;
+  status: string;
+  compensation: string | null;
+  funding: string | null;
+  sponsorship: string;
+  requirements: { text: string; preferred: boolean }[];
+  research_topics: string[];
+  tracked: boolean;
+  has_official_application_url: boolean;
+  last_verified: string;
+}
+
+export interface CareerLine {
+  text: string;
+  fact: boolean;
+  evidence_count: number;
+  flagged: boolean;
+  flag_reason: string | null;
+}
+
+export interface CareerDocument {
+  document_id: string;
+  kind: string;
+  version: number;
+  approved: boolean;
+  sha256: string;
+  unresolved: number;
+  lines: CareerLine[];
+}
+
+export interface CareerQuestion {
+  question_id: string;
+  text: string;
+  kind: string;
+  classification: "safe" | "evidence_backed" | "owner_review_required";
+  answered: boolean;
+  answer: string | null;
+  answer_source: string | null;
+}
+
+export interface CareerApplication {
+  draft_id: string;
+  opportunity_id: string;
+  state: string;
+  version: number;
+  documents: CareerDocument[];
+  questions: CareerQuestion[];
+  last_failure: string | null;
+  submitted_at: string | null;
+  approved: boolean;
+}
+
+export interface CareerContact {
+  contact_id: string;
+  name: string;
+  role: string;
+  organization: string;
+  email: string | null;
+  source_url: string;
+  source_kind: string;
+  opportunity_id: string | null;
+  research_topics: string[];
+}
+
+export interface CareerOutreach {
+  outreach_id: string;
+  kind: string;
+  channel: string;
+  contact_id: string;
+  opportunity_id: string | null;
+  subject: string;
+  state: string;
+  lines: CareerLine[];
+  unresolved: number;
+  sendable: boolean;
+}
+
+export interface CareerFollowUp {
+  follow_up_id: string;
+  opportunity_id: string;
+  contact_id: string | null;
+  due_at: string;
+  count: number;
+  state: string;
+}
+
+export interface CareerReviewItem {
+  kind: string;
+  label: string;
+  opportunity_id: string | null;
+  item_id: string | null;
+}
+
+export interface CareerPreferences {
+  preferred_roles: string[];
+  locations: string[];
+  work_modes: string[];
+  role_types: string[];
+  salary_preference: string | null;
+  needs_sponsorship: boolean | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  portfolio_url: string | null;
+  linkedin_url: string | null;
+}
+
+export interface CareerOverview extends OperationResult {
+  opportunities: CareerOpportunity[];
+  applications: CareerApplication[];
+  contacts: CareerContact[];
+  outreach: CareerOutreach[];
+  follow_ups: CareerFollowUp[];
+  review_queue: CareerReviewItem[];
+  preferences: CareerPreferences | null;
+  submission_available: boolean;
+  sending_available: boolean;
+}
+
+export interface CareerClaim {
+  claim_id: string;
+  category: string;
+  statement: string;
+  evidence_count: number;
+}
+
+export interface CareerFit extends OperationResult {
+  requirements: { requirement: string; preferred: boolean; status: string; claims: CareerClaim[]; unsupported: string[] }[];
+  alignment_status: string | null;
+  alignment: { topic: string; status: string; claims: CareerClaim[] }[];
+}
+
+export interface CareerItemResult extends OperationResult {
+  item_id: string | null;
+  state: string | null;
+}
+
+export interface CareerOpportunityInput {
+  action: "import" | "track" | "review";
+  opportunityId?: string;
+  draftId?: string;
+  text?: string;
+  url?: string;
+  sourceKind?: CareerSourceKind;
+  opportunityType?: "job" | "phd";
+  applicationUrl?: string;
+  externalId?: string;
+}
+
+/** Local drafting only. There is no "submit" here: submission is its own
+ * confirmed command, and nothing can set an application's state directly. */
+export interface CareerDraftInput {
+  action: "create" | "answer" | "edit_document" | "approve_document" | "approve_submission" | "withdraw";
+  opportunityId?: string;
+  draftId?: string;
+  documentId?: string;
+  questionId?: string;
+  text?: string;
+  questions?: string[];
+  lines?: string[];
+  motivation?: string;
+  direction?: string;
+  confirmationId?: string;
+}
+
+export interface CareerContactInput {
+  name: string;
+  role: CareerRole;
+  organization: string;
+  sourceKind: CareerSourceKind;
+  url: string;
+  quote: string;
+  email?: string;
+  opportunityId?: string;
+  researchTopics?: string[];
+}
+
+export interface CareerOutreachInput {
+  action: "create" | "approve" | "follow_up";
+  outreachId?: string;
+  contactId?: string;
+  followUpId?: string;
+  kind?: CareerOutreachKind;
+  channel?: CareerChannel;
+  opportunityId?: string;
+  note?: string;
+}
+
+export interface CareerPreferencesInput {
+  preferredRoles: string[];
+  locations: string[];
+  workModes: string[];
+  roleTypes: string[];
+  salaryPreference: string | null;
+  needsSponsorship: boolean | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  portfolioUrl: string | null;
+  linkedinUrl: string | null;
+}

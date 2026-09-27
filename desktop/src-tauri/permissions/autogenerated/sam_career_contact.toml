@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-career-contact"
+description = "Enables the sam_career_contact command without any pre-configured scope."
+commands.allow = ["sam_career_contact"]
+
+[[permission]]
+identifier = "deny-sam-career-contact"
+description = "Denies the sam_career_contact command without any pre-configured scope."
+commands.deny = ["sam_career_contact"]

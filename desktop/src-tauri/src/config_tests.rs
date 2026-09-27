@@ -10,7 +10,7 @@ const LIB_RS: &str = include_str!("lib.rs");
 const BACKEND_RS: &str = include_str!("backend.rs");
 const CARGO: &str = include_str!("../Cargo.toml");
 
-const COMMANDS: [&str; 37] = [
+const COMMANDS: [&str; 46] = [
     "sam_status",
     "sam_chat",
     "sam_knowledge_list",
@@ -48,6 +48,15 @@ const COMMANDS: [&str; 37] = [
     "sam_proactive_run",
     "sam_proactive_notification",
     "sam_proactive_scheduler",
+    "sam_career_overview",
+    "sam_career_opportunity",
+    "sam_career_fit",
+    "sam_career_draft",
+    "sam_career_submit",
+    "sam_career_contact",
+    "sam_career_outreach",
+    "sam_career_send",
+    "sam_career_preferences",
 ];
 
 fn conf() -> Value {
@@ -149,7 +158,7 @@ fn build_script_declares_the_same_command_list_as_the_handler() {
             "handler missing {command}"
         );
     }
-    assert_eq!(BUILD_RS.matches("\"sam_").count(), 37);
+    assert_eq!(BUILD_RS.matches("\"sam_").count(), 46);
 }
 
 #[test]
@@ -176,7 +185,93 @@ fn no_generic_or_privileged_commands_exist() {
             "backend.rs must not contain {banned}"
         );
     }
-    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 37);
+    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 46);
+}
+
+/// The ONLY exception to the "no URL arguments" rule, reviewed for Phase 16:
+/// Career links that are provenance DATA (where a listing or contact was seen,
+/// the owner's own portfolio/LinkedIn links, and the official application page
+/// recorded from an official listing). Neither the shell nor the backend ever
+/// requests any of them; the backend validates them as https and a submission
+/// target must match the official host exactly. Every other command still takes
+/// no URL, endpoint, scope, risk, principal, token or model.
+const CAREER_LINK_DATA: [&str; 5] = [
+    "url: Option<String>,",
+    "application_url: Option<String>,",
+    "url: String,",
+    "portfolio_url: Option<String>,",
+    "linkedin_url: Option<String>,",
+];
+
+#[test]
+fn career_link_data_is_confined_to_career_commands() {
+    for (index, line) in LIB_RS.lines().enumerate() {
+        if CAREER_LINK_DATA.contains(&line.trim()) {
+            let preceding: Vec<&str> = LIB_RS.lines().take(index).collect();
+            let owner = preceding
+                .iter()
+                .rev()
+                .find(|l| l.starts_with("fn sam_") || l.starts_with("struct "))
+                .copied()
+                .unwrap_or_default();
+            assert!(
+                owner.starts_with("fn sam_career_") || owner == "struct CareerPreferencesArgs {",
+                "{line} outside a Career command: {owner}"
+            );
+        }
+    }
+}
+
+/// Career link DATA must never become a URL-opening or network capability:
+/// no opener/shell/browser crate or plugin, no call that opens or fetches a
+/// URL, and the only HTTP client talks to the fixed loopback backend.
+#[test]
+fn career_link_data_cannot_open_or_fetch_anything() {
+    for banned in [
+        "tauri-plugin-opener",
+        "tauri-plugin-shell",
+        "tauri-plugin-http",
+        "webbrowser",
+        "open =",
+        "opener",
+        "reqwest",
+        "hyper",
+    ] {
+        assert!(
+            !CARGO.contains(banned),
+            "Cargo.toml must not contain {banned}"
+        );
+    }
+    for source in [LIB_RS, BACKEND_RS] {
+        for banned in [
+            "open::",
+            "webbrowser::",
+            "opener",
+            ".shell()",
+            "open_url",
+            "Url::parse",
+            "WebviewUrl::External",
+            "WebviewWindowBuilder",
+            "navigate(",
+        ] {
+            assert!(!source.contains(banned), "shell must not contain {banned}");
+        }
+    }
+    // The backend host is a constant; a career URL can only ever travel as a
+    // JSON body field to that loopback backend, which treats it as data.
+    assert!(BACKEND_RS.contains("pub const BACKEND_HOST: &str = \"127.0.0.1\";"));
+    let career_fns: Vec<&str> = LIB_RS
+        .split("#[tauri::command]")
+        .filter(|f| f.contains("fn sam_career_"))
+        .collect();
+    assert_eq!(career_fns.len(), 9);
+    for body in career_fns {
+        let forwarded = body.split("\n}").next().unwrap_or_default();
+        assert!(
+            forwarded.contains("run(") && forwarded.contains("Route::Career"),
+            "career command must only forward to the fixed backend route"
+        );
+    }
 }
 
 #[test]
@@ -204,6 +299,7 @@ fn commands_take_no_authority_or_destination_arguments() {
         for line in signatures
             .lines()
             .filter(|l| l.contains(": String") || l.contains(": Option"))
+            .filter(|l| !CAREER_LINK_DATA.contains(&l.trim()))
         {
             assert!(
                 !line.contains(banned),

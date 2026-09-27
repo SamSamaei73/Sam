@@ -69,11 +69,20 @@ pub enum Route {
     ProactiveRun,
     ProactiveNotification,
     ProactiveScheduler,
+    CareerOverview,
+    CareerOpportunity,
+    CareerFit,
+    CareerDraft,
+    CareerSubmit,
+    CareerContact,
+    CareerOutreach,
+    CareerSend,
+    CareerPreferences,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 37] = [
+    pub const ALL: [Route; 46] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -111,6 +120,15 @@ impl Route {
         Route::ProactiveRun,
         Route::ProactiveNotification,
         Route::ProactiveScheduler,
+        Route::CareerOverview,
+        Route::CareerOpportunity,
+        Route::CareerFit,
+        Route::CareerDraft,
+        Route::CareerSubmit,
+        Route::CareerContact,
+        Route::CareerOutreach,
+        Route::CareerSend,
+        Route::CareerPreferences,
     ];
 
     pub fn path(self) -> &'static str {
@@ -152,6 +170,15 @@ impl Route {
             Route::ProactiveRun => "/desktop/v1/proactive/run",
             Route::ProactiveNotification => "/desktop/v1/proactive/notification",
             Route::ProactiveScheduler => "/desktop/v1/proactive/scheduler",
+            Route::CareerOverview => "/desktop/v1/career/overview",
+            Route::CareerOpportunity => "/desktop/v1/career/opportunity",
+            Route::CareerFit => "/desktop/v1/career/fit",
+            Route::CareerDraft => "/desktop/v1/career/draft",
+            Route::CareerSubmit => "/desktop/v1/career/submit",
+            Route::CareerContact => "/desktop/v1/career/contact",
+            Route::CareerOutreach => "/desktop/v1/career/outreach",
+            Route::CareerSend => "/desktop/v1/career/send",
+            Route::CareerPreferences => "/desktop/v1/career/preferences",
         }
     }
 
@@ -167,6 +194,7 @@ impl Route {
                 | Route::ModelsStatus
                 | Route::ProfessionalProfile
                 | Route::ProactiveOverview
+                | Route::CareerOverview
         )
     }
 
@@ -399,7 +427,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 37);
+        assert_eq!(paths.len(), 46);
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));

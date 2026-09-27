@@ -13,6 +13,14 @@ import type {
   ProfessionalQueryResult,
   ProfessionalReviewInput,
   ProfessionalSourceType,
+  CareerContactInput,
+  CareerDraftInput,
+  CareerFit,
+  CareerItemResult,
+  CareerOpportunityInput,
+  CareerOutreachInput,
+  CareerOverview,
+  CareerPreferencesInput,
   ProactiveCreateInput,
   ProactiveOverview,
   ProactiveSchedulerResult,
@@ -135,6 +143,20 @@ export interface SamBridge {
   proactiveNotification(notificationId: string, action: "read" | "dismiss"): Promise<OperationResult>;
   /** The owner's switch for background scheduling. Turning it on grants nothing. */
   proactiveScheduler(enabled: boolean): Promise<ProactiveSchedulerResult>;
+
+  // Career & PhD Agent: review first. Sam discovers, analyses and drafts
+  // locally. Submitting and sending are separate, confirmed commands bound to
+  // the exact package or message; nothing here takes a path, a principal, a
+  // permission or an application state.
+  careerOverview(): Promise<CareerOverview>;
+  careerOpportunity(input: CareerOpportunityInput): Promise<CareerItemResult>;
+  careerFit(opportunityId: string, contactId?: string): Promise<CareerFit>;
+  careerDraft(input: CareerDraftInput): Promise<CareerItemResult>;
+  careerSubmit(draftId: string, confirmationId?: string): Promise<CareerItemResult>;
+  careerContact(input: CareerContactInput): Promise<CareerItemResult>;
+  careerOutreach(input: CareerOutreachInput): Promise<CareerItemResult>;
+  careerSend(outreachId: string, confirmationId?: string, emailConfirmationId?: string): Promise<CareerItemResult>;
+  careerPreferences(input: CareerPreferencesInput): Promise<CareerItemResult>;
 }
 
 /** A failure the UI may show. Contains no backend body, path or secret. */

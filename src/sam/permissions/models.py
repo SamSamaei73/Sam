@@ -54,6 +54,10 @@ class PermissionAction(StrEnum):
     SEND = "send"
     PUBLISH = "publish"
     APPROVE = "approve"
+    # Phase 16: submitting an application (job or PhD) to an external party.
+    # Classified only for CAREER; on any other resource it is unclassified and
+    # therefore denied.
+    SUBMIT = "submit"
 
 
 class PermissionResource(StrEnum):
@@ -79,6 +83,7 @@ class PermissionResource(StrEnum):
     SPEECH_SYNTHESIS = "speech_synthesis"
     PROFESSIONAL = "professional"
     PROACTIVE = "proactive"
+    CAREER = "career"
 
 
 class RiskLevel(StrEnum):

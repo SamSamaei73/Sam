@@ -15,6 +15,7 @@ from sam.api.routes.health import router as health_router
 from sam.core.config import Settings, get_settings
 from sam.core.logging import configure_logging
 from sam.desktop.api import router as desktop_router
+from sam.desktop.career_api import router as desktop_career_router
 from sam.desktop.identity_api import router as desktop_identity_router
 from sam.desktop.models_api import router as desktop_models_router
 from sam.desktop.proactive_api import router as desktop_proactive_router
@@ -92,6 +93,7 @@ def create_app(
     application.include_router(desktop_models_router)
     application.include_router(desktop_professional_router)
     application.include_router(desktop_proactive_router)
+    application.include_router(desktop_career_router)
     application.add_exception_handler(AgentError, agent_error_handler)
     return application
 

@@ -387,6 +387,144 @@ pub fn condition_params(
     Ok(())
 }
 
+// --------------------------------------------------------------- career
+
+pub const MAX_LISTING_CHARS: usize = 40_000;
+pub const MAX_CAREER_TEXT_CHARS: usize = 2_000;
+pub const MAX_CAREER_ITEMS: usize = 40;
+pub const MAX_CAREER_LINES: usize = 400;
+
+pub fn career_opportunity_action(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["import", "track", "review"])
+}
+
+/// No "submit", "send" or "mark_submitted": submission is its own confirmed
+/// command, and nothing can set an application state directly.
+pub fn career_draft_action(value: &str) -> Result<(), BridgeError> {
+    one_of(
+        value,
+        &[
+            "create",
+            "answer",
+            "edit_document",
+            "approve_document",
+            "approve_submission",
+            "withdraw",
+        ],
+    )
+}
+
+pub fn career_outreach_action(value: &str) -> Result<(), BridgeError> {
+    one_of(value, &["create", "approve", "follow_up"])
+}
+
+pub fn optional_source_kind(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), source_kind)
+}
+
+pub fn source_kind(value: &str) -> Result<(), BridgeError> {
+    one_of(
+        value,
+        &[
+            "official_career_page",
+            "official_ats",
+            "linkedin",
+            "indeed",
+            "glassdoor",
+            "university_page",
+            "funding_page",
+            "supervisor_page",
+            "academic_source",
+            "other",
+        ],
+    )
+}
+
+pub fn optional_opportunity_type(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), |v| one_of(v, &["job", "phd"]))
+}
+
+pub fn contact_role(value: &str) -> Result<(), BridgeError> {
+    one_of(
+        value,
+        &[
+            "recruiter",
+            "hiring_manager",
+            "team_lead",
+            "professor",
+            "supervisor",
+            "research_group",
+        ],
+    )
+}
+
+pub fn optional_outreach_kind(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), |v| {
+        one_of(
+            v,
+            &[
+                "recruiter",
+                "hiring_manager",
+                "supervisor",
+                "phd_inquiry",
+                "follow_up",
+            ],
+        )
+    })
+}
+
+pub fn optional_channel(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), |v| {
+        one_of(
+            v,
+            &[
+                "email",
+                "recruiter_message",
+                "linkedin_connection_note",
+                "linkedin_message",
+            ],
+        )
+    })
+}
+
+pub fn work_modes(values: &[String]) -> Result<(), BridgeError> {
+    if values.len() > 4 {
+        return Err(BridgeError::Invalid);
+    }
+    values
+        .iter()
+        .try_for_each(|v| one_of(v, &["onsite", "hybrid", "remote", "unknown"]))
+}
+
+/// An https URL of bounded length (the backend checks the host strictly).
+pub fn https_url(value: &str) -> Result<(), BridgeError> {
+    let ok = value.len() <= 2_000
+        && value.starts_with("https://")
+        && !value.chars().any(|c| c.is_whitespace() || c.is_control());
+    if ok {
+        Ok(())
+    } else {
+        Err(BridgeError::Invalid)
+    }
+}
+
+pub fn optional_https_url(value: Option<&str>) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), https_url)
+}
+
+pub fn optional_text(value: Option<&str>, max: usize) -> Result<(), BridgeError> {
+    value.map_or(Ok(()), |v| text_allow_empty(v, max))
+}
+
+pub fn text_list(values: &[String], max_items: usize, max_chars: usize) -> Result<(), BridgeError> {
+    if values.len() > max_items {
+        return Err(BridgeError::Invalid);
+    }
+    values
+        .iter()
+        .try_for_each(|v| text_allow_empty(v, max_chars))
+}
+
 pub fn base64_payload(value: &str, max: usize) -> Result<(), BridgeError> {
     let ok = !value.is_empty()
         && value.len() <= max
@@ -683,6 +821,41 @@ mod tests {
         assert!(condition_params(&params).is_ok());
         params.insert("Bad-Key".to_string(), "x".to_string());
         assert_eq!(condition_params(&params), Err(BridgeError::Invalid));
+    }
+
+    #[test]
+    fn career_closed_sets_reject_everything_else() {
+        assert!(career_draft_action("approve_submission").is_ok());
+        for bad in ["submit", "send", "mark_submitted", "set_state", ""] {
+            assert_eq!(career_draft_action(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        assert!(career_opportunity_action("import").is_ok());
+        assert_eq!(
+            career_opportunity_action("scrape"),
+            Err(BridgeError::Invalid)
+        );
+        assert!(career_outreach_action("follow_up").is_ok());
+        assert_eq!(career_outreach_action("send"), Err(BridgeError::Invalid));
+        assert!(source_kind("official_ats").is_ok());
+        assert_eq!(source_kind("private_session"), Err(BridgeError::Invalid));
+        assert!(contact_role("supervisor").is_ok());
+        assert_eq!(contact_role("ceo"), Err(BridgeError::Invalid));
+        assert!(optional_channel(Some("linkedin_connection_note")).is_ok());
+        assert_eq!(optional_channel(Some("sms")), Err(BridgeError::Invalid));
+        assert!(https_url("https://careers.example/jobs/1").is_ok());
+        for bad in [
+            "http://x.example",
+            "file:///etc/passwd",
+            "https://a b",
+            "~/.ssh/id_rsa",
+        ] {
+            assert_eq!(https_url(bad), Err(BridgeError::Invalid), "{bad}");
+        }
+        assert!(work_modes(&["remote".to_string()]).is_ok());
+        assert_eq!(
+            work_modes(&["anywhere".to_string()]),
+            Err(BridgeError::Invalid)
+        );
     }
 
     #[test]

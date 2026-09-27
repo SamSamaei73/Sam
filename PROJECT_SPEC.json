@@ -466,9 +466,35 @@
       "id": 16,
       "name": "career_and_phd_agent",
       "scope": [
-        "career and PhD agent"
+        "career and PhD agent",
+        "PermissionResource.CAREER and PermissionAction.SUBMIT",
+        "review-first default",
+        "in-memory repository only",
+        "opportunity model where unknown stays unknown",
+        "source priority and deterministic deduplication",
+        "Professional Intelligence evidence via read-only ports",
+        "fit analysis and research alignment without scores",
+        "claim safety",
+        "CV tailoring preserving provenance and dates",
+        "cover letters separating fact from motivation",
+        "sensitive questions require owner review",
+        "deterministic application state machine",
+        "confirmation binding to opportunity, draft version, target and document hashes",
+        "freshness and endpoint checks before submit",
+        "at-most-once external action attempts",
+        "OUTCOME_UNKNOWN and trusted reconciliation",
+        "immutable submission and send manifests",
+        "destination trust and redirect policy",
+        "contacts without guessed e-mails",
+        "outreach drafts; LinkedIn drafts only",
+        "follow-up interval, cap and cooldown",
+        "PhD workflow",
+        "read-only proactive observers",
+        "metadata-only audit",
+        "owner-only desktop Career view"
       ],
-      "status": "not_started"
+      "status": "approved",
+      "scope_note": "Phase 16 adds Sam's Career & PhD Agent (src/sam/career/): review-first job and PhD application support built only from owner-accepted Professional Intelligence evidence (read through narrow read-only ports; Career never modifies Professional claims) and Knowledge paper provenance. It has its own PermissionResource.CAREER (READ low; CREATE/UPDATE medium; SUBMIT/SEND/DELETE high + confirmation) and a new PermissionAction.SUBMIT; it does not reuse PROFESSIONAL, PROACTIVE or MCP permissions, and PROACTIVE EXECUTE never authorizes submission, sending, uploads, account creation or legally binding answers. Opportunities keep only explicitly stated facts (salary, funding, deadline, remote status, sponsorship, hiring manager and supervisor stay unknown otherwise); only official sources may set the application URL; deduplication is deterministic with the official source canonical. Fit and research alignment are per-requirement statuses with no score. Every factual draft line is checked (metrics verbatim, paper-read claims need Knowledge provenance, publication contributions and author positions need explicit evidence, third-party interest always flagged); dates and titles are copied exactly. Sensitive questions are owner-only, never inferred or reused. A deterministic state machine allows SUBMITTED only from a verified adapter receipt whose binding matches; SUBMIT/SEND confirmations are bound to opportunity, draft, version, action, target and document hashes, one-time and expiring; freshness (72 h) and exact official-host endpoint checks run before submit; packages contain only the draft's approved documents (no paths). Contacts never have guessed e-mails; outreach is drafts only and sending needs CAREER SEND plus the e-mail tool's own permission; LinkedIn is drafts only. In-memory repository only; metadata-only audit; owner-only desktop Career view (Guest refused before the body is used). The desktop runtime configures no source adapter, submission adapter or e-mail tool, and SUBMIT/SEND are not bootstrapped, so discovery, submission and sending fail closed. Independent-review remediation: SUBMIT/SEND are at most once (a Sam-generated ExternalActionAttempt per action; validation, confirmation consumption and attempt creation under one lock before the adapter is called; a second request while an attempt is in flight, unknown or verified is answered from the ledger and never reaches the adapter); adapters return a structured ExternalActionResult (VERIFIED_SUCCESS / VERIFIED_FAILURE / OUTCOME_UNKNOWN) validated against the attempt, item, opportunity, manifest, receipt format and trusted destination; timeouts, resets, lost responses and malformed or foreign results are OUTCOME_UNKNOWN, which is never retried, never SUBMITTED and leaves only through trusted read-only reconciliation or a confirmed owner release back to review; confirmations are bound to the hash of an immutable, canonical SubmissionManifest / SendManifest (destination, every document hash and version, every answer hash; recipient, subject, body, channel, attachments), and every edit creates a new version; the destination comes only from official provenance, with exact-host checks for every redirect hop and the reported final destination; CAREER_LINK_DATA is data only (no opener/shell/HTTP plugin); sensitive answers never reach a model, the audit or Professional evidence. Approved after independent review (mutations M1-M28 plus M21b and M23b caught, every restore byte-identical; no real application submitted, no real message sent, no live provider call). Final architecture: Career & PhD Agent; separate PermissionResource.CAREER and PermissionAction.SUBMIT; REVIEW_FIRST default; opportunity discovery, normalization and deduplication; Professional Intelligence evidence integration (read-only); evidence-backed CV and application claims; sensitive-question owner review; application draft/version model; deterministic application state machine; immutable SubmissionManifest / SendManifest with confirmation binding to the exact manifest; at-most-once process-local ExternalActionAttempt ledger; OUTCOME_UNKNOWN and reconciliation behavior; destination and redirect trust; verified receipt requirement; Career SEND / SUBMIT isolation; PROACTIVE EXECUTE separation; PhD research matching and outreach drafting; metadata-only audit; in-memory repository. Known limitations: the attempt ledger and repository are in-memory, so at-most-once guarantees hold only within one running Sam process; reconciliation and release exist as service paths but are not exposed in the UI; a hung adapter fails closed and may block its item until restart; real source, submission and e-mail integrations remain unconfigured. CRITICAL PHASE 17 REQUIREMENT: real SUBMIT and real SEND must remain unavailable until a durable, trusted external-action/idempotency store survives process restart (preserving attempt_id, action, opportunity_id, draft/message identity and version, manifest hash, destination identity, state IN_FLIGHT / OUTCOME_UNKNOWN / VERIFIED_SUCCESS / VERIFIED_FAILURE, receipt/reference and reconciliation state); a restart must never turn OUTCOME_UNKNOWN into retryable; no real job-submission or e-mail adapter may be wired before this."
     },
     {
       "id": 17,
@@ -756,9 +782,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 15,
+    "phase": 16,
     "status": "approved",
-    "next_phase": 16,
+    "next_phase": 17,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {

@@ -164,6 +164,24 @@ _POLICY: dict[tuple[PermissionResource, PermissionAction], PolicyEntry] = {
     (_R.PROACTIVE, _A.UPDATE): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.PROACTIVE, _A.EXECUTE): PolicyEntry(RiskLevel.MEDIUM, False),
     (_R.PROACTIVE, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
+    # --- career (Phase 16) -----------------------------------------------
+    # sam.career discovers and analyses job and PhD opportunities and prepares
+    # LOCAL drafts. Its own resource: never PROFESSIONAL, PROACTIVE or MCP.
+    # READ (inspect opportunities, applications, evidence) is LOW; CREATE
+    # (track an opportunity, create a draft) and UPDATE (edit a draft, answer a
+    # question, record status) are MEDIUM and stay local. Anything that leaves
+    # the device is HIGH and ALWAYS confirmed: SUBMIT (an application or its
+    # documents), SEND (recruiter, hiring-manager or supervisor outreach) and
+    # DELETE (withdrawal / consequential deletion). Each SUBMIT/SEND
+    # confirmation is bound to one draft/message version and the hash of an
+    # immutable manifest of the exact payload, so it can never authorize
+    # anything else.
+    (_R.CAREER, _A.READ): PolicyEntry(RiskLevel.LOW, False),
+    (_R.CAREER, _A.CREATE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.CAREER, _A.UPDATE): PolicyEntry(RiskLevel.MEDIUM, False),
+    (_R.CAREER, _A.SUBMIT): PolicyEntry(RiskLevel.HIGH, True),
+    (_R.CAREER, _A.SEND): PolicyEntry(RiskLevel.HIGH, True),
+    (_R.CAREER, _A.DELETE): PolicyEntry(RiskLevel.HIGH, True),
     # --- voice (Phase 9) -------------------------------------------------
     # sam.voice maps its three explicit operations onto these rows (never a
     # new PermissionAction): opening an in-memory voice session is

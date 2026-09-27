@@ -42,6 +42,15 @@
     "allow-sam-proactive-delete",
     "allow-sam-proactive-run",
     "allow-sam-proactive-notification",
-    "allow-sam-proactive-scheduler"
+    "allow-sam-proactive-scheduler",
+    "allow-sam-career-overview",
+    "allow-sam-career-opportunity",
+    "allow-sam-career-fit",
+    "allow-sam-career-draft",
+    "allow-sam-career-submit",
+    "allow-sam-career-contact",
+    "allow-sam-career-outreach",
+    "allow-sam-career-send",
+    "allow-sam-career-preferences"
   ]
 }

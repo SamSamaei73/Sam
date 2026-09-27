@@ -17,6 +17,7 @@ import type {
   GrantInfo,
   KnowledgeHit,
   OperationResult,
+  CareerOpportunity,
   ProClaim,
   ProfessionalProfile,
   ProNotification,
@@ -519,6 +520,82 @@ export function demoBridge(): SamBridge {
       log("proactive", enabled ? "Automations scheduling on" : "Automations scheduling off", "ok");
       return { ...empty, status: "ok", scheduler_enabled: enabled };
     },
+    // ---- Career & PhD (demo only; nothing is ever submitted or sent) ----
+    async careerOverview() {
+      await wait(60);
+      return {
+        ...empty,
+        status: "ok",
+        opportunities: careerDemo.opportunities,
+        applications: [],
+        contacts: [],
+        outreach: [],
+        follow_ups: [],
+        review_queue: [],
+        preferences: null,
+        submission_available: false,
+        sending_available: false,
+      };
+    },
+    async careerOpportunity(input) {
+      await wait(80);
+      if (input.action === "import" && input.text) {
+        const title = /Title:\s*(.+)/.exec(input.text)?.[1] ?? "Untitled";
+        const organization = /(?:Company|University):\s*(.+)/.exec(input.text)?.[1] ?? "Unknown";
+        careerDemo.opportunities.push({
+          opportunity_id: `op_demo_${careerDemo.opportunities.length + 1}`,
+          type: input.opportunityType ?? "job",
+          title,
+          organization,
+          location: null,
+          work_mode: "unknown",
+          source: input.sourceKind ?? "other",
+          canonical_url: input.url ?? "",
+          source_count: 1,
+          deadline: null,
+          status: "active",
+          compensation: null,
+          funding: null,
+          sponsorship: "unknown",
+          requirements: [],
+          research_topics: [],
+          tracked: false,
+          has_official_application_url: false,
+          last_verified: iso(),
+        });
+      }
+      log("career", `Opportunity ${input.action}`, "ok");
+      return { ...empty, status: "ok", item_id: null, state: null };
+    },
+    async careerFit() {
+      await wait(60);
+      return { ...empty, status: "ok", requirements: [], alignment_status: null, alignment: [] };
+    },
+    async careerDraft(input) {
+      await wait(60);
+      log("career", `Application ${input.action}`, "ok");
+      return { ...empty, status: "ok", item_id: null, state: null };
+    },
+    async careerSubmit() {
+      await wait(40);
+      return { ...empty, status: "denied", reason_code: "submission_unavailable", message: "Sam can't submit applications yet.", item_id: null, state: null };
+    },
+    async careerContact() {
+      await wait(40);
+      return { ...empty, status: "ok", item_id: null, state: null };
+    },
+    async careerOutreach() {
+      await wait(40);
+      return { ...empty, status: "ok", item_id: null, state: null };
+    },
+    async careerSend() {
+      await wait(40);
+      return { ...empty, status: "denied", reason_code: "email_unavailable", message: "Sam can't send e-mail yet.", item_id: null, state: null };
+    },
+    async careerPreferences() {
+      await wait(40);
+      return { ...empty, status: "ok", item_id: null, state: null };
+    },
     async proactiveCreate(input) {
       await wait(100);
       const s = input.schedule;
@@ -633,6 +710,8 @@ const ingestEmpty = {
   candidates_rejected: 0,
   unmapped_skills: 0,
 } as const;
+
+const careerDemo: { opportunities: CareerOpportunity[] } = { opportunities: [] };
 
 const auto: { tasks: ProTask[]; notifications: ProNotification[]; schedulerEnabled: boolean } = {
   tasks: [],

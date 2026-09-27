@@ -28,7 +28,10 @@ from threading import RLock
 from typing import Literal
 
 from sam.agent.core import AgentCore
+from sam.career.audit import InMemoryCareerAuditSink
+from sam.career.service import CareerService
 from sam.core.config import Settings
+from sam.desktop.career_ports import KnowledgePapers, ProfessionalEvidence
 from sam.desktop.identity import DesktopVoiceIdentity
 from sam.knowledge.audit import InMemoryKnowledgeAuditSink
 from sam.knowledge.engine import KnowledgeEngine
@@ -41,6 +44,7 @@ from sam.memory.engine import MemoryEngine
 from sam.memory.store import InMemoryMemoryStore
 from sam.memory.working import InMemoryWorkingMemoryStore
 from sam.models.factory import ModelSettingsStore
+from sam.models.models import PrivacyClass
 from sam.models.router import ModelRouter
 from sam.permissions.audit import InMemoryAuditSink
 from sam.permissions.confirmation import InMemoryConfirmationProvider
@@ -56,8 +60,13 @@ from sam.permissions.models import (
 )
 from sam.permissions.store import InMemoryPermissionStore
 from sam.proactive.audit import InMemoryProactiveAuditSink
-from sam.proactive.conditions import ConditionEntry, ConditionRegistry
+from sam.proactive.conditions import (
+    ConditionEntry,
+    ConditionRegistry,
+    RequiredPermission,
+)
 from sam.proactive.observers import (
+    CountObserver,
     deadline_entry,
     professional_conflicts_entry,
     provider_status_entry,
@@ -182,6 +191,18 @@ class DesktopRuntime:
                 else None
             ),
             owner_identity=_owner_identity(settings),
+            clock=clock,
+        )
+        # Career & PhD Agent (Phase 16): review-first. Reads Professional evidence
+        # and Knowledge papers through read-only ports; drafts stay local. No
+        # submission adapter and no e-mail tool are configured, so nothing can be
+        # submitted or sent from this runtime (fail closed).
+        self.career_audit = InMemoryCareerAuditSink()
+        self.career = CareerService(
+            permission_engine=self.permissions,
+            evidence=ProfessionalEvidence(self.professional),
+            papers=KnowledgePapers(self.knowledge, KNOWLEDGE_COLLECTION),
+            audit_sink=self.career_audit,
             clock=clock,
         )
         # Proactive Agent (Phase 15): owner-defined reminders, summaries and
@@ -369,9 +390,34 @@ def _proactive_registry(runtime: DesktopRuntime) -> ConditionRegistry:
         result = runtime.professional.get_conflicts(principal)
         return len(result.data) if result.ok and result.data is not None else None
 
+    def career_count(key: str) -> Callable[[Principal], int | None]:
+        def count(principal: Principal) -> int | None:
+            result = runtime.career.counts(principal)
+            return result.data[key] if result.ok and result.data is not None else None
+
+        return count
+
+    def career_entry(condition_id: str, key: str, noun: str) -> ConditionEntry:
+        # READ-only Career signals: a proactive run can notify, never submit/send.
+        return ConditionEntry(
+            condition_id=condition_id,
+            label="career",
+            permission=RequiredPermission(
+                PermissionResource.CAREER,
+                PermissionAction.READ,
+                PermissionScope.from_path("career"),
+            ),
+            observer=CountObserver(career_count(key), noun),
+            max_seconds=5.0,
+            privacy_class=PrivacyClass.PRIVATE,
+        )
+
     entries: list[ConditionEntry] = [
         deadline_entry(),
         professional_conflicts_entry(open_conflicts),
+        career_entry("career_review_queue", "review", "career item(s)"),
+        career_entry("career_deadlines", "deadlines", "application deadline(s)"),
+        career_entry("career_follow_ups_due", "follow_ups", "follow-up(s)"),
     ]
     if runtime.model_router is not None:
         entries.append(provider_status_entry(runtime.model_router.provider_state))
@@ -483,6 +529,20 @@ def bootstrap_grants(runtime: DesktopRuntime) -> None:
             PermissionResource.PROACTIVE,
             action,
             PermissionScope.from_path("proactive"),
+        )
+    # Career & PhD Agent: local, review-first work only. SUBMIT and SEND are
+    # deliberately NOT bootstrapped (and no adapter exists to use them); withdrawal
+    # (DELETE) is HIGH and always asks for a confirmation.
+    for action in (
+        PermissionAction.READ,
+        PermissionAction.CREATE,
+        PermissionAction.UPDATE,
+        PermissionAction.DELETE,
+    ):
+        grant(
+            PermissionResource.CAREER,
+            action,
+            PermissionScope.from_path("career"),
         )
     if runtime.voice_gateway is not None:
         for action in (

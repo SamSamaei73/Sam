@@ -135,4 +135,64 @@ export const tauriBridge: SamBridge = {
   proactiveNotification: (notificationId, action) =>
     call("sam_proactive_notification", { notificationId, action }),
   proactiveScheduler: (enabled) => call("sam_proactive_scheduler", { enabled }),
+  careerOverview: () => call("sam_career_overview"),
+  careerOpportunity: (input) =>
+    call("sam_career_opportunity", {
+      action: input.action,
+      opportunityId: input.opportunityId ?? null,
+      draftId: input.draftId ?? null,
+      text: input.text ?? null,
+      url: input.url ?? null,
+      sourceKind: input.sourceKind ?? null,
+      opportunityType: input.opportunityType ?? null,
+      applicationUrl: input.applicationUrl ?? null,
+      externalId: input.externalId ?? null,
+    }),
+  careerFit: (opportunityId, contactId) => call("sam_career_fit", { opportunityId, contactId: contactId ?? null }),
+  careerDraft: (input) =>
+    call("sam_career_draft", {
+      action: input.action,
+      opportunityId: input.opportunityId ?? null,
+      draftId: input.draftId ?? null,
+      documentId: input.documentId ?? null,
+      questionId: input.questionId ?? null,
+      text: input.text ?? null,
+      questions: input.questions ?? [],
+      lines: input.lines ?? [],
+      motivation: input.motivation ?? null,
+      direction: input.direction ?? null,
+      confirmationId: input.confirmationId ?? null,
+    }),
+  careerSubmit: (draftId, confirmationId) =>
+    call("sam_career_submit", { draftId, confirmationId: confirmationId ?? null }),
+  careerContact: (input) =>
+    call("sam_career_contact", {
+      name: input.name,
+      role: input.role,
+      organization: input.organization,
+      sourceKind: input.sourceKind,
+      url: input.url,
+      quote: input.quote,
+      email: input.email ?? null,
+      opportunityId: input.opportunityId ?? null,
+      researchTopics: input.researchTopics ?? [],
+    }),
+  careerOutreach: (input) =>
+    call("sam_career_outreach", {
+      action: input.action,
+      outreachId: input.outreachId ?? null,
+      contactId: input.contactId ?? null,
+      followUpId: input.followUpId ?? null,
+      kind: input.kind ?? null,
+      channel: input.channel ?? null,
+      opportunityId: input.opportunityId ?? null,
+      note: input.note ?? null,
+    }),
+  careerSend: (outreachId, confirmationId, emailConfirmationId) =>
+    call("sam_career_send", {
+      outreachId,
+      confirmationId: confirmationId ?? null,
+      emailConfirmationId: emailConfirmationId ?? null,
+    }),
+  careerPreferences: (input) => call("sam_career_preferences", { preferences: input }),
 };

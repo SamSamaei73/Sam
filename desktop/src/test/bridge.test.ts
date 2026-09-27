@@ -50,6 +50,15 @@ const METHODS = [
   "proactiveRun",
   "proactiveNotification",
   "proactiveScheduler",
+  "careerOverview",
+  "careerOpportunity",
+  "careerFit",
+  "careerDraft",
+  "careerSubmit",
+  "careerContact",
+  "careerOutreach",
+  "careerSend",
+  "careerPreferences",
 ].sort();
 
 describe("tauri bridge", () => {
@@ -132,6 +141,27 @@ describe("tauri bridge", () => {
     ]);
     for (const key of keys) expect(key).not.toMatch(/endpoint|url|token|api_?key|model|cost|billing|paid|principal|scope|risk/i);
     expect(invoke.mock.calls.at(-1)).toEqual(["sam_chat", { message: "hi", language: "auto", privacy: "private" }]);
+  });
+
+  it("career commands carry only the owner's data: never a path, principal, permission, state or command", async () => {
+    invoke.mockResolvedValue({});
+    await tauriBridge.careerOverview();
+    await tauriBridge.careerDraft({ action: "create", opportunityId: "op_1", questions: ["Full name"] });
+    await tauriBridge.careerSubmit("ap_1", "conf-1");
+    await tauriBridge.careerSend("or_1", "c1", "c2");
+    const calls = invoke.mock.calls.filter((call) => /^sam_career_/.test(String(call[0])));
+    expect(calls.map((call) => call[0])).toEqual([
+      "sam_career_overview",
+      "sam_career_draft",
+      "sam_career_submit",
+      "sam_career_send",
+    ]);
+    expect(Object.keys((calls[2]?.[1] ?? {}) as object).sort()).toEqual(["confirmationId", "draftId"]);
+    for (const [, args] of calls) {
+      for (const key of Object.keys((args ?? {}) as object)) {
+        expect(key).not.toMatch(/path|file|principal|permission|scope|risk|state|token|command|approved|submitted/i);
+      }
+    }
   });
 
   it("proactive commands carry only the owner's task data: never a command, provider, permission or future confirmation", async () => {

@@ -563,6 +563,7 @@ def test_guest_gets_no_grants_and_owner_permissions_are_unchanged() -> None:
         "knowledge",
         "professional",
         "proactive",
+        "career",
         "voice",
         "speech_synthesis",
     }

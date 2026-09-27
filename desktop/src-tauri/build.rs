@@ -38,6 +38,15 @@ const COMMANDS: &[&str] = &[
     "sam_proactive_run",
     "sam_proactive_notification",
     "sam_proactive_scheduler",
+    "sam_career_overview",
+    "sam_career_opportunity",
+    "sam_career_fit",
+    "sam_career_draft",
+    "sam_career_submit",
+    "sam_career_contact",
+    "sam_career_outreach",
+    "sam_career_send",
+    "sam_career_preferences",
 ];
 
 fn main() {

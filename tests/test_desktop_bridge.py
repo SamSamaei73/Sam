@@ -378,8 +378,13 @@ def test_permissions_list_and_revoke_only() -> None:
     grants = bridge.get("/permissions").json()["grants"]
     assert grants and all(g["status"] == "active" for g in grants)
     assert not any(g["scope"] == "*" for g in grants)
-    # Phase 14 adds PROFESSIONAL and Phase 15 PROACTIVE; nothing else.
-    assert {g["resource"] for g in grants} == {"knowledge", "professional", "proactive"}
+    # Phase 14 adds PROFESSIONAL, 15 PROACTIVE and 16 CAREER; nothing else.
+    assert {g["resource"] for g in grants} == {
+        "knowledge",
+        "professional",
+        "proactive",
+        "career",
+    }
     ident = next(
         g["grant_id"]
         for g in grants
@@ -668,6 +673,16 @@ def test_router_has_only_the_documented_routes() -> None:
             ("POST", "/desktop/v1/proactive/run"),
             ("POST", "/desktop/v1/proactive/notification"),
             ("POST", "/desktop/v1/proactive/scheduler"),
+            # Phase 16: Career & PhD Agent (owner-bound, review-first)
+            ("GET", "/desktop/v1/career/overview"),
+            ("POST", "/desktop/v1/career/opportunity"),
+            ("POST", "/desktop/v1/career/fit"),
+            ("POST", "/desktop/v1/career/draft"),
+            ("POST", "/desktop/v1/career/submit"),
+            ("POST", "/desktop/v1/career/contact"),
+            ("POST", "/desktop/v1/career/outreach"),
+            ("POST", "/desktop/v1/career/send"),
+            ("POST", "/desktop/v1/career/preferences"),
         ]
     )
 
@@ -832,6 +847,12 @@ def test_bootstrap_grants_are_exactly_the_documented_set_and_audited() -> None:
         ("proactive", "update", "proactive"),
         ("proactive", "execute", "proactive"),
         ("proactive", "delete", "proactive"),
+        # Phase 16: local, review-first Career work only. No SUBMIT or SEND grant
+        # is bootstrapped; withdrawal (delete) always confirms.
+        ("career", "read", "career"),
+        ("career", "create", "career"),
+        ("career", "update", "career"),
+        ("career", "delete", "career"),
     }
     bare = Bridge()
     got = {
@@ -857,6 +878,7 @@ def test_bootstrap_grants_are_exactly_the_documented_set_and_audited() -> None:
         "knowledge",
         "professional",
         "proactive",
+        "career",
         "voice",
         "speech_synthesis",
     }

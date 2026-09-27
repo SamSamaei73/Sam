@@ -624,6 +624,294 @@ fn sam_proactive_scheduler(state: State<'_, AppState>, enabled: bool) -> Command
     )
 }
 
+/// Owner-approved career preferences: typed and closed. Unknown fields (a
+/// permission, a path, a state) are refused by deserialization.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CareerPreferencesArgs {
+    preferred_roles: Vec<String>,
+    locations: Vec<String>,
+    work_modes: Vec<String>,
+    role_types: Vec<String>,
+    salary_preference: Option<String>,
+    needs_sponsorship: Option<bool>,
+    contact_name: Option<String>,
+    contact_email: Option<String>,
+    contact_phone: Option<String>,
+    portfolio_url: Option<String>,
+    linkedin_url: Option<String>,
+}
+
+#[tauri::command]
+fn sam_career_overview(state: State<'_, AppState>) -> CommandResult {
+    run(&state, Route::CareerOverview, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_career_opportunity(
+    state: State<'_, AppState>,
+    action: String,
+    opportunity_id: Option<String>,
+    draft_id: Option<String>,
+    text: Option<String>,
+    url: Option<String>,
+    source_kind: Option<String>,
+    opportunity_type: Option<String>,
+    application_url: Option<String>,
+    external_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::career_opportunity_action(&action))?;
+    invalid(validate::optional_id(opportunity_id.as_deref()))?;
+    invalid(validate::optional_id(draft_id.as_deref()))?;
+    invalid(validate::optional_text(
+        text.as_deref(),
+        validate::MAX_LISTING_CHARS,
+    ))?;
+    invalid(validate::optional_https_url(url.as_deref()))?;
+    invalid(validate::optional_source_kind(source_kind.as_deref()))?;
+    invalid(validate::optional_opportunity_type(
+        opportunity_type.as_deref(),
+    ))?;
+    invalid(validate::optional_https_url(application_url.as_deref()))?;
+    invalid(validate::optional_text(external_id.as_deref(), 200))?;
+    run(
+        &state,
+        Route::CareerOpportunity,
+        Some(json!({
+            "action": action,
+            "opportunity_id": opportunity_id,
+            "draft_id": draft_id,
+            "text": text,
+            "url": url,
+            "source_kind": source_kind,
+            "opportunity_type": opportunity_type,
+            "application_url": application_url,
+            "external_id": external_id,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_career_fit(
+    state: State<'_, AppState>,
+    opportunity_id: String,
+    contact_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::id(&opportunity_id))?;
+    invalid(validate::optional_id(contact_id.as_deref()))?;
+    run(
+        &state,
+        Route::CareerFit,
+        Some(json!({ "opportunity_id": opportunity_id, "contact_id": contact_id })),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_career_draft(
+    state: State<'_, AppState>,
+    action: String,
+    opportunity_id: Option<String>,
+    draft_id: Option<String>,
+    document_id: Option<String>,
+    question_id: Option<String>,
+    text: Option<String>,
+    questions: Vec<String>,
+    lines: Vec<String>,
+    motivation: Option<String>,
+    direction: Option<String>,
+    confirmation_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::career_draft_action(&action))?;
+    for id in [
+        &opportunity_id,
+        &draft_id,
+        &document_id,
+        &question_id,
+        &confirmation_id,
+    ] {
+        invalid(validate::optional_id(id.as_deref()))?;
+    }
+    let max = validate::MAX_CAREER_TEXT_CHARS;
+    invalid(validate::optional_text(text.as_deref(), max))?;
+    invalid(validate::optional_text(motivation.as_deref(), max))?;
+    invalid(validate::optional_text(direction.as_deref(), max))?;
+    invalid(validate::text_list(
+        &questions,
+        validate::MAX_CAREER_ITEMS,
+        500,
+    ))?;
+    invalid(validate::text_list(&lines, validate::MAX_CAREER_LINES, max))?;
+    run(
+        &state,
+        Route::CareerDraft,
+        Some(json!({
+            "action": action,
+            "opportunity_id": opportunity_id,
+            "draft_id": draft_id,
+            "document_id": document_id,
+            "question_id": question_id,
+            "text": text,
+            "questions": questions,
+            "lines": lines,
+            "motivation": motivation,
+            "direction": direction,
+            "confirmation_id": confirmation_id,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_career_submit(
+    state: State<'_, AppState>,
+    draft_id: String,
+    confirmation_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::id(&draft_id))?;
+    invalid(validate::optional_id(confirmation_id.as_deref()))?;
+    run(
+        &state,
+        Route::CareerSubmit,
+        Some(json!({ "draft_id": draft_id, "confirmation_id": confirmation_id })),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_career_contact(
+    state: State<'_, AppState>,
+    name: String,
+    role: String,
+    organization: String,
+    source_kind: String,
+    url: String,
+    quote: String,
+    email: Option<String>,
+    opportunity_id: Option<String>,
+    research_topics: Vec<String>,
+) -> CommandResult {
+    invalid(validate::text(&name, 200))?;
+    invalid(validate::contact_role(&role))?;
+    invalid(validate::text(&organization, 200))?;
+    invalid(validate::source_kind(&source_kind))?;
+    invalid(validate::https_url(&url))?;
+    invalid(validate::text(&quote, 500))?;
+    invalid(validate::optional_text(email.as_deref(), 254))?;
+    invalid(validate::optional_id(opportunity_id.as_deref()))?;
+    invalid(validate::text_list(&research_topics, 20, 80))?;
+    run(
+        &state,
+        Route::CareerContact,
+        Some(json!({
+            "name": name,
+            "role": role,
+            "organization": organization,
+            "source_kind": source_kind,
+            "url": url,
+            "quote": quote,
+            "email": email,
+            "opportunity_id": opportunity_id,
+            "research_topics": research_topics,
+        })),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn sam_career_outreach(
+    state: State<'_, AppState>,
+    action: String,
+    outreach_id: Option<String>,
+    contact_id: Option<String>,
+    follow_up_id: Option<String>,
+    kind: Option<String>,
+    channel: Option<String>,
+    opportunity_id: Option<String>,
+    note: Option<String>,
+) -> CommandResult {
+    invalid(validate::career_outreach_action(&action))?;
+    for id in [&outreach_id, &contact_id, &follow_up_id, &opportunity_id] {
+        invalid(validate::optional_id(id.as_deref()))?;
+    }
+    invalid(validate::optional_outreach_kind(kind.as_deref()))?;
+    invalid(validate::optional_channel(channel.as_deref()))?;
+    invalid(validate::optional_text(
+        note.as_deref(),
+        validate::MAX_CAREER_TEXT_CHARS,
+    ))?;
+    run(
+        &state,
+        Route::CareerOutreach,
+        Some(json!({
+            "action": action,
+            "outreach_id": outreach_id,
+            "contact_id": contact_id,
+            "follow_up_id": follow_up_id,
+            "kind": kind,
+            "channel": channel,
+            "opportunity_id": opportunity_id,
+            "note": note,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_career_send(
+    state: State<'_, AppState>,
+    outreach_id: String,
+    confirmation_id: Option<String>,
+    email_confirmation_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::id(&outreach_id))?;
+    invalid(validate::optional_id(confirmation_id.as_deref()))?;
+    invalid(validate::optional_id(email_confirmation_id.as_deref()))?;
+    run(
+        &state,
+        Route::CareerSend,
+        Some(json!({
+            "outreach_id": outreach_id,
+            "confirmation_id": confirmation_id,
+            "email_confirmation_id": email_confirmation_id,
+        })),
+    )
+}
+
+#[tauri::command]
+fn sam_career_preferences(
+    state: State<'_, AppState>,
+    preferences: CareerPreferencesArgs,
+) -> CommandResult {
+    let p = preferences;
+    invalid(validate::text_list(&p.preferred_roles, 20, 100))?;
+    invalid(validate::text_list(&p.locations, 20, 100))?;
+    invalid(validate::work_modes(&p.work_modes))?;
+    invalid(validate::text_list(&p.role_types, 20, 100))?;
+    invalid(validate::optional_text(p.salary_preference.as_deref(), 100))?;
+    invalid(validate::optional_text(p.contact_name.as_deref(), 200))?;
+    invalid(validate::optional_text(p.contact_email.as_deref(), 254))?;
+    invalid(validate::optional_text(p.contact_phone.as_deref(), 40))?;
+    invalid(validate::optional_https_url(p.portfolio_url.as_deref()))?;
+    invalid(validate::optional_https_url(p.linkedin_url.as_deref()))?;
+    run(
+        &state,
+        Route::CareerPreferences,
+        Some(json!({
+            "preferred_roles": p.preferred_roles,
+            "locations": p.locations,
+            "work_modes": p.work_modes,
+            "role_types": p.role_types,
+            "salary_preference": p.salary_preference,
+            "needs_sponsorship": p.needs_sponsorship,
+            "contact_name": p.contact_name,
+            "contact_email": p.contact_email,
+            "contact_phone": p.contact_phone,
+            "portfolio_url": p.portfolio_url,
+            "linkedin_url": p.linkedin_url,
+        })),
+    )
+}
+
 #[tauri::command]
 fn sam_models_status(state: State<'_, AppState>) -> CommandResult {
     run(&state, Route::ModelsStatus, None)
@@ -712,6 +1000,15 @@ pub fn run_app() {
             sam_proactive_run,
             sam_proactive_notification,
             sam_proactive_scheduler,
+            sam_career_overview,
+            sam_career_opportunity,
+            sam_career_fit,
+            sam_career_draft,
+            sam_career_submit,
+            sam_career_contact,
+            sam_career_outreach,
+            sam_career_send,
+            sam_career_preferences,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sam desktop");

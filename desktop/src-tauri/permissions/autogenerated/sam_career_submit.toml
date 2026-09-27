@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-career-submit"
+description = "Enables the sam_career_submit command without any pre-configured scope."
+commands.allow = ["sam_career_submit"]
+
+[[permission]]
+identifier = "deny-sam-career-submit"
+description = "Denies the sam_career_submit command without any pre-configured scope."
+commands.deny = ["sam_career_submit"]

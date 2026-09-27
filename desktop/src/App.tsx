@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import type { SamBridge } from "./bridge/bridge";
 import {
   IconActivity,
+  IconCareer,
   IconChat,
   IconKnowledge,
   IconMemory,
@@ -20,6 +21,7 @@ import type { AudioEnvironment } from "./lib/recorder";
 import { GuestBanner } from "./components/GuestBanner";
 import { SamProvider, useSam } from "./state";
 import { ActivityView } from "./views/ActivityView";
+import { CareerView } from "./views/CareerView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { MemoryView } from "./views/MemoryView";
 import { PermissionsView } from "./views/PermissionsView";
@@ -34,6 +36,7 @@ export type ViewId =
   | "knowledge"
   | "professional"
   | "proactive"
+  | "career"
   | "memory"
   | "tools"
   | "permissions"
@@ -45,6 +48,7 @@ const NAV_ICONS: Record<ViewId, ReactNode> = {
   knowledge: <IconKnowledge />,
   professional: <IconProfessional />,
   proactive: <IconProactive />,
+  career: <IconCareer />,
   memory: <IconMemory />,
   tools: <IconTools />,
   permissions: <IconShield />,
@@ -56,6 +60,7 @@ const NAV_KEYS = {
   knowledge: "nav.knowledge",
   professional: "nav.professional",
   proactive: "nav.proactive",
+  career: "nav.career",
   memory: "nav.memory",
   tools: "nav.tools",
   permissions: "nav.permissions",
@@ -67,6 +72,7 @@ const VIEW_ORDER: ViewId[] = [
   "knowledge",
   "professional",
   "proactive",
+  "career",
   "memory",
   "tools",
   "permissions",
@@ -201,6 +207,8 @@ function pageFor(view: ViewId): ReactNode {
       return <ProfessionalView />;
     case "proactive":
       return <ProactiveView />;
+    case "career":
+      return <CareerView />;
     case "memory":
       return <MemoryView />;
     case "tools":

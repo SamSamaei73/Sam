@@ -49,6 +49,12 @@ export const IconProactive = () => (
     <path d="M12 9.5V13l2.5 1.5M9.5 3.5h5" />
   </Base>
 );
+export const IconCareer = () => (
+  <Base>
+    <path d="M4 20V9l8-5 8 5v11" />
+    <path d="M9 20v-6h6v6" />
+  </Base>
+);
 export const IconMemory = () => (
   <Base>
     <circle cx="12" cy="12" r="3" />

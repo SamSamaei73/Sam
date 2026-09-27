@@ -5,6 +5,7 @@ import type { SamBridge } from "../bridge/bridge";
 import type {
   IdentityStatus,
   OperationResult,
+  CareerOverview,
   ProactiveOverview,
   ProfessionalIngestResult,
   ProfessionalProfile,
@@ -162,6 +163,19 @@ export const emptyProactive: ProactiveOverview = {
   scheduler_enabled: false,
 };
 
+export const emptyCareer: CareerOverview = {
+  ...ok,
+  opportunities: [],
+  applications: [],
+  contacts: [],
+  outreach: [],
+  follow_ups: [],
+  review_queue: [],
+  preferences: null,
+  submission_available: false,
+  sending_available: false,
+};
+
 export const emptyIngest: ProfessionalIngestResult = {
   ...ok,
   source_id: null,
@@ -233,6 +247,15 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
     professionalProfile: vi.fn(async () => emptyProfessional),
     professionalIngest: vi.fn(async () => ({ ...emptyIngest, ingest_status: "ingested" })),
     proactiveOverview: vi.fn(async () => emptyProactive),
+    careerOverview: vi.fn(async () => emptyCareer),
+    careerOpportunity: vi.fn(async () => ({ ...ok, item_id: "op_1", state: null })),
+    careerFit: vi.fn(async () => ({ ...ok, requirements: [], alignment_status: null, alignment: [] })),
+    careerDraft: vi.fn(async () => ({ ...ok, item_id: "ap_1", state: "drafting" })),
+    careerSubmit: vi.fn(async () => ({ ...ok, item_id: "ap_1", state: null })),
+    careerContact: vi.fn(async () => ({ ...ok, item_id: "ct_1", state: null })),
+    careerOutreach: vi.fn(async () => ({ ...ok, item_id: "or_1", state: "draft" })),
+    careerSend: vi.fn(async () => ({ ...ok, item_id: "or_1", state: null })),
+    careerPreferences: vi.fn(async () => ({ ...ok, item_id: null, state: null })),
     proactiveCreate: vi.fn(async () => ({ ...ok, task: null })),
     proactiveUpdate: vi.fn(async () => ({ ...ok, task: null })),
     proactiveDelete: vi.fn(async () => ok),
