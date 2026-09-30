@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-owner-setup"
+description = "Enables the sam_owner_setup command without any pre-configured scope."
+commands.allow = ["sam_owner_setup"]
+
+[[permission]]
+identifier = "deny-sam-owner-setup"
+description = "Denies the sam_owner_setup command without any pre-configured scope."
+commands.deny = ["sam_owner_setup"]

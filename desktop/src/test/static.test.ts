@@ -60,7 +60,7 @@ describe("static security checks (production sources)", { timeout: 60_000 }, () 
     expect(users.map((f) => relative(ROOT, f))).toEqual(["src/bridge/tauri.ts"]);
     const text = read(join(SRC, "bridge", "tauri.ts"));
     const commands = [...text.matchAll(/call(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(commands.length).toBe(48);
+    expect(commands.length).toBe(51);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
   });
 

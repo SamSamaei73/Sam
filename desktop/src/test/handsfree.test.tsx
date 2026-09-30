@@ -6,7 +6,14 @@ import type { LocalSpeechOutput } from "../lib/localSpeech";
 import { baseIdentity, baseStatus, fakeAudioEnvironment, mockBridge, ok, renderApp } from "./helpers";
 
 const FRAME = 1_600; // 100 ms at 16 kHz
-const enrolled: IdentityStatus = { ...baseIdentity, available: true, enrolled: true, speaker_model: "configured" };
+const enrolled: IdentityStatus = {
+  ...baseIdentity,
+  available: true,
+  enrolled: true,
+  setup_state: "enrolled",
+  step_up_configured: true,
+  speaker_model: "configured",
+};
 const handsFreeStatus = {
   ...baseStatus,
   voice_input: "configured" as const,
@@ -183,7 +190,7 @@ describe("hands-free voice activation", () => {
 
 describe("hands-free setup and safety", () => {
   it("without a voice profile it asks for setup and does not open the microphone", async () => {
-    const { fake } = setup({}, { ...enrolled, enrolled: false });
+    const { fake } = setup({}, { ...enrolled, enrolled: false, setup_state: "not_enrolled" });
     expect(await screen.findByRole("button", { name: "Set up your voice so Sam can recognize you" })).toBeInTheDocument();
     expect(fake.getUserMedia).not.toHaveBeenCalled();
     await userEvent.setup().click(screen.getByRole("button", { name: /Action required/ }));

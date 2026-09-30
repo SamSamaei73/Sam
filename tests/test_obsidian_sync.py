@@ -225,8 +225,13 @@ def test_the_real_repository_ignores_obsidian_and_tracks_nothing_in_it() -> None
         [GIT, "ls-files", "--", "Obsidian"], cwd=ROOT, capture_output=True, check=True
     )
     assert tracked.stdout == b""
-    ignored = subprocess.run([GIT, "check-ignore", "-q", "Obsidian"], cwd=ROOT)
-    assert ignored.returncode == 0
+    # `Obsidian/` is a directory-only rule and the owner's vault is local and
+    # untracked, so a fresh clone has no Obsidian/ directory. Probe paths that
+    # git classifies as inside that directory whether or not it exists; the
+    # test never creates, reads or changes the real vault.
+    for path in ("Obsidian/", "Obsidian/Sam/notes.md"):
+        ignored = subprocess.run([GIT, "check-ignore", "-q", path], cwd=ROOT)
+        assert ignored.returncode == 0, path
 
 
 def test_obsidian_app_settings_directories_are_ignored_too() -> None:

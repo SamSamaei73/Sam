@@ -13,7 +13,7 @@ const MAIN_RS: &str = include_str!("main.rs");
 const CARGO: &str = include_str!("../Cargo.toml");
 const BACKEND_PATHS: &str = include_str!("../../../src/sam/storage/paths.py");
 
-const COMMANDS: [&str; 48] = [
+const COMMANDS: [&str; 51] = [
     "sam_status",
     "sam_chat",
     "sam_knowledge_list",
@@ -62,6 +62,9 @@ const COMMANDS: [&str; 48] = [
     "sam_career_preferences",
     "sam_voice_wake",
     "sam_voice_activation",
+    "sam_voice_models_install",
+    "sam_owner_setup",
+    "sam_restart_backend",
 ];
 
 fn conf() -> Value {
@@ -180,7 +183,7 @@ fn build_script_declares_the_same_command_list_as_the_handler() {
             "handler missing {command}"
         );
     }
-    assert_eq!(BUILD_RS.matches("\"sam_").count(), 48);
+    assert_eq!(BUILD_RS.matches("\"sam_").count(), 51);
 }
 
 #[test]
@@ -207,7 +210,7 @@ fn no_generic_or_privileged_commands_exist() {
             "backend.rs must not contain {banned}"
         );
     }
-    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 48);
+    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 51);
 }
 
 /// The ONLY exception to the "no URL arguments" rule, reviewed for Phase 16:
@@ -418,7 +421,19 @@ fn owned_backend_starts_in_the_background_and_always_stops() {
     let body = &LIB_RS[start..start + LIB_RS[start..].find("\n}\n").unwrap()];
     assert!(body.contains("std::thread::spawn(move || match sidecar::start_owned()"));
     assert!(body.contains("if guard.exiting {"));
-    assert!(LIB_RS.contains(".manage(AppState { backend: slot })"));
+    assert!(LIB_RS.contains(".manage(AppState {\n            backend: slot,"));
+    // A newer backend never leaves an earlier one running.
+    assert!(body.contains("if let Some(mut previous) = guard.sidecar.replace(sidecar) {"));
+    assert!(body.contains("previous.stop();"));
+    // Restart (after a verified voice install): refused while quitting, stops
+    // the running backend first, then uses the same owned start path.
+    let restart = LIB_RS.find("fn sam_restart_backend(").expect("restart");
+    let rbody = &LIB_RS[restart..restart + LIB_RS[restart..].find("\n}\n").unwrap()];
+    let exiting = rbody.find("if guard.exiting {").expect("exit guard");
+    let stop = rbody.find("sidecar.stop();").expect("stops previous");
+    let start = rbody.find("\n    start_backend(").expect("restarts");
+    assert!(exiting < stop && stop < start);
+    assert!(rbody.contains("if cfg!(debug_assertions) {"));
     assert!(LIB_RS.contains("BackendSlot::new(Slot::Starting)"));
     let exit = LIB_RS.find("tauri::RunEvent::Exit").expect("exit handler");
     let handler = &LIB_RS[exit..];

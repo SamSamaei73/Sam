@@ -28,7 +28,12 @@ from sam.desktop.models import (
     GuestStartRequest,
     IdentityStatusResponse,
     OperationResult,
+    OwnerSetupRequest,
     ProfileDeleteRequest,
+    VoiceModelsInfo,
+    VoiceModelsInstallRequest,
+    VoiceModelsInstallResponse,
+    VoiceSetupState,
 )
 from sam.desktop.runtime import DesktopRuntime
 from sam.desktop.security import bridge_runtime, owner_bridge_runtime
@@ -70,6 +75,11 @@ _MESSAGES = {
     "owner_verification_failed": "Owner verification failed.",
     "guest_active": "Guest Mode is already active. End it first.",
     "challenge_invalid": "That challenge is no longer valid.",
+    "step_up_mismatch": "The two entries don't match.",
+    "step_up_already_set": "Owner security is already set up.",
+    "step_up_unavailable": "The macOS Keychain isn't available, so nothing was saved.",
+    "step_up_too_short": "Use at least 16 characters.",
+    "step_up_store_error": "The macOS Keychain couldn't save it. Nothing was saved.",
 }
 
 
@@ -116,11 +126,49 @@ def _guest_info(identity: DesktopVoiceIdentity) -> GuestInfo:
     return GuestInfo(active=status.active, seconds_remaining=status.seconds_remaining)
 
 
+def _models_info(runtime: DesktopRuntime) -> VoiceModelsInfo:
+    installer = runtime.voice_installer
+    if installer is None:
+        return VoiceModelsInfo()
+    status = installer.status()
+    return VoiceModelsInfo(
+        state=status.state.value,
+        bytes_done=status.bytes_done,
+        bytes_total=status.bytes_total,
+        reason_code=status.reason_code,
+    )
+
+
+def _setup_state(
+    runtime: DesktopRuntime, models: VoiceModelsInfo, enrolled: bool | None
+) -> VoiceSetupState:
+    """The ONE place the owner's voice setup stage is decided. Each stage has
+    its own message and action; none collapses into a generic block."""
+
+    if runtime.identity is None:
+        if runtime.voice_readiness == "models_missing":
+            if models.state == "installed":
+                return "restart_required"
+            return "models_missing"
+        return "voice_unavailable"
+    if enrolled is None:
+        return "voice_unavailable"  # the secure store could not be read
+    if enrolled:
+        return "enrolled"
+    return "not_enrolled" if runtime.step_up_configured() else "setup_required"
+
+
 @router.get("/voice/identity", response_model=IdentityStatusResponse)
 def identity_status(runtime: DesktopRuntime = _runtime) -> IdentityStatusResponse:
     identity = _identity(runtime)
+    models = _models_info(runtime)
     if identity is None:
-        return IdentityStatusResponse(available=False)
+        return IdentityStatusResponse(
+            available=False,
+            setup_state=_setup_state(runtime, models, None),
+            step_up_configured=runtime.step_up_configured(),
+            models=models,
+        )
     enrolled = identity.enrollment.status().enrolled
     last = identity.last_speaker_result
     last_state: Literal["verified", "not_verified", "unknown"] | None = None
@@ -133,6 +181,9 @@ def identity_status(runtime: DesktopRuntime = _runtime) -> IdentityStatusRespons
     guest = _guest_info(identity)
     return IdentityStatusResponse(
         available=True,
+        setup_state=_setup_state(runtime, models, enrolled),
+        step_up_configured=runtime.step_up_configured(),
+        models=models,
         enrolled=enrolled,
         mode="guest_mode" if guest.active else "owner_only",
         guest=guest,
@@ -163,6 +214,63 @@ def enroll_begin(
         code = "already_enrolled" if not payload.re_enroll else "not_enrolled"
         return EnrollBeginResponse(
             status="rejected", reason_code=code, message=_msg(code)
+        )
+    runtime.activity.add("voice", "Owner enrollment started", "started")
+    return EnrollBeginResponse(status="ok", session_id=session_id)
+
+
+@router.post("/voice/models/install", response_model=VoiceModelsInstallResponse)
+def voice_models_install(
+    payload: VoiceModelsInstallRequest, runtime: DesktopRuntime = _owner_runtime
+) -> VoiceModelsInstallResponse:
+    """The owner explicitly starts installing the pinned local voice models.
+    Runs in the background; nothing else ever starts it."""
+
+    installer = runtime.voice_installer
+    if installer is None:
+        return VoiceModelsInstallResponse(**_unavailable().model_dump())
+    installer.start()
+    runtime.activity.add("voice", "Voice components install", "started")
+    return VoiceModelsInstallResponse(status="ok", models=_models_info(runtime))
+
+
+@router.post("/voice/identity/setup", response_model=EnrollBeginResponse)
+def owner_setup(
+    payload: OwnerSetupRequest, runtime: DesktopRuntime = _owner_runtime
+) -> EnrollBeginResponse:
+    """First-time owner security setup: store the chosen step-up secret in the
+    Keychain, then begin enrollment with the same grant ``enroll/begin`` uses.
+
+    Only while no step-up secret exists; replacing one stays an admin
+    (terminal) action. The secret is never logged, audited, echoed or kept
+    anywhere but the Keychain and the runtime's in-memory settings."""
+
+    identity = _identity(runtime)
+    if identity is None:
+        return EnrollBeginResponse(**_unavailable().model_dump())
+    secret = payload.step_up.get_secret_value()
+    if secret != payload.confirm.get_secret_value():
+        return EnrollBeginResponse(
+            status="rejected",
+            reason_code="step_up_mismatch",
+            message=_msg("step_up_mismatch"),
+        )
+    outcome = runtime.configure_step_up(secret)
+    if outcome != "ok":
+        runtime.activity.add("permission", "Owner security setup refused", outcome)
+        code = f"step_up_{outcome}"
+        return EnrollBeginResponse(
+            status="rejected", reason_code=code, message=_msg(code)
+        )
+    runtime.activity.add("permission", "Owner security setup", "configured")
+    grant = identity.step_up.mint("enroll")
+    try:
+        session_id = identity.enrollment.begin(grant, re_enroll=False)
+    except (EnrollmentError, AuthorizationError):
+        return EnrollBeginResponse(
+            status="rejected",
+            reason_code="already_enrolled",
+            message=_msg("already_enrolled"),
         )
     runtime.activity.add("voice", "Owner enrollment started", "started")
     return EnrollBeginResponse(status="ok", session_id=session_id)

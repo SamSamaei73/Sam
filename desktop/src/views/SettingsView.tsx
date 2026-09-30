@@ -2,7 +2,7 @@ import type { Capability } from "../bridge/types";
 import { Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
 import { BUILD_INFO } from "../build";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ModelSettings } from "../components/ModelSettings";
 import { EnrollmentDialog, GuestDialog, RemoveProfileDialog } from "../components/IdentityDialogs";
 import { NeonButton } from "../components/primitives";
@@ -48,7 +48,7 @@ function capabilityPill(value: string | undefined, t: (k: "settings.configured" 
 
 export function SettingsView() {
   const { status, connection, prefs, updatePrefs, refreshStatus, identity, refreshIdentity, bridge, t } = useSam();
-  const [dialog, setDialog] = useState<null | "enroll" | "reEnroll" | "remove" | "guest">(null);
+  const [dialog, setDialog] = useState<null | "setup" | "enroll" | "reEnroll" | "remove" | "guest">(null);
   const rows: [string, Capability | undefined, string][] = [
     ["Sam (language model)", status?.agent, "Answers your messages."],
     ["Knowledge", status?.knowledge, "Your documents, kept for this session."],
@@ -98,7 +98,16 @@ export function SettingsView() {
 
       <section className="glass panel" aria-labelledby="owner-h">
         <h3 id="owner-h">{t("settings.ownerVoice")}</h3>
-        {!identity?.available ? (
+        {identity?.setup_state === "models_missing" || identity?.setup_state === "restart_required" ? (
+          <VoiceComponents />
+        ) : identity?.setup_state === "setup_required" ? (
+          <>
+            <p className="muted">{t("setup.body")}</p>
+            <div className="row">
+              <NeonButton onClick={() => setDialog("setup")}>{t("setup.start")}</NeonButton>
+            </div>
+          </>
+        ) : !identity?.available ? (
           <p className="muted">{t("settings.voiceIdentityOff")}</p>
         ) : (
           <>
@@ -196,9 +205,10 @@ export function SettingsView() {
         </p>
       </section>
 
-      {dialog === "enroll" || dialog === "reEnroll" ? (
+      {dialog === "enroll" || dialog === "reEnroll" || dialog === "setup" ? (
         <EnrollmentDialog
           reEnroll={dialog === "reEnroll"}
+          firstTime={dialog === "setup"}
           onClose={() => setDialog(null)}
           onDone={() => void refreshIdentity()}
         />
@@ -322,6 +332,88 @@ function About() {
  * refuses it there anyway). It changes nothing else: no permission, no
  * scheduler, no confirmation.
  */
+/**
+ * The owner-started installer for Sam's pinned local voice models, then the
+ * restart that loads them. Never started automatically; text keeps working
+ * whatever happens here.
+ */
+function VoiceComponents() {
+  const { identity, bridge, refreshIdentity, refreshStatus, t } = useSam();
+  const [error, setError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  const models = identity?.models;
+  const installing = models?.state === "installing";
+  const restartNeeded = identity?.setup_state === "restart_required";
+
+  useEffect(() => {
+    if (!installing && !restarting) return;
+    const timer = window.setInterval(() => {
+      void refreshIdentity();
+      if (restarting) void refreshStatus();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [installing, restarting, refreshIdentity, refreshStatus]);
+
+  useEffect(() => {
+    if (restarting && identity && identity.setup_state !== "restart_required") setRestarting(false);
+  }, [restarting, identity]);
+
+  const install = async () => {
+    setError(null);
+    try {
+      await bridge.installVoiceComponents();
+      await refreshIdentity();
+    } catch {
+      setError(t("voiceSetup.failed"));
+    }
+  };
+  const restart = async () => {
+    setError(null);
+    setRestarting(true);
+    try {
+      await bridge.restartBackend();
+    } catch {
+      setRestarting(false);
+      setError(t("voiceSetup.restartFailed"));
+    }
+  };
+
+  const total = models?.bytes_total ?? 0;
+  const done = models?.bytes_done ?? 0;
+  const percent = total > 0 ? Math.floor((done / total) * 100) : 0;
+  const megabytes = Math.round(total / 1_000_000);
+  return (
+    <div data-testid="voice-components">
+      {restartNeeded ? (
+        <>
+          <p className="muted">{t("voiceSetup.installed")}</p>
+          <div className="row">
+            <NeonButton disabled={restarting} onClick={() => void restart()}>
+              {restarting ? t("voiceSetup.restarting") : t("voiceSetup.restart")}
+            </NeonButton>
+          </div>
+        </>
+      ) : installing ? (
+        <div role="status" aria-live="polite">
+          <p className="muted">{t("voiceSetup.installing")}</p>
+          <progress max={100} value={percent} aria-label={t("voiceSetup.install")} style={{ width: "100%" }} />
+          <p className="faint">{percent}%</p>
+        </div>
+      ) : (
+        <>
+          <p className="muted">{t("voiceSetup.body").replace("{mb}", String(megabytes))}</p>
+          <p className="faint">{t("voiceSetup.source")}</p>
+          {models?.state === "failed" ? <Notice tone="warn">{t("voiceSetup.failed")}</Notice> : null}
+          <div className="row">
+            <NeonButton onClick={() => void install()}>{t("voiceSetup.install")}</NeonButton>
+          </div>
+        </>
+      )}
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+    </div>
+  );
+}
+
 function VoiceActivation() {
   const { status, bridge, refreshStatus, t } = useSam();
   const [busy, setBusy] = useState(false);

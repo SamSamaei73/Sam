@@ -26,19 +26,21 @@ function StepUpField({
   onChange,
   label,
   hint,
+  id = "identity-step-up",
 }: {
   value: string;
   onChange: (value: string) => void;
   label: string;
   hint?: string;
+  id?: string;
 }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label htmlFor="identity-step-up" className="muted">
+      <label htmlFor={id} className="muted">
         {label}
       </label>
       <input
-        id="identity-step-up"
+        id={id}
         className="text-input"
         style={{ marginTop: 6 }}
         type="password"
@@ -57,19 +59,27 @@ function StepUpField({
  * Owner enrollment. The step-up secret is typed by the user, sent once to the
  * backend (which verifies it), and cleared from state immediately after. No
  * recording is stored: each sample is embedded by the backend and dropped.
+ *
+ * ``firstTime``: owner security is not set up yet. The owner CHOOSES the
+ * step-up secret here (typed twice); the backend stores it only in the macOS
+ * Keychain and begins enrollment in the same request, so nothing needs to be
+ * kept for a second call. Both fields are cleared before the request is sent.
  */
 export function EnrollmentDialog({
   reEnroll,
+  firstTime = false,
   onClose,
   onDone,
 }: {
   reEnroll: boolean;
+  firstTime?: boolean;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { bridge, t } = useSam();
   const errorText = useErrorText();
   const [stepUp, setStepUp] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [session, setSession] = useState<string | null>(null);
   const [count, setCount] = useState(0);
   const [needed, setNeeded] = useState(3);
@@ -90,11 +100,15 @@ export function EnrollmentDialog({
 
   const begin = async () => {
     const secret = stepUp;
+    const repeated = confirm;
     setStepUp(""); // never retained after submit
+    setConfirm("");
     setBusy(true);
     setMessage(null);
     try {
-      const result = await bridge.identityEnrollBegin({ stepUp: secret, reEnroll });
+      const result = firstTime
+        ? await bridge.ownerSetup({ stepUp: secret, confirm: repeated })
+        : await bridge.identityEnrollBegin({ stepUp: secret, reEnroll });
       if (result.status === "ok" && result.session_id) {
         setSession(result.session_id);
         setNeeded(result.samples_needed);
@@ -144,7 +158,10 @@ export function EnrollmentDialog({
   };
 
   return (
-    <Modal title={reEnroll ? t("enroll.reTitle") : t("enroll.title")} onClose={onClose}>
+    <Modal
+      title={firstTime ? t("setup.title") : reEnroll ? t("enroll.reTitle") : t("enroll.title")}
+      onClose={onClose}
+    >
       {finished ? (
         <>
           <Notice>{t("enroll.done")}</Notice>
@@ -154,20 +171,41 @@ export function EnrollmentDialog({
         </>
       ) : !session ? (
         <>
-          <p className="muted">{t("enroll.intro")}</p>
-          <StepUpField
-            value={stepUp}
-            onChange={setStepUp}
-            label={t("enroll.stepUp")}
-            hint={t("enroll.stepUpHint")}
-          />
+          <p className="muted">{firstTime ? t("setup.intro") : t("enroll.intro")}</p>
+          {firstTime ? (
+            <>
+              <StepUpField
+                id="setup-step-up"
+                value={stepUp}
+                onChange={setStepUp}
+                label={t("setup.choose")}
+                hint={t("setup.chooseHint")}
+              />
+              <StepUpField
+                id="setup-step-up-confirm"
+                value={confirm}
+                onChange={setConfirm}
+                label={t("setup.confirm")}
+              />
+            </>
+          ) : (
+            <StepUpField
+              value={stepUp}
+              onChange={setStepUp}
+              label={t("enroll.stepUp")}
+              hint={t("enroll.stepUpHint")}
+            />
+          )}
           {message ? <Notice tone="danger">{message}</Notice> : null}
           <div className="dialog-actions">
             <NeonButton variant="quiet" onClick={onClose}>
               {t("common.cancel")}
             </NeonButton>
-            <NeonButton disabled={busy || stepUp.length === 0} onClick={() => void begin()}>
-              {t("enroll.begin")}
+            <NeonButton
+              disabled={busy || stepUp.length === 0 || (firstTime && confirm.length === 0)}
+              onClick={() => void begin()}
+            >
+              {firstTime ? t("setup.continue") : t("enroll.begin")}
             </NeonButton>
           </div>
         </>

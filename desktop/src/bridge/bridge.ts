@@ -40,6 +40,7 @@ import type {
   StatusResponse,
   ToolsResponse,
   VoiceActivationResponse,
+  VoiceComponentsInstallResponse,
   VoiceResponse,
   VoiceWakeResponse,
 } from "./types";
@@ -102,6 +103,16 @@ export interface SamBridge {
     stepUp: string;
     reEnroll: boolean;
   }): Promise<EnrollBeginResponse>;
+  /** The owner explicitly installs Sam's pinned local voice models. */
+  installVoiceComponents(): Promise<VoiceComponentsInstallResponse>;
+  /**
+   * First-time owner security: the chosen step-up secret (and its
+   * confirmation) goes to the backend once, which keeps it only in the macOS
+   * Keychain and begins enrollment. Callers must not retain the values.
+   */
+  ownerSetup(input: { stepUp: string; confirm: string }): Promise<EnrollBeginResponse>;
+  /** Restart Sam's own backend so newly installed voice components load. */
+  restartBackend(): Promise<{ status: string }>;
   identityEnrollSample(
     sessionId: string,
     audioBase64: string,

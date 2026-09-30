@@ -123,6 +123,7 @@ from sam.voice.transcription import TranscriptionProvider
 from sam.voice.wake import WakeRateLimiter
 from sam.voice_identity.providers import SpeakerEmbeddingProvider
 from sam.voice_identity.store import VoiceProfileStore
+from sam.voice_local.install import VoiceModelInstaller, required_models
 
 LOCAL_PRINCIPAL = Principal(kind=PrincipalKind.USER, id="local-user")
 KNOWLEDGE_COLLECTION = "default"
@@ -179,6 +180,9 @@ class DesktopRuntime:
         durable: DurableState | None = None,
         startup: StartupReport | None = None,
         credentials: CredentialReport | None = None,
+        voice_readiness: str = "disabled",
+        voice_installer: VoiceModelInstaller | None = None,
+        step_up_writer: Callable[[str], None] | None = None,
     ) -> None:
         self.settings = settings
         # Phase 17: durable state (None = in-memory development / tests) and
@@ -186,6 +190,14 @@ class DesktopRuntime:
         self.durable = durable
         self.startup = startup or StartupReport()
         self.credentials = credentials
+        # In-app owner setup: why local voice is (un)available, the
+        # owner-started model installer, and a WRITE-ONLY capability that can
+        # store exactly one credential (the step-up secret) in the Keychain,
+        # once. This is still not a credential provider: nothing reachable
+        # from the runtime can read, list or change any other credential.
+        self.voice_readiness = voice_readiness
+        self.voice_installer = voice_installer
+        self._step_up_writer = step_up_writer
         self.owner_settings: OwnerSettingsStore = (
             durable.owner_settings if durable is not None else InMemoryOwnerSettings()
         )
@@ -425,6 +437,40 @@ class DesktopRuntime:
             count += 1
             self._step_up_failures[key] = (count, now)
             return "locked" if count >= MAX_STEP_UP_ATTEMPTS else "failed"
+
+    def step_up_configured(self) -> bool:
+        return self.settings.desktop_step_up_secret is not None
+
+    def configure_step_up(self, value: str) -> str:
+        """First-time owner setup of the step-up secret, from the app.
+
+        Allowed only while NO step-up secret exists (replacing one requires the
+        admin CLI, i.e. local terminal access, exactly as before). The value is
+        stored through the Keychain boundary and then held only in these
+        in-memory settings, like a secret resolved at startup. It is never
+        logged, audited, persisted elsewhere or returned. Returns ``ok`` |
+        ``already_set`` | ``unavailable`` | ``too_short`` | ``store_error``.
+        """
+
+        from pydantic import SecretStr
+
+        from sam.system.secrets import MIN_STEP_UP_CHARS, SecretUnavailable
+
+        with self._step_up_lock:
+            if self.settings.desktop_step_up_secret is not None:
+                return "already_set"
+            if self._step_up_writer is None:
+                return "unavailable"
+            if len(value) < MIN_STEP_UP_CHARS or not value.strip():
+                return "too_short"
+            try:
+                self._step_up_writer(value)
+            except SecretUnavailable:
+                return "store_error"
+            self.settings = self.settings.model_copy(
+                update={"desktop_step_up_secret": SecretStr(value)}
+            )
+            return "ok"
 
     def warm_wake_recognizer(self) -> None:
         """Load the local wake recognizer in the background (no download)."""
@@ -816,6 +862,8 @@ def build_desktop_runtime(
     startup: StartupReport | None = None,
     credentials: CredentialReport | None = None,
     wake_transcriber: TranscriptionProvider | None = None,
+    voice_installer: VoiceModelInstaller | None = None,
+    step_up_writer: Callable[[str], None] | None = None,
 ) -> DesktopRuntime:
     """Compose the runtime from trusted configuration.
 
@@ -843,13 +891,18 @@ def build_desktop_runtime(
                 speech_provider = gemini_provider
             else:
                 extra_speech_providers.append(gemini_provider)
+    voice_readiness = "ready" if speaker_embedder is not None else "disabled"
     if (
         speaker_embedder is None
         and profile_store is None
         and transcription_provider is None
         and settings.voice_identity_enabled
     ):
-        from sam.voice_local.factory import local_voice_from_settings
+        from sam.voice_local.factory import (
+            local_voice_from_settings,
+            local_voice_readiness,
+        )
+        from sam.voice_local.registry import default_model_root
 
         stack = local_voice_from_settings(settings)
         if stack is not None:
@@ -857,6 +910,20 @@ def build_desktop_runtime(
             profile_store = stack.store
             transcription_provider = stack.transcriber
             local_wake = stack.transcriber
+            voice_readiness = "ready"
+        else:
+            voice_readiness = local_voice_readiness(settings)
+        if voice_installer is None and voice_readiness in (
+            "ready",
+            "models_missing",
+        ):
+            # Knows only where the pinned models go; installs nothing unless
+            # the owner explicitly starts it from the app.
+            voice_installer = VoiceModelInstaller(
+                default_model_root(),
+                required_models(settings),
+                installed=voice_readiness != "models_missing",
+            )
     if transcription_provider is not None:
         # Lets the user's language preference nudge the recognizer, per request.
         transcription_provider = HintedTranscriptionProvider(transcription_provider)
@@ -882,6 +949,9 @@ def build_desktop_runtime(
         durable=durable,
         startup=startup,
         credentials=credentials,
+        voice_readiness=voice_readiness,
+        voice_installer=voice_installer,
+        step_up_writer=step_up_writer,
     )
     # Wake detection needs owner identity too: without it no turn could ever
     # be verified, so there is nothing to wake for.

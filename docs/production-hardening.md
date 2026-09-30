@@ -492,6 +492,7 @@ confirmation. Durable persistence alone never enables an adapter.
 | `models/providers/claude_subscription.py` | local `claude` CLI (subprocess) | bounded | owner's own subscription login | no API key |
 | `agent/claude.py` | `api.anthropic.com` | SDK timeout | Anthropic key | paid API client, **not wired** (PAID_FALLBACK off) |
 | `voice_local/setup.py` | `huggingface.co` | explicit model setup only | none | never at request time |
+| `voice_local/install.py` | `huggingface.co`, redirects only to `*.hf.co` | connect 15 s / read 60 s, 1 h overall deadline; manual HTTPS-only redirects (max 5); no retry; `trust_env=False` | none | owner-started from the app only; pinned commit + size + SHA-256; staged, atomic |
 | desktop shell (Rust, `ureq`) | `127.0.0.1` only | fixed; no redirects, no proxy, no TLS stack | bridge token | loopback bridge |
 
 A test enforces that only the reviewed provider modules import a network

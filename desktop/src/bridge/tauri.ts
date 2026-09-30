@@ -58,6 +58,9 @@ export const tauriBridge: SamBridge = {
   identityStatus: () => call("sam_identity_status"),
   identityEnrollBegin: ({ stepUp, reEnroll }) =>
     call("sam_identity_enroll_begin", { stepUp, reEnroll }),
+  installVoiceComponents: () => call("sam_voice_models_install"),
+  ownerSetup: ({ stepUp, confirm }) => call("sam_owner_setup", { stepUp, confirm }),
+  restartBackend: () => call("sam_restart_backend"),
   identityEnrollSample: (sessionId, audioBase64) =>
     call("sam_identity_enroll_sample", { sessionId, audioBase64 }),
   identityEnrollComplete: (sessionId) =>

@@ -124,6 +124,13 @@ def create_app(
             durable=durable,
             startup=report,
             credentials=credentials,
+            # Write-only, one credential: lets the owner set the step-up secret
+            # the first time from the app. Absent unless the Keychain opened.
+            step_up_writer=(
+                (lambda value: store.set("desktop_step_up_secret", value))
+                if store is not None and keychain_status == "ok"
+                else None
+            ),
         )
         if desktop
         else None

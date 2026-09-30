@@ -230,8 +230,33 @@ export interface GuestInfo {
 }
 
 /** Everything Settings may show about owner voice identity. */
+/** The owner's voice setup stage. Each has its own message and action. */
+export type VoiceSetupState =
+  | "voice_unavailable"
+  | "models_missing"
+  | "restart_required"
+  | "setup_required"
+  | "not_enrolled"
+  | "enrolled";
+
+/** The owner-started local model installer. Content-free: no URL or path. */
+export interface VoiceModelsInfo {
+  state: "not_installed" | "installing" | "installed" | "failed" | "unavailable";
+  bytes_done: number;
+  bytes_total: number;
+  reason_code: string | null;
+}
+
+export interface VoiceComponentsInstallResponse extends OperationResult {
+  models: VoiceModelsInfo;
+}
+
 export interface IdentityStatus {
   available: boolean;
+  setup_state: VoiceSetupState;
+  /** Whether owner security (the step-up secret) is set. Never the value. */
+  step_up_configured: boolean;
+  models: VoiceModelsInfo;
   /** null: the secure store could not be read. */
   enrolled: boolean | null;
   mode: "owner_only" | "guest_mode";

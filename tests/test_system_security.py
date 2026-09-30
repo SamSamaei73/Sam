@@ -182,6 +182,8 @@ NETWORK_MODULES = {
     "models/providers/gemini.py",  # generativelanguage.googleapis.com
     "tts/fish_audio.py",  # api.fish.audio
     "tts/gemini_tts.py",  # generativelanguage.googleapis.com
+    # huggingface.co (+ *.hf.co CDN), pinned files only, owner-started only
+    "voice_local/install.py",
 }
 NETWORK_LIBS = {
     "httpx",

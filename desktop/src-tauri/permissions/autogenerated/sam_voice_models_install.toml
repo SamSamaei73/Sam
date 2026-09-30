@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-voice-models-install"
+description = "Enables the sam_voice_models_install command without any pre-configured scope."
+commands.allow = ["sam_voice_models_install"]
+
+[[permission]]
+identifier = "deny-sam-voice-models-install"
+description = "Denies the sam_voice_models_install command without any pre-configured scope."
+commands.deny = ["sam_voice_models_install"]

@@ -119,6 +119,24 @@ class VoiceActivationRequest(_Request):
     enabled: bool
 
 
+class VoiceModelsInstallRequest(_Request):
+    """The owner explicitly starts downloading Sam's pinned voice models. No
+    model, URL, file or size can be named: the trusted registry decides."""
+
+    accept: Literal[True]
+
+
+class OwnerSetupRequest(_Request):
+    """First-time owner security setup from the app: choose the step-up secret
+    (stored only in the Keychain) and begin voice enrollment in one request,
+    so the app never has to hold the secret for a second call. The 16-char
+    minimum is enforced by the route (a content-free ``step_up_too_short``),
+    never by a validation error that could echo the rejected value."""
+
+    step_up: SecretStr = Field(min_length=1, max_length=256)
+    confirm: SecretStr = Field(min_length=1, max_length=256)
+
+
 class EnrollBeginRequest(_Request):
     """Start (or restart) owner enrollment. ``step_up`` is the backend-verified
     Phase 11 authentication secret; a voice match can never stand in for it."""
@@ -403,10 +421,38 @@ class GuestInfo(BaseModel):
     seconds_remaining: int = 0
 
 
+class VoiceModelsInfo(BaseModel):
+    """The owner-started model installer. Content-free: no URL or path."""
+
+    state: Literal[
+        "not_installed", "installing", "installed", "failed", "unavailable"
+    ] = "unavailable"
+    bytes_done: int = 0
+    bytes_total: int = 0
+    reason_code: str | None = None
+
+
+VoiceSetupState = Literal[
+    "voice_unavailable",  # voice identity off, unsupported, or Keychain unusable
+    "models_missing",  # the trusted local models are not installed
+    "restart_required",  # models just installed; Sam restarts its backend
+    "setup_required",  # no step-up secret yet: owner security setup needed
+    "not_enrolled",  # ready to enroll the owner's voice
+    "enrolled",  # the owner's voice profile exists
+]
+
+
+class VoiceModelsInstallResponse(OperationResult):
+    models: VoiceModelsInfo = VoiceModelsInfo()
+
+
 class IdentityStatusResponse(BaseModel):
     """Everything the Settings screen may show about voice identity."""
 
     available: bool
+    setup_state: VoiceSetupState = "voice_unavailable"
+    step_up_configured: bool = False
+    models: VoiceModelsInfo = VoiceModelsInfo()
     enrolled: bool | None = None  # None: the secure store could not be read
     mode: Literal["owner_only", "guest_mode"] = "owner_only"
     guest: GuestInfo = GuestInfo(active=False)

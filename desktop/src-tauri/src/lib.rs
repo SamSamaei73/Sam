@@ -25,6 +25,7 @@ use tauri::State;
 
 pub struct AppState {
     backend: Arc<BackendSlot>,
+    owned: Arc<Mutex<Owned>>,
 }
 
 type CommandResult = Result<Value, String>;
@@ -225,6 +226,58 @@ fn sam_voice_wake(state: State<'_, AppState>, audio_base64: String) -> CommandRe
         Route::VoiceWake,
         Some(json!({ "audio_base64": audio_base64 })),
     )
+}
+
+/// The owner explicitly starts installing Sam's pinned local voice models.
+/// There is no argument: which models, from where, and their hashes are
+/// decided by the backend's trusted registry alone.
+#[tauri::command]
+fn sam_voice_models_install(state: State<'_, AppState>) -> CommandResult {
+    run(
+        &state,
+        Route::VoiceModelsInstall,
+        Some(json!({ "accept": true })),
+    )
+}
+
+/// First-time owner security setup: the chosen step-up secret (twice) goes
+/// to the backend, which stores it only in the Keychain and begins voice
+/// enrollment. Not stored or logged here.
+#[tauri::command]
+fn sam_owner_setup(state: State<'_, AppState>, step_up: String, confirm: String) -> CommandResult {
+    invalid(validate::required_step_up(&step_up))?;
+    invalid(validate::required_step_up(&confirm))?;
+    run(
+        &state,
+        Route::OwnerSetup,
+        Some(json!({ "step_up": step_up, "confirm": confirm })),
+    )
+}
+
+/// Restart Sam's own backend so newly installed, verified voice components
+/// are composed by the normal startup path (never hot-wired into a running
+/// backend). Release builds only: a development build talks to the
+/// developer's backend and is left alone.
+#[tauri::command]
+fn sam_restart_backend(state: State<'_, AppState>) -> CommandResult {
+    if cfg!(debug_assertions) {
+        return Ok(json!({ "status": "not_configured" }));
+    }
+    let previous = {
+        let Ok(mut guard) = state.owned.lock() else {
+            return Err("unavailable".to_string());
+        };
+        if guard.exiting {
+            return Err("unavailable".to_string());
+        }
+        guard.sidecar.take()
+    };
+    state.backend.set(Slot::Starting);
+    if let Some(mut sidecar) = previous {
+        sidecar.stop();
+    }
+    start_backend(state.backend.clone(), state.owned.clone());
+    Ok(json!({ "status": "ok" }))
 }
 
 /// The owner-only hands-free switch (the backend refuses it in Guest Mode).
@@ -1040,7 +1093,10 @@ fn start_backend(slot: Arc<BackendSlot>, owned: Arc<Mutex<Owned>>) {
                 sidecar.port,
                 Some(sidecar.token.clone()),
             )));
-            guard.sidecar = Some(sidecar);
+            // Never leave an earlier backend behind (e.g. two restarts).
+            if let Some(mut previous) = guard.sidecar.replace(sidecar) {
+                previous.stop();
+            }
         }
         Err(_) => slot.set(Slot::Failed),
     });
@@ -1062,7 +1118,10 @@ pub fn run_app() {
     let owned = Arc::new(Mutex::new(Owned::default()));
     start_backend(slot.clone(), owned.clone());
     tauri::Builder::default()
-        .manage(AppState { backend: slot })
+        .manage(AppState {
+            backend: slot,
+            owned: owned.clone(),
+        })
         .invoke_handler(tauri::generate_handler![
             sam_status,
             sam_chat,
@@ -1112,6 +1171,9 @@ pub fn run_app() {
             sam_career_preferences,
             sam_voice_wake,
             sam_voice_activation,
+            sam_voice_models_install,
+            sam_owner_setup,
+            sam_restart_backend,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Sam desktop")

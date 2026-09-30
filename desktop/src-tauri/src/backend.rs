@@ -81,11 +81,13 @@ pub enum Route {
     CareerPreferences,
     VoiceWake,
     VoiceActivation,
+    VoiceModelsInstall,
+    OwnerSetup,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 48] = [
+    pub const ALL: [Route; 50] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -134,6 +136,8 @@ impl Route {
         Route::CareerPreferences,
         Route::VoiceWake,
         Route::VoiceActivation,
+        Route::VoiceModelsInstall,
+        Route::OwnerSetup,
     ];
 
     pub fn path(self) -> &'static str {
@@ -186,6 +190,8 @@ impl Route {
             Route::CareerPreferences => "/desktop/v1/career/preferences",
             Route::VoiceWake => "/desktop/v1/voice/wake",
             Route::VoiceActivation => "/desktop/v1/voice/activation",
+            Route::VoiceModelsInstall => "/desktop/v1/voice/models/install",
+            Route::OwnerSetup => "/desktop/v1/voice/identity/setup",
         }
     }
 
@@ -489,7 +495,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 48);
+        assert_eq!(paths.len(), 50);
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));

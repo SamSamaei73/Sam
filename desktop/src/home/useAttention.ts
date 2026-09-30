@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { StatusResponse } from "../bridge/types";
+import type { StatusResponse, VoiceSetupState } from "../bridge/types";
 import type { ConnectionState } from "../state";
 import { useSession } from "../session";
 import { useSam } from "../state";
@@ -74,7 +74,8 @@ export function useAttention(): { items: AttentionItem[]; nextUp: NextUp | null 
 
   const voice = {
     micDenied: handsFree.micDenied,
-    needsSetup: handsFree.needsSetup && handsFree.activation === "on",
+    needsSetup: handsFree.needsSetup,
+    setupState: handsFree.setupState,
   };
   return {
     items: attentionItems(status, connection, identity?.last_verification ?? null, reviews, unread, voice),
@@ -88,7 +89,10 @@ export function attentionItems(
   verification: string | null,
   reviews: number,
   unread: number,
-  voice: { micDenied: boolean; needsSetup: boolean } = { micDenied: false, needsSetup: false },
+  voice: { micDenied: boolean; needsSetup: boolean; setupState?: VoiceSetupState | null } = {
+    micDenied: false,
+    needsSetup: false,
+  },
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
   if (connection === "unavailable") {
@@ -124,7 +128,15 @@ export function attentionItems(
     });
   }
   if (voice.needsSetup) {
-    items.push({ id: "voice-setup", label: "Set up your voice for hands-free Sam", tone: "info", target: "settings" });
+    const label =
+      voice.setupState === "models_missing"
+        ? "Install voice components"
+        : voice.setupState === "restart_required"
+          ? "Finish voice setup: restart Sam's engine"
+          : voice.setupState === "setup_required"
+            ? "Set up owner security and your voice"
+            : "Set up your voice for hands-free Sam";
+    items.push({ id: "voice-setup", label, tone: "info", target: "settings" });
   }
   if (verification === "not_verified") {
     items.push({ id: "owner", label: "Owner verification required", tone: "warn", target: "settings" });

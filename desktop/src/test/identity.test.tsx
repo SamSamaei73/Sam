@@ -16,10 +16,12 @@ const available: IdentityStatus = {
   ...baseIdentity,
   available: true,
   enrolled: false,
+  setup_state: "not_enrolled",
+  step_up_configured: true,
   speaker_model: "configured",
   local_stt: "configured",
 };
-const enrolled: IdentityStatus = { ...available, enrolled: true };
+const enrolled: IdentityStatus = { ...available, enrolled: true, setup_state: "enrolled" };
 const guestActive: IdentityStatus = {
   ...enrolled,
   mode: "guest_mode",

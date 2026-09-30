@@ -30,6 +30,28 @@ class LocalVoiceStack:
     transcriber: TranscriptionProvider
 
 
+def local_voice_readiness(settings: Settings, model_root: Path | None = None) -> str:
+    """Why the local voice stack is or is not available, for the owner's
+    setup screen: ``disabled`` | ``models_missing`` | ``keychain_unavailable``
+    | ``ready``. Looks only at the pinned model files and whether the Keychain
+    backend can be opened; never at a profile, template or secret."""
+
+    if not settings.voice_identity_enabled or sys.platform != "darwin":
+        return "disabled"
+    root = model_root or default_model_root()
+    stt = stt_model(settings.local_stt_model)
+    if not (
+        verify_model(model_dir(root, SPEAKER_MODEL), SPEAKER_MODEL)
+        and verify_model(model_dir(root, stt), stt)
+    ):
+        return "models_missing"
+    try:
+        MacOSKeychainVoiceProfileStore()
+    except Exception:
+        return "keychain_unavailable"
+    return "ready"
+
+
 def local_voice_from_settings(
     settings: Settings, model_root: Path | None = None
 ) -> LocalVoiceStack | None:
@@ -53,4 +75,4 @@ def local_voice_from_settings(
     )
 
 
-__all__ = ["LocalVoiceStack", "local_voice_from_settings"]
+__all__ = ["LocalVoiceStack", "local_voice_from_settings", "local_voice_readiness"]

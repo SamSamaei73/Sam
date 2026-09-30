@@ -11,6 +11,8 @@ import { bytesToBase64, encodeWav } from "../lib/wav";
 import type {
   ActivityItem,
   IdentityStatus,
+  VoiceModelsInfo,
+  VoiceSetupState,
   ProviderPreferences,
   ProvidersStatus,
   ProviderStatus,
@@ -42,8 +44,17 @@ const iso = () => new Date().toISOString();
  * voice (voice input on; a slow reply; audible synthesized speech), guest,
  * attention (items waiting for the owner) and degraded (no language model).
  */
-type Fixture = "voice" | "handsfree" | "stranger" | "guest" | "attention" | "degraded" | "setup" | null;
-const FIXTURES = ["voice", "handsfree", "stranger", "guest", "attention", "degraded", "setup"] as const;
+type Fixture =
+  | "voice"
+  | "handsfree"
+  | "stranger"
+  | "guest"
+  | "attention"
+  | "degraded"
+  | "setup"
+  | "firstrun"
+  | null;
+const FIXTURES = ["voice", "handsfree", "stranger", "guest", "attention", "degraded", "setup", "firstrun"] as const;
 function fixtureFromUrl(): Fixture {
   const value = new URLSearchParams(globalThis.location?.search ?? "").get("fixture");
   return (FIXTURES as readonly string[]).includes(value ?? "") ? (value as Fixture) : null;
@@ -138,16 +149,36 @@ export function demoBridge(): SamBridge {
     paid_fallback: "off",
     max_provider_attempts: 2,
   });
+  // First run: no local voice models, no owner security, nobody enrolled.
+  const firstRun = fixture === "firstrun";
+  const MODEL_BYTES = 569_529_058; // the pinned speaker + small Whisper files
   const identity = {
     enrolled: fixture === "guest" || fixture === "attention" || handsFree,
     samples: 0,
     session: null as string | null,
     guestUntil: fixture === "guest" ? Date.now() + 15 * 60_000 : 0,
+    modelsReady: !firstRun,
+    modelState: (firstRun ? "not_installed" : "installed") as VoiceModelsInfo["state"],
+    modelBytes: firstRun ? 0 : MODEL_BYTES,
+    stepUp: !firstRun,
+  };
+  const setupState = (): VoiceSetupState => {
+    if (!identity.modelsReady) return identity.modelState === "installed" ? "restart_required" : "models_missing";
+    if (identity.enrolled) return "enrolled";
+    return identity.stepUp ? "not_enrolled" : "setup_required";
   };
   const snapshot = (): IdentityStatus => {
     const remaining = Math.max(0, Math.round((identity.guestUntil - Date.now()) / 1000));
     return {
-      available: true,
+      available: identity.modelsReady,
+      setup_state: setupState(),
+      step_up_configured: identity.stepUp,
+      models: {
+        state: identity.modelState,
+        bytes_done: identity.modelBytes,
+        bytes_total: MODEL_BYTES,
+        reason_code: null,
+      },
       enrolled: identity.enrolled,
       mode: remaining > 0 ? "guest_mode" : "owner_only",
       guest: { active: remaining > 0, seconds_remaining: remaining },
@@ -423,6 +454,35 @@ export function demoBridge(): SamBridge {
       identity.session = `enroll-${Date.now()}`;
       identity.samples = 0;
       return { ...empty, status: "ok", session_id: identity.session, samples_needed: 3 };
+    },
+    async installVoiceComponents() {
+      await wait(80);
+      if (identity.modelState !== "installed" && identity.modelState !== "installing") {
+        identity.modelState = "installing";
+        identity.modelBytes = 0;
+        const step = () => {
+          identity.modelBytes = Math.min(MODEL_BYTES, identity.modelBytes + MODEL_BYTES / 8);
+          if (identity.modelBytes >= MODEL_BYTES) identity.modelState = "installed";
+          else window.setTimeout(step, 250);
+        };
+        window.setTimeout(step, 250);
+      }
+      return { ...empty, status: "ok", models: snapshot().models };
+    },
+    async ownerSetup({ stepUp, confirm }) {
+      await wait(150);
+      if (stepUp !== confirm) return { ...empty, status: "rejected", reason_code: "step_up_mismatch", message: "The two entries don't match.", session_id: null, samples_needed: 3 };
+      if (stepUp.trim().length < 16) return { ...empty, status: "rejected", reason_code: "step_up_too_short", message: "Use at least 16 characters.", session_id: null, samples_needed: 3 };
+      if (identity.stepUp) return { ...empty, status: "rejected", reason_code: "step_up_already_set", message: "Owner security is already set up.", session_id: null, samples_needed: 3 };
+      identity.stepUp = true;
+      identity.session = `enroll-${Date.now()}`;
+      identity.samples = 0;
+      return { ...empty, status: "ok", session_id: identity.session, samples_needed: 3 };
+    },
+    async restartBackend() {
+      await wait(300);
+      if (identity.modelState === "installed") identity.modelsReady = true;
+      return { status: "ok" };
     },
     async identityEnrollSample() {
       await wait(250);

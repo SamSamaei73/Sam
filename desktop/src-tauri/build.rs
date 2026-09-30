@@ -49,6 +49,9 @@ const COMMANDS: &[&str] = &[
     "sam_career_preferences",
     "sam_voice_wake",
     "sam_voice_activation",
+    "sam_voice_models_install",
+    "sam_owner_setup",
+    "sam_restart_backend",
 ];
 
 fn main() {

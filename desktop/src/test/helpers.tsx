@@ -45,6 +45,9 @@ export const baseStatus: StatusResponse = {
 
 export const baseIdentity: IdentityStatus = {
   available: false,
+  setup_state: "voice_unavailable",
+  step_up_configured: false,
+  models: { state: "unavailable", bytes_done: 0, bytes_total: 0, reason_code: null },
   enrolled: null,
   mode: "owner_only",
   guest: { active: false, seconds_remaining: 0 },
@@ -235,6 +238,12 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
     })),
     identityStatus: vi.fn(async () => baseIdentity),
     identityEnrollBegin: vi.fn(async () => ({ ...ok, session_id: "enroll-1", samples_needed: 3 })),
+    installVoiceComponents: vi.fn(async () => ({
+      ...ok,
+      models: { state: "installing" as const, bytes_done: 0, bytes_total: 100, reason_code: null },
+    })),
+    ownerSetup: vi.fn(async () => ({ ...ok, session_id: "enroll-1", samples_needed: 3 })),
+    restartBackend: vi.fn(async () => ({ status: "ok" })),
     identityEnrollSample: vi.fn(async () => ({ ...ok, accepted: true, sample_count: 1, samples_needed: 3 })),
     identityEnrollComplete: vi.fn(async () => ok),
     identityEnrollCancel: vi.fn(async () => ok),

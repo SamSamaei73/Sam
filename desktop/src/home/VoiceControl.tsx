@@ -81,7 +81,11 @@ export function VoiceControl({ onType, onSetup }: { onType: () => void; onSetup:
           </span>
         ) : hf.needsSetup ? (
           <button type="button" className="link-button setup-link" onClick={onSetup}>
-            {t("home.setupVoice")}
+            {hf.setupState === "models_missing"
+              ? t("home.installVoice")
+              : hf.setupState === "restart_required"
+                ? t("home.finishVoice")
+                : t("home.setupVoice")}
           </button>
         ) : session.micAvailable ? (
           hf.activation === "off" ? t("home.pushToTalk") : t("home.talk")

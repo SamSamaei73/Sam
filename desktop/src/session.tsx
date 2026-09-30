@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { BridgeError, toBridgeError } from "./bridge/bridge";
-import type { OperationResult, ResponseLanguage } from "./bridge/types";
+import type { OperationResult, ResponseLanguage, VoiceSetupState } from "./bridge/types";
 import type { ChatMessage } from "./components/MessageBubble";
 import { playSynthesizedAudio, type Playback } from "./lib/audioPlayback";
 import { detectLanguage } from "./lib/language";
@@ -63,8 +63,10 @@ export interface HandsFreeInfo {
   active: boolean;
   phase: HandsFreePhase;
   activation: "on" | "off" | "unavailable";
-  /** Voice activation exists but Sam doesn't know the owner's voice yet. */
+  /** The owner's voice isn't ready yet (models, owner security or enrollment). */
   needsSetup: boolean;
+  /** Which setup step comes next (drives the Home hint and Action Required). */
+  setupState: VoiceSetupState | null;
   /** macOS microphone access was refused (not a Sam permission). */
   micDenied: boolean;
 }
@@ -470,7 +472,15 @@ export function SessionProvider({
 
   const activation = status?.voice_activation ?? "unavailable";
   const enrolled = identity?.available === true && identity.enrolled === true;
-  const needsSetup = activation !== "unavailable" && identity?.available === true && identity.enrolled !== true;
+  // Owner voice setup still to do: its own state, never a generic block. Not
+  // offered in Guest Mode (a guest can't set up or change the owner's voice).
+  const setupState: VoiceSetupState | null =
+    identity && identity.mode !== "guest_mode" && identity.setup_state !== "enrolled"
+      ? identity.setup_state === "voice_unavailable"
+        ? null
+        : identity.setup_state
+      : null;
+  const needsSetup = setupState !== null;
   const handsFreeOn =
     activation === "on" &&
     enrolled &&
@@ -736,7 +746,7 @@ export function SessionProvider({
       speak,
       stopSpeaking,
       profileFor,
-      handsFree: { active: phase !== "off", phase, activation, needsSetup, micDenied },
+      handsFree: { active: phase !== "off", phase, activation, needsSetup, setupState, micDenied },
       setHomeActive,
       wakeNow,
       sleepNow,
@@ -747,6 +757,7 @@ export function SessionProvider({
       phase,
       activation,
       needsSetup,
+      setupState,
       micDenied,
       wakeNow,
       sleepNow,
