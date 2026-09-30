@@ -292,6 +292,7 @@ def proactive_overview(
         ),
         live_runs=data.live_runs,
         scheduler_enabled=data.scheduler_enabled,
+        scheduler_persistent=runtime.owner_settings.scheduler_persistent(),
     )
 
 
@@ -394,11 +395,17 @@ def proactive_run(
 def proactive_scheduler(
     payload: ProactiveSchedulerRequest, runtime: DesktopRuntime = _owner_runtime
 ) -> ProactiveSchedulerResponse:
-    """The owner-only switch for background scheduling (off by default and after
-    every restart). Guest Mode is refused before this body is read. Turning it on
-    grants no permission: every run is still authorized on its own."""
+    """The owner-only switch for background scheduling (off by default). Guest
+    Mode is refused before this body is read. Turning it on grants no
+    permission: every run is still authorized on its own. It stays on after a
+    restart ONLY if the owner explicitly asks (``remember``); turning it off
+    always clears that."""
 
     result = runtime.proactive.set_scheduler_enabled(runtime.principal, payload.enabled)
+    if result.ok:
+        runtime.owner_settings.set_scheduler_persistent(
+            payload.enabled and payload.remember
+        )
     runtime.activity.add(
         "proactive",
         "Automations scheduling on"
@@ -408,7 +415,9 @@ def proactive_scheduler(
     )
     base = _operation(runtime, result)
     return ProactiveSchedulerResponse(
-        **base.model_dump(), scheduler_enabled=runtime.proactive.scheduler_enabled
+        **base.model_dump(),
+        scheduler_enabled=runtime.proactive.scheduler_enabled,
+        scheduler_persistent=runtime.owner_settings.scheduler_persistent(),
     )
 
 

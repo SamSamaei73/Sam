@@ -8,9 +8,12 @@ const CAPABILITY: &str = include_str!("../capabilities/default.json");
 const BUILD_RS: &str = include_str!("../build.rs");
 const LIB_RS: &str = include_str!("lib.rs");
 const BACKEND_RS: &str = include_str!("backend.rs");
+const SIDECAR_RS: &str = include_str!("sidecar.rs");
+const MAIN_RS: &str = include_str!("main.rs");
 const CARGO: &str = include_str!("../Cargo.toml");
+const BACKEND_PATHS: &str = include_str!("../../../src/sam/storage/paths.py");
 
-const COMMANDS: [&str; 46] = [
+const COMMANDS: [&str; 48] = [
     "sam_status",
     "sam_chat",
     "sam_knowledge_list",
@@ -57,6 +60,8 @@ const COMMANDS: [&str; 46] = [
     "sam_career_outreach",
     "sam_career_send",
     "sam_career_preferences",
+    "sam_voice_wake",
+    "sam_voice_activation",
 ];
 
 fn conf() -> Value {
@@ -109,6 +114,23 @@ fn capability_has_no_broad_plugin_or_core_permissions() {
     }
 }
 
+/// Phase 17: the bundle identity is the backend's data-directory identity
+/// (``~/Library/Application Support/app.sam.desktop``), and a release build
+/// uses the bundled frontend, never a development server.
+#[test]
+fn app_identity_matches_the_backend_data_directory_and_release_needs_no_dev_server() {
+    let c = conf();
+    assert_eq!(c["identifier"], "app.sam.desktop");
+    assert!(BACKEND_PATHS.contains("APP_IDENTIFIER = \"app.sam.desktop\""));
+    assert_eq!(c["build"]["frontendDist"], "../dist");
+    assert!(c["build"]["devUrl"]
+        .as_str()
+        .unwrap()
+        .starts_with("http://127.0.0.1:"));
+    assert!(c["app"].get("devtools").is_none());
+    assert!(!CARGO.contains("devtools"));
+}
+
 #[test]
 fn csp_is_restrictive_and_has_no_remote_sources() {
     let csp = conf()["app"]["security"]["csp"]
@@ -158,7 +180,7 @@ fn build_script_declares_the_same_command_list_as_the_handler() {
             "handler missing {command}"
         );
     }
-    assert_eq!(BUILD_RS.matches("\"sam_").count(), 46);
+    assert_eq!(BUILD_RS.matches("\"sam_").count(), 48);
 }
 
 #[test]
@@ -185,7 +207,7 @@ fn no_generic_or_privileged_commands_exist() {
             "backend.rs must not contain {banned}"
         );
     }
-    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 46);
+    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 48);
 }
 
 /// The ONLY exception to the "no URL arguments" rule, reviewed for Phase 16:
@@ -324,4 +346,82 @@ fn tauri_dependency_does_not_enable_devtools_or_extra_features() {
     assert!(CARGO.contains("tauri = { version = \"2\", features = [] }"));
     assert!(!CARGO.contains("devtools"));
     assert!(!CARGO.contains("protocol-asset"));
+}
+
+/// Phase 17 remediation: the ONLY process the app ever starts is its own
+/// bundled backend, by argv, with a cleared environment and no credential.
+#[test]
+fn the_backend_is_spawned_only_by_the_sidecar_with_fixed_argv_and_clean_env() {
+    // Production code only: no comments, no unit tests.
+    let code: String = SIDECAR_RS
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap()
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(SIDECAR_RS.matches("Command::new(").count(), 1);
+    for source in [LIB_RS, BACKEND_RS, MAIN_RS] {
+        assert!(
+            !source.contains("Command::new"),
+            "only sidecar.rs may spawn"
+        );
+    }
+    assert!(SIDECAR_RS.contains("Command::new(python)"));
+    assert!(SIDECAR_RS.contains(r#".args(["-I", "-B", "-m", BACKEND_MODULE])"#));
+    assert!(SIDECAR_RS.contains(r#"pub const BACKEND_MODULE: &str = "sam.system.backend";"#));
+    assert!(SIDECAR_RS.contains(".env_clear()"));
+    assert!(SIDECAR_RS.contains(r#".env("APP_ENV", "production")"#));
+    assert!(SIDECAR_RS.contains(".stdout(Stdio::null())"));
+    assert!(SIDECAR_RS.contains(".stderr(Stdio::null())"));
+    assert!(SIDECAR_RS.contains("Resources/backend/python/bin/python3.12"));
+    assert!(SIDECAR_RS.contains("if !python.starts_with(&contents)"));
+    for banned in [
+        "\"/bin/sh\"",
+        "\"sh\"",
+        "bash",
+        "\"-c\"",
+        "API_KEY",
+        "GEMINI",
+        "ANTHROPIC",
+        "FISH",
+        "PYTHONPATH",
+        "reload",
+        "0.0.0.0",
+        ".venv",
+    ] {
+        assert!(!code.contains(banned), "sidecar must not contain {banned}");
+    }
+}
+
+/// A release build owns its backend and never falls back to an
+/// environment-configured (developer) backend.
+#[test]
+fn release_builds_never_use_an_environment_configured_backend() {
+    let start = LIB_RS.find("fn start_backend(").expect("start_backend");
+    let body = &LIB_RS[start..start + LIB_RS[start..].find("\n}\n").unwrap()];
+    assert_eq!(body.matches("Backend::from_env()").count(), 1);
+    let debug = body.find("if cfg!(debug_assertions)").expect("debug gate");
+    let from_env = body.find("Backend::from_env()").unwrap();
+    let release = body.find("sidecar::start_owned()").expect("owned backend");
+    assert!(debug < from_env && from_env < release);
+    assert!(body.contains("Err(_) => slot.set(Slot::Failed)"));
+    assert_eq!(LIB_RS.matches("Backend::from_env()").count(), 1);
+}
+
+/// The window never waits on the backend, and quitting always stops it, even
+/// when Sam quits while the backend is still starting.
+#[test]
+fn owned_backend_starts_in_the_background_and_always_stops() {
+    let start = LIB_RS.find("fn start_backend(").expect("start_backend");
+    let body = &LIB_RS[start..start + LIB_RS[start..].find("\n}\n").unwrap()];
+    assert!(body.contains("std::thread::spawn(move || match sidecar::start_owned()"));
+    assert!(body.contains("if guard.exiting {"));
+    assert!(LIB_RS.contains(".manage(AppState { backend: slot })"));
+    assert!(LIB_RS.contains("BackendSlot::new(Slot::Starting)"));
+    let exit = LIB_RS.find("tauri::RunEvent::Exit").expect("exit handler");
+    let handler = &LIB_RS[exit..];
+    assert!(handler.contains("guard.exiting = true;"));
+    assert!(handler.contains("backend.stop();"));
 }

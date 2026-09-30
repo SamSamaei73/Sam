@@ -4,6 +4,7 @@ import type { ToolsResponse } from "../bridge/types";
 import { EmptyState, Notice, SectionHeader, StatusPill } from "../components/primitives";
 import { humanize } from "../lib/format";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 export function ToolsView() {
   const { bridge } = useSam();
@@ -30,9 +31,7 @@ export function ToolsView() {
       </Notice>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {data === null && !error ? (
-        <p className="muted" role="status">
-          Loading…
-        </p>
+        <Loader />
       ) : null}
       {data && data.tools.length === 0 ? (
         <EmptyState

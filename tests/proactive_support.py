@@ -205,6 +205,7 @@ def make_rig(
     grant_all: bool = True,
     start: datetime = START,
     scheduler_on: bool = True,
+    repository: Any = None,
 ) -> Rig:
     clock = ManualClock(start)
     grants = InMemoryPermissionStore()
@@ -227,6 +228,7 @@ def make_rig(
         limits=limits,
         clock=clock,
         run_loop=False,  # tests tick explicitly; no background thread
+        repository=repository,
     )
     rig = Rig(service, engine, grants, confirmations, permission_audit, clock, flag)
     if grant_all:

@@ -15,6 +15,7 @@ import type {
 import { EmptyState, NeonButton, Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
 import { humanize } from "../lib/format";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 type Tab = "review" | "opportunities" | "applications" | "phd" | "drafts" | "contacts" | "followups";
 
@@ -414,7 +415,7 @@ export function CareerView() {
     <div className="page-narrow">
       <SectionHeader
         title="Career"
-        description="Jobs and PhD opportunities, evidence checks and application drafts. Review first: Sam drafts locally and never submits or sends without your confirmation of that exact package or message. Kept in memory for this session only."
+        description="Jobs and PhD opportunities, evidence checks and application drafts. Review first: Sam drafts locally and never submits or sends without your confirmation of that exact package or message. Stored only on this Mac, in Sam's owner-only data folder (a development build keeps it for this session only)."
       />
       {data && !data.submission_available ? (
         <Notice tone="warn" live={false}>
@@ -444,9 +445,7 @@ export function CareerView() {
 
       <div role="tabpanel" id={`career-panel-${tab}`} aria-labelledby={`career-tab-${tab}`}>
         {data === null ? (
-          <p className="muted" role="status">
-            Loading…
-          </p>
+          <Loader />
         ) : null}
 
         {data !== null && tab === "review" ? (

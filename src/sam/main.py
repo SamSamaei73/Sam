@@ -23,6 +23,13 @@ from sam.desktop.professional_api import router as desktop_professional_router
 from sam.desktop.runtime import build_desktop_runtime
 from sam.models.adapter import RoutedLLMProvider
 from sam.models.factory import build_model_router
+from sam.system.secrets import credential_store_for, resolve_credentials
+from sam.system.startup import (
+    DurableState,
+    StartupPhase,
+    StartupReport,
+    open_durable_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,22 +41,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     provider: RoutedLLMProvider | None = app.state.provider
     runtime = app.state.desktop_runtime
+    durable: DurableState | None = app.state.durable
+    report: StartupReport = app.state.startup
     scheduler = runtime.proactive.scheduler if runtime is not None else None
-    configure_logging(settings.log_level)
+    configure_logging(
+        settings.log_level,
+        log_dir=durable.data_dir / "logs" if durable is not None else None,
+    )
     logger.info("Starting %s in %s environment", settings.app_name, settings.app_env)
+    if report.blocked:
+        # Reason code only: never a path, SQL or exception text.
+        logger.error("Startup blocked: %s", report.reason_code)
     try:
-        if provider is not None:
+        if provider is not None and not report.blocked:
             provider.open()
-        # Proactive scheduling is off unless the owner's trusted local settings
-        # turn it on; the owner can also switch it from the Automations view.
-        if scheduler is not None and settings.proactive_scheduler_enabled:
+        # Proactive scheduling is off unless the owner turned it on: through
+        # trusted local settings, or with the Automations switch set to stay
+        # on across restarts (persisted, OFF by default and after migration).
+        if (
+            scheduler is not None
+            and runtime is not None
+            and not report.blocked
+            and (
+                settings.proactive_scheduler_enabled
+                or runtime.owner_settings.scheduler_persistent()
+            )
+        ):
             scheduler.enable()
+        report.done(StartupPhase.SCHEDULER_INIT)
+        report.done(StartupPhase.READY)
         yield
     finally:
         if scheduler is not None:
             scheduler.shutdown()
         if provider is not None:
             provider.close()
+        if durable is not None:
+            durable.close()
         logger.info("Stopping %s", settings.app_name)
 
 
@@ -60,8 +88,19 @@ def create_app(
     """Create and configure the FastAPI application."""
 
     resolved_settings = settings or get_settings()
+    desktop = resolved_settings.desktop_bridge_token is not None
+    # Phase 17 startup: storage phases first (fail closed: BLOCKED, never a
+    # silent in-memory fallback for durable data), then credentials.
+    report = StartupReport()
+    durable = open_durable_state(resolved_settings, report) if desktop else None
+    store, keychain_status = credential_store_for(resolved_settings)
+    resolved_settings, credentials = resolve_credentials(
+        resolved_settings, store, keychain_status
+    )
     application = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
     application.state.settings = resolved_settings
+    application.state.durable = durable
+    application.state.startup = report
     # ONE trusted model boundary: the router. The paid Anthropic Messages API
     # provider is deliberately not wired here (PAID_FALLBACK = OFF).
     provider: RoutedLLMProvider | None = None
@@ -82,10 +121,14 @@ def create_app(
             agent_core,
             model_router=model_router,
             model_settings=model_settings,
+            durable=durable,
+            startup=report,
+            credentials=credentials,
         )
-        if resolved_settings.desktop_bridge_token is not None
+        if desktop
         else None
     )
+    report.done(StartupPhase.PROVIDER_INIT)
     application.include_router(health_router)
     application.include_router(agent_router)
     application.include_router(desktop_router)

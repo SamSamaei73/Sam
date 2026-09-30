@@ -48,7 +48,7 @@ function setup(risk: Challenge["risk"] = "high") {
 
 async function openDialog() {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Knowledge" }));
+  await user.click(await screen.findByRole("button", { name: "Knowledge" }));
   await user.click(await screen.findByRole("button", { name: `Remove ${doc.name}` }));
   const dialog = await screen.findByRole("alertdialog");
   return { user, dialog };
@@ -107,7 +107,7 @@ describe("confirmation dialog", () => {
       mockBridge({ knowledgeList: vi.fn(async () => ({ ...ok, resources: [doc] })), knowledgeRemove: remove }),
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Knowledge" }));
+    await user.click(await screen.findByRole("button", { name: "Knowledge" }));
     await user.click(await screen.findByRole("button", { name: `Remove ${doc.name}` }));
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Approve" }));
     expect(await screen.findByText("Sam isn't permitted to do that.")).toBeInTheDocument();
@@ -156,7 +156,7 @@ describe("confirmation dialog", () => {
       }),
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Knowledge" }));
+    await user.click(await screen.findByRole("button", { name: "Knowledge" }));
     await user.click(await screen.findByRole("button", { name: `Remove ${doc.name}` }));
     let dialog = await screen.findByRole("alertdialog");
     await user.type(within(dialog).getByLabelText(/step-up secret/i), "wrong-secret-1234");
@@ -187,7 +187,7 @@ describe("confirmation dialog", () => {
       }),
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Knowledge" }));
+    await user.click(await screen.findByRole("button", { name: "Knowledge" }));
     await user.click(await screen.findByRole("button", { name: `Remove ${doc.name}` }));
     const dialog = await screen.findByRole("alertdialog");
     await user.type(within(dialog).getByLabelText(/step-up secret/i), "some-secret-value");

@@ -21,6 +21,7 @@ import { IconTrash } from "../components/Icons";
 import { EmptyState, IconButton, NeonButton, Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
 import { humanize } from "../lib/format";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 type Tab = "active" | "scheduled" | "watching" | "notifications" | "history";
 
@@ -602,6 +603,7 @@ export function ProactiveView() {
   const [tab, setTab] = useState<Tab>("active");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [notice, setNotice] = useState<{ tone?: "danger" | "warn"; text: string } | null>(null);
 
   const report = (result: OperationResult, success?: string) => {
@@ -670,9 +672,15 @@ export function ProactiveView() {
       return result;
     }, `Created “${input.title}”.`);
   const scheduling = data?.scheduler_enabled ?? false;
+  const persistent = data?.scheduler_persistent ?? false;
   const switchScheduling = () =>
     void act(
-      () => bridge.proactiveScheduler(!scheduling),
+      () =>
+        scheduling
+          ? bridge.proactiveScheduler(false)
+          : remember
+            ? bridge.proactiveScheduler(true, true)
+            : bridge.proactiveScheduler(true),
       scheduling
         ? "Scheduling is off. No automation will run until you turn it back on."
         : "Scheduling is on. Each run still asks for permission, and turning this on granted nothing new.",
@@ -682,7 +690,7 @@ export function ProactiveView() {
     <div className="page-narrow">
       <SectionHeader
         title="Automations"
-        description="Reminders, summaries and watches that Sam runs for you on a schedule. Sam only notifies you: it asks for permission on every run and never acts on your behalf. Kept in memory for this session only."
+        description="Reminders, summaries and watches that Sam runs for you on a schedule. Sam only notifies you: it asks for permission on every run and never acts on your behalf. Stored only on this Mac, in Sam's owner-only data folder (a development build keeps it for this session only)."
         actions={
           <span className="row">
             <NeonButton variant="quiet" disabled={busy || data === null} onClick={switchScheduling}>
@@ -696,8 +704,16 @@ export function ProactiveView() {
       />
       {data !== null && !scheduling ? (
         <Notice tone="warn" live={false}>
-          Scheduling is off, so no automation runs (not even “Run now”). It starts off every time Sam starts.
+          Scheduling is off, so no automation runs (not even “Run now”). It starts off every time Sam starts unless you
+          choose to keep it on.
+          <label className="row">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Keep scheduling on after Sam restarts
+          </label>
         </Notice>
+      ) : null}
+      {data !== null && scheduling && persistent ? (
+        <p className="faint">Scheduling stays on after Sam restarts because you chose that. Turning it off clears it.</p>
       ) : null}
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       {creating && data ? <NewAutomation conditions={data.conditions} busy={busy} onCreate={create} /> : null}
@@ -723,9 +739,7 @@ export function ProactiveView() {
 
       <div role="tabpanel" id={`auto-panel-${tab}`} aria-labelledby={`auto-tab-${tab}`}>
         {data === null ? (
-          <p className="muted" role="status">
-            Loading…
-          </p>
+          <Loader />
         ) : null}
 
         {data !== null && (tab === "active" || tab === "scheduled" || tab === "watching") ? (

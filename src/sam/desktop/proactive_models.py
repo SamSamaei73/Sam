@@ -97,9 +97,13 @@ class ProactiveRunRequest(_Strict):
 
 
 class ProactiveSchedulerRequest(_Strict):
-    """The owner's switch for background scheduling. Nothing else."""
+    """The owner's switch for background scheduling. Nothing else.
+
+    ``remember`` (Phase 17): keep scheduling on across restarts. Only honoured
+    when turning scheduling ON; turning it off always clears it. Default off."""
 
     enabled: bool
+    remember: bool = False
 
 
 class ProactiveNotificationRequest(_Strict):
@@ -202,6 +206,7 @@ class ProactiveOverviewResponse(OperationResult):
     limits: ProLimits | None = None
     live_runs: int = 0
     scheduler_enabled: bool = False
+    scheduler_persistent: bool = False
 
 
 class ProactiveTaskResponse(OperationResult):
@@ -210,6 +215,7 @@ class ProactiveTaskResponse(OperationResult):
 
 class ProactiveSchedulerResponse(OperationResult):
     scheduler_enabled: bool = False
+    scheduler_persistent: bool = False
 
 
 __all__ = [

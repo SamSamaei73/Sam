@@ -14,6 +14,7 @@
 //! Nothing here decides authorization. The backend's PermissionEngine does.
 
 use serde_json::Value;
+use std::sync::RwLock;
 use std::time::Duration;
 
 /// Loopback only. Not configurable.
@@ -78,11 +79,13 @@ pub enum Route {
     CareerOutreach,
     CareerSend,
     CareerPreferences,
+    VoiceWake,
+    VoiceActivation,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 46] = [
+    pub const ALL: [Route; 48] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -129,6 +132,8 @@ impl Route {
         Route::CareerOutreach,
         Route::CareerSend,
         Route::CareerPreferences,
+        Route::VoiceWake,
+        Route::VoiceActivation,
     ];
 
     pub fn path(self) -> &'static str {
@@ -179,6 +184,8 @@ impl Route {
             Route::CareerOutreach => "/desktop/v1/career/outreach",
             Route::CareerSend => "/desktop/v1/career/send",
             Route::CareerPreferences => "/desktop/v1/career/preferences",
+            Route::VoiceWake => "/desktop/v1/voice/wake",
+            Route::VoiceActivation => "/desktop/v1/voice/activation",
         }
     }
 
@@ -215,6 +222,8 @@ impl Route {
 /// The only failures the webview can observe. `as_code` is the whole message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BridgeError {
+    /// The app's own backend is still starting (bounded; see `sidecar`).
+    Starting,
     Unavailable,
     Timeout,
     Unauthorized,
@@ -231,6 +240,7 @@ pub enum BridgeError {
 impl BridgeError {
     pub fn as_code(self) -> &'static str {
         match self {
+            BridgeError::Starting => "starting",
             BridgeError::Unavailable => "unavailable",
             BridgeError::Timeout => "timeout",
             BridgeError::Unauthorized => "unauthorized",
@@ -257,6 +267,39 @@ pub fn parse_port(raw: Option<&str>) -> u16 {
 pub fn valid_token(raw: Option<&str>) -> Option<String> {
     let token = raw?.trim();
     (token.chars().count() >= MIN_TOKEN_CHARS).then(|| token.to_string())
+}
+
+/// Where the app's backend is in its (bounded) startup. The window opens at
+/// once; bridge calls answer `starting` until the owned backend is ready.
+pub enum Slot {
+    Starting,
+    Ready(Backend),
+    Failed,
+}
+
+pub struct BackendSlot(RwLock<Slot>);
+
+impl BackendSlot {
+    pub fn new(slot: Slot) -> Self {
+        BackendSlot(RwLock::new(slot))
+    }
+
+    pub fn set(&self, slot: Slot) {
+        if let Ok(mut guard) = self.0.write() {
+            *guard = slot;
+        }
+    }
+
+    pub fn call(&self, route: Route, body: Option<Value>) -> Result<Value, BridgeError> {
+        match self.0.read() {
+            Ok(guard) => match &*guard {
+                Slot::Starting => Err(BridgeError::Starting),
+                Slot::Ready(backend) => backend.call(route, body),
+                Slot::Failed => Err(BridgeError::Unavailable),
+            },
+            Err(_) => Err(BridgeError::Unavailable),
+        }
+    }
 }
 
 pub struct Backend {
@@ -361,6 +404,25 @@ fn classify_transport(error: ureq::Error) -> BridgeError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_starting_or_failed_slot_never_reaches_the_network() {
+        let starting = BackendSlot::new(Slot::Starting);
+        assert_eq!(
+            starting.call(Route::Status, None).unwrap_err().as_code(),
+            "starting"
+        );
+        starting.set(Slot::Failed);
+        assert_eq!(
+            starting.call(Route::Status, None).unwrap_err().as_code(),
+            "unavailable"
+        );
+        starting.set(Slot::Ready(Backend::new(DEFAULT_PORT, None)));
+        assert_eq!(
+            starting.call(Route::Status, None).unwrap_err().as_code(),
+            "not_configured"
+        );
+    }
+
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -427,7 +489,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 46);
+        assert_eq!(paths.len(), 48);
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));

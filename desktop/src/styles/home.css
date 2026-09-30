@@ -1,0 +1,835 @@
+/*
+ * Voice-first Sam (Home = Sam). Same palette and tokens as the rest of the
+ * app; this file only adds structure and the presence animations. Motion is
+ * slow and restrained, and every animation is disabled for reduced motion.
+ */
+
+/* ================= slim navigation rail ================= */
+.rail {
+  width: 196px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 10px 14px;
+  background: var(--glass-deep);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-right: 1px solid var(--line);
+  transition: width var(--dur) var(--ease);
+  overflow: hidden;
+  z-index: 2;
+}
+.rail[data-collapsed="true"] {
+  width: 66px;
+}
+.rail-head {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 4px 6px;
+}
+.rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex: 1;
+}
+.rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  color: var(--text-dim);
+  text-align: start;
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.rail-item svg {
+  flex: none;
+}
+.rail-item:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.rail-item[aria-current="page"] {
+  color: var(--ice);
+  background: linear-gradient(90deg, rgba(63, 125, 255, 0.22), rgba(63, 125, 255, 0.04));
+  border-color: var(--line);
+}
+.rail-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -10px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+}
+.rail[data-collapsed="true"] .rail-label {
+  display: none;
+}
+.rail-foot {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+.conn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+.conn-dot[data-state="starting"] {
+  background: var(--accent-strong);
+}
+.conn-dot[data-state="degraded"] {
+  background: var(--warn);
+  box-shadow: 0 0 10px var(--warn);
+}
+.conn-dot[data-state="unavailable"] {
+  background: var(--danger);
+  box-shadow: 0 0 10px var(--danger);
+}
+
+/* ================= Home ================= */
+.home {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.home-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2.2vh, 22px);
+  padding: 56px 24px 32px;
+  overflow-y: auto;
+}
+.home-top {
+  position: absolute;
+  top: 16px;
+  inset-inline-end: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.home .system-panel {
+  margin: 12px 14px 14px 0;
+  animation: slide-in 220ms var(--ease);
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+.sam-heading {
+  text-align: center;
+}
+.wordmark {
+  margin: 0;
+  font-size: clamp(22px, 2.3vw, 30px);
+  font-weight: 600;
+  letter-spacing: 0.62em;
+  padding-inline-start: 0.62em; /* optical centring of the tracking */
+  color: var(--ice);
+  text-shadow: 0 0 18px rgba(111, 180, 255, 0.45);
+}
+.state-word {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  transition: background var(--dur) var(--ease);
+}
+.state-word[data-state="listening"] .state-dot {
+  background: #7ff0ff;
+  box-shadow: 0 0 12px #7ff0ff;
+}
+.state-word[data-state="permission"] .state-dot,
+.state-word[data-state="error"] .state-dot {
+  background: var(--warn);
+  box-shadow: 0 0 10px var(--warn);
+}
+.state-word[data-state="offline"] .state-dot {
+  background: var(--text-faint);
+  box-shadow: none;
+}
+
+/* ================= the presence ================= */
+.presence {
+  --level: 0;
+  width: clamp(200px, 36vmin, 400px);
+  aspect-ratio: 1;
+  flex: none;
+  position: relative;
+}
+.presence-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.presence-svg * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.presence .halo {
+  opacity: 0.7;
+  transition: opacity 300ms var(--ease);
+}
+.presence .orbit {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.presence .ticks line {
+  stroke: rgba(150, 190, 255, 0.28);
+  stroke-width: 1.2;
+}
+/* Each tick carries its own rotate(… 200 200) attribute, so it must keep the
+   SVG default origin; the group (which may spin) turns about the centre. */
+.presence .ticks line {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.presence .ticks {
+  transform-box: view-box;
+  transform-origin: 200px 200px;
+}
+.presence .arcs path {
+  fill: none;
+  stroke: url(#sam-arc);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  opacity: 0.55;
+  transition: opacity 300ms var(--ease);
+}
+.presence .wave {
+  fill: none;
+  stroke: #9fdcff;
+  stroke-width: 1.6;
+  opacity: 0;
+  transition: opacity 250ms var(--ease);
+}
+.presence .listen-ring {
+  fill: none;
+  stroke: #7ff0ff;
+  stroke-width: 1.6;
+  opacity: 0;
+}
+.presence .core-glow {
+  fill: rgba(80, 150, 255, 0.55);
+}
+.presence .core,
+.presence .core-glow,
+.presence .core-hi {
+  animation: breathe 6s ease-in-out infinite;
+}
+.presence .core-hi {
+  fill: rgba(255, 255, 255, 0.35);
+}
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.025);
+  }
+}
+
+/* sleeping: hands-free, waiting only for its name — a slow, low-energy pulse */
+.presence[data-state="sleeping"] .core,
+.presence[data-state="sleeping"] .core-glow,
+.presence[data-state="sleeping"] .core-hi {
+  animation: breathe 9s ease-in-out infinite;
+}
+.presence[data-state="sleeping"] .core {
+  filter: brightness(0.82) saturate(0.9);
+}
+.presence[data-state="sleeping"] .halo {
+  opacity: 0.4;
+}
+.presence[data-state="sleeping"] .arcs path {
+  opacity: 0.3;
+}
+
+/* waking: the name was heard — the core brightens once */
+.presence[data-state="waking"] .core,
+.presence[data-state="waking"] .core-glow {
+  animation: wake 0.9s ease-out 1;
+}
+.presence[data-state="waking"] .halo {
+  opacity: 1;
+}
+.presence[data-state="waking"] .orbit {
+  stroke: rgba(127, 240, 255, 0.8);
+}
+@keyframes wake {
+  0% {
+    transform: scale(0.95);
+    filter: brightness(1);
+  }
+  40% {
+    transform: scale(1.08);
+    filter: brightness(1.45);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1.1);
+  }
+}
+
+/* attending: a conversation is open; Sam waits for the owner's turn */
+.presence[data-state="attending"] .orbit {
+  stroke: rgba(127, 240, 255, 0.55);
+  transition: stroke 300ms var(--ease);
+}
+.presence[data-state="attending"] .listen-ring.r1 {
+  opacity: 0.28;
+}
+.presence[data-state="attending"] .core,
+.presence[data-state="attending"] .core-glow {
+  animation: breathe 3.2s ease-in-out infinite;
+}
+.presence[data-state="attending"] .halo {
+  opacity: 0.85;
+}
+
+/* listening: outward rings that swell with the real mic level */
+.presence[data-state="listening"] .listen-ring {
+  animation: listen 2.1s ease-out infinite;
+}
+.presence[data-state="listening"] .listen-ring.r2 {
+  animation-delay: 0.7s;
+}
+.presence[data-state="listening"] .listen-ring.r3 {
+  animation-delay: 1.4s;
+}
+.presence[data-state="listening"] .core {
+  animation: none;
+  transform: scale(calc(1 + var(--level) * 0.12));
+  transition: transform 90ms linear;
+}
+.presence[data-state="listening"] .halo {
+  opacity: calc(0.75 + var(--level) * 0.25);
+}
+@keyframes listen {
+  0% {
+    transform: scale(1);
+    opacity: calc(0.45 + var(--level) * 0.45);
+  }
+  100% {
+    transform: scale(calc(1.5 + var(--level) * 0.35));
+    opacity: 0;
+  }
+}
+
+/* thinking: controlled counter-rotating arcs */
+.presence[data-state="thinking"] .arcs {
+  opacity: 1;
+}
+.presence[data-state="thinking"] .arcs path {
+  opacity: 0.95;
+}
+.presence[data-state="thinking"] .arcs.outer {
+  animation: spin 5s linear infinite;
+}
+.presence[data-state="thinking"] .arcs.inner {
+  animation: spin 3.4s linear infinite reverse;
+}
+.presence[data-state="thinking"] .core {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* speaking: a steady pulse with a waveform ring */
+.presence[data-state="speaking"] .wave {
+  opacity: 0.85;
+  animation: spin 14s linear infinite, wave 0.9s ease-in-out infinite;
+}
+.presence[data-state="speaking"] .core,
+.presence[data-state="speaking"] .core-glow {
+  animation: speak 0.9s ease-in-out infinite;
+}
+@keyframes speak {
+  0%,
+  100% {
+    transform: scale(0.98);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+@keyframes wave {
+  50% {
+    stroke-width: 2.6;
+  }
+}
+
+/* permission: a calm amber halo */
+.presence[data-state="permission"] .halo {
+  opacity: 0.9;
+}
+.presence[data-state="permission"] .orbit {
+  stroke: rgba(255, 204, 102, 0.55);
+  animation: attention 2.8s ease-in-out infinite;
+}
+@keyframes attention {
+  50% {
+    stroke-width: 2.2;
+  }
+}
+/* something needs the owner (Action required): a quiet marker, no alarm */
+.presence[data-attention="true"][data-state="idle"] .orbit {
+  stroke: rgba(255, 204, 102, 0.32);
+}
+
+/* error: a brief, muted warm tint */
+.presence[data-state="error"] .core {
+  filter: hue-rotate(155deg) saturate(0.55) brightness(0.9);
+}
+.presence[data-state="error"] .halo {
+  opacity: 0.35;
+}
+
+/* offline: dim and still */
+.presence[data-state="offline"] {
+  filter: saturate(0.25) brightness(0.7);
+}
+.presence[data-state="offline"] * {
+  animation: none !important;
+}
+
+/* Guest Mode: a distinct, elegant violet orbit */
+.presence[data-guest="true"] .orbit {
+  stroke: rgba(190, 150, 255, 0.6);
+  stroke-dasharray: 3 7;
+}
+/* Guest Mode: a violet cast on the whole presence, so it never looks like the
+   owner's Sam at a glance (the Guest banner remains the authoritative cue). */
+.presence[data-guest="true"] .core,
+.presence[data-guest="true"] .core-glow {
+  filter: hue-rotate(38deg) saturate(0.85);
+}
+.presence[data-guest="true"] .halo {
+  opacity: 0.45;
+}
+.presence[data-guest="true"] .ticks line {
+  stroke: rgba(190, 150, 255, 0.3);
+}
+
+/* ================= voice control ================= */
+.voice-control {
+  display: grid;
+  /* Equal flexible sides keep the microphone centred, whatever the hint says. */
+  grid-template-columns: 1fr auto 1fr;
+  width: min(560px, 100%);
+  align-items: center;
+  justify-items: center;
+  column-gap: 18px;
+  row-gap: 10px;
+}
+.voice-side {
+  display: flex;
+  justify-content: center;
+  min-width: 40px;
+}
+.mic-button {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--ice);
+  background: radial-gradient(circle at 35% 30%, rgba(90, 140, 255, 0.45), rgba(10, 20, 80, 0.85));
+  border: 1px solid var(--rim-soft);
+  box-shadow: 0 0 26px rgba(63, 125, 255, 0.45), inset 0 0 18px rgba(111, 180, 255, 0.25);
+  transition:
+    transform var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.mic-button svg {
+  width: 22px;
+  height: 22px;
+}
+.mic-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 36px rgba(63, 125, 255, 0.65), inset 0 0 20px rgba(111, 180, 255, 0.35);
+}
+.mic-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.mic-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.mic-button[data-listening="true"] {
+  background: radial-gradient(circle at 35% 30%, rgba(140, 240, 255, 0.55), rgba(20, 70, 160, 0.9));
+  border-color: #9ff0ff;
+  box-shadow: 0 0 40px rgba(127, 240, 255, 0.6);
+}
+.mic-glow {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 1px solid rgba(127, 200, 255, 0.25);
+  pointer-events: none;
+}
+.mic-button[data-listening="true"] .mic-glow {
+  animation: listen 1.8s ease-out infinite;
+  border-color: rgba(127, 240, 255, 0.55);
+}
+.voice-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  min-height: 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.voice-hint .recording {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+
+/* ================= transient transcript ================= */
+.transient {
+  width: min(560px, 92%);
+  padding: 12px 16px 8px;
+  border-radius: var(--r);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: 0 0 24px rgba(42, 77, 255, 0.16);
+  animation: fade-up 240ms var(--ease);
+  font-size: 14px;
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.transient .bubble {
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+.transient-heard,
+.transient-reply {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+.transient-heard {
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.transient-reply[data-status="failed"] {
+  color: var(--warn);
+}
+.transient-who {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.transient-wait {
+  margin: 0;
+  color: var(--text-faint);
+}
+.transient-error {
+  margin: 0 0 6px;
+  color: var(--warn);
+}
+.transient-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* ================= compact text input (command palette) ================= */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 18vh;
+  background: rgba(2, 3, 11, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fade 180ms var(--ease);
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+.palette {
+  width: min(640px, 92vw);
+}
+.palette-note {
+  margin: 8px 4px 0;
+}
+
+/* ================= action required ================= */
+.attention-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(255, 204, 102, 0.35);
+  background: rgba(40, 30, 10, 0.35);
+  color: var(--text);
+  font-size: 12px;
+}
+.attention-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+.attention-count {
+  color: var(--warn);
+  font-weight: 600;
+}
+.attention ul {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.attention li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.attention li[data-tone="danger"] .attention-dot {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+}
+.attention li[data-tone="info"] .attention-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.attention .link-button {
+  text-align: start;
+}
+.context-block {
+  margin-bottom: 16px;
+}
+.context-block p {
+  margin: 0;
+}
+.identity-line[data-tone="ok"] {
+  color: var(--ok);
+}
+.identity-line[data-tone="warn"] {
+  color: var(--warn);
+}
+.identity-line[data-tone="guest"] {
+  color: #c8a8ff;
+}
+.identity-line[data-tone="muted"] {
+  color: var(--text-faint);
+}
+
+/* ================= standard loader ================= */
+.loader-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 220px;
+  height: 100%;
+}
+.loader-ring {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(111, 180, 255, 0.18);
+  border-top-color: var(--accent);
+  box-shadow: 0 0 14px rgba(63, 125, 255, 0.35);
+  animation: spin 0.9s linear infinite;
+}
+
+/* ================= History ================= */
+.history .thread {
+  overflow: visible;
+}
+
+/* ================= responsive ================= */
+@media (max-width: 1100px) {
+  .rail {
+    width: 66px;
+  }
+  .rail .rail-label {
+    display: none;
+  }
+  .home .system-panel {
+    display: block; /* an overlay here, never hidden: Action Required lives in it */
+    position: absolute;
+    inset-inline-end: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 5;
+  }
+}
+@media (max-height: 720px) {
+  .presence {
+    width: clamp(180px, 30vmin, 320px);
+  }
+  .home-stage {
+    padding-top: 48px;
+  }
+}
+
+/* ================= reduced motion ================= */
+@media (prefers-reduced-motion: reduce) {
+  .presence *,
+  .mic-glow,
+  .loader-ring,
+  .transient,
+  .palette-backdrop,
+  .home .system-panel {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+:root[data-reduced-motion="true"] .presence *,
+:root[data-reduced-motion="true"] .mic-glow,
+:root[data-reduced-motion="true"] .loader-ring,
+:root[data-reduced-motion="true"] .transient,
+:root[data-reduced-motion="true"] .palette-backdrop,
+:root[data-reduced-motion="true"] .home .system-panel {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* ---------- startup (bounded; only while Sam's own backend starts) ---------- */
+.startup {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.startup .presence {
+  width: clamp(140px, 22vmin, 220px);
+}
+.startup-word {
+  margin-top: 18px;
+}
+
+/* ---------- About (Settings) ---------- */
+.about-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 18px;
+  margin: 0;
+  font-size: 13px;
+}
+.about-list dt {
+  color: var(--text-dim);
+}
+.about-list dd {
+  margin: 0;
+}
+
+/* ---------- hands-free controls (no dominant button) ---------- */
+.voice-control.hands-free {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.hands-free-hint {
+  font-size: 14px;
+  color: var(--text);
+  letter-spacing: 0.06em;
+}
+.voice-control.hands-free[data-state="sleeping"] .hands-free-hint {
+  color: var(--text-dim);
+}
+.hands-free-tools {
+  display: flex;
+  gap: 12px;
+  opacity: 0.8;
+}
+.hands-free-tools:hover,
+.hands-free-tools:focus-within {
+  opacity: 1;
+}
+.hint-problem {
+  color: var(--warn, #ffcc66);
+}
+.setup-link {
+  font-size: 13px;
+}
+
+.voice-control:not(.hands-free) > .voice-side:first-child {
+  justify-self: end;
+}
+.voice-control:not(.hands-free) > .voice-side:nth-child(3) {
+  justify-self: start;
+}
+.voice-control .voice-hint {
+  text-align: center;
+}

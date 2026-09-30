@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     voice_identity_enabled: bool = False
     speaker_verification_threshold: float = Field(default=0.5, ge=0.3, le=0.9)
     local_stt_model: Literal["small", "medium", "large-v3"] = "small"
+    # Phase 17: durable local state. "auto" means SQLite in production
+    # (APP_ENV=production) and in-memory otherwise (development, tests). The data
+    # directory defaults to the platform application-data directory; it may be
+    # overridden by trusted local configuration only (absolute path).
+    sam_storage: Literal["auto", "memory", "sqlite"] = "auto"
+    sam_data_dir: str | None = Field(default=None, max_length=1_000)
+    # Credentials from the macOS Keychain: "auto" means on in production. An
+    # environment value always wins; a Keychain failure never falls back.
+    sam_keychain: Literal["auto", "on", "off"] = "auto"
     claude_model: str = Field(default="claude-sonnet-4-5", min_length=1)
     claude_base_url: AnyHttpUrl = Field(default=AnyHttpUrl("https://api.anthropic.com"))
     claude_timeout: FiniteFloat = Field(default=30.0, gt=0, le=300)
@@ -148,6 +157,34 @@ class Settings(BaseSettings):
                 "DESKTOP_STEP_UP_SECRET must differ from DESKTOP_BRIDGE_TOKEN"
             )
         return self
+
+    @field_validator("sam_data_dir")
+    @classmethod
+    def validate_data_dir(cls, value: str | None) -> str | None:
+        """A relative data directory would depend on the working directory
+        (and could land inside the repository)."""
+
+        if value is None or not value.strip():
+            return None  # unset: the platform application-data directory
+        if not value.startswith("/"):
+            raise ValueError("SAM_DATA_DIR must be an absolute path")
+        return value
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
+    @property
+    def storage_backend(self) -> Literal["memory", "sqlite"]:
+        if self.sam_storage == "auto":
+            return "sqlite" if self.is_production else "memory"
+        return self.sam_storage
+
+    @property
+    def keychain_enabled(self) -> bool:
+        if self.sam_keychain == "auto":
+            return self.is_production
+        return self.sam_keychain == "on"
 
     @field_validator("claude_model")
     @classmethod

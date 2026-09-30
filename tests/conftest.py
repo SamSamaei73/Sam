@@ -106,3 +106,18 @@ def _hermetic_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "settings_customise_sources",
         classmethod(_sources_without_the_developers_dotenv),
     )
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_owners_data_or_keychain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Phase 17: durable storage and the Keychain are production-only. A test
+    that selects production or SQLite still writes ONLY to a temporary data
+    directory, never to the owner's application-data directory, and never
+    reads or writes the owner's real Keychain."""
+
+    for name in ("APP_ENV", "SAM_STORAGE", "SAM_KEYCHAIN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SAM_DATA_DIR", str(tmp_path_factory.mktemp("sam-data")))
+    monkeypatch.setenv("SAM_KEYCHAIN", "off")

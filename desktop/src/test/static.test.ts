@@ -21,7 +21,15 @@ const read = (f: string) => readFileSync(f, "utf8");
 /** Source with comments removed, so prose about what is forbidden isn't flagged. */
 const code = (f: string) => read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-describe("static security checks (production sources)", () => {
+// Generous timeout: these scan every source file, and the first read can be
+// slow on a synced (iCloud) checkout when the whole suite runs in parallel.
+describe("static security checks (production sources)", { timeout: 60_000 }, () => {
+  it("never asks the owner to finish a text draft before talking", () => {
+    for (const file of productionSources) {
+      expect(read(file), file).not.toMatch(/finish (your|the) draft|draft first/i);
+    }
+  });
+
   it("has production sources to scan", () => {
     expect(productionSources.length).toBeGreaterThan(20);
   });
@@ -52,7 +60,7 @@ describe("static security checks (production sources)", () => {
     expect(users.map((f) => relative(ROOT, f))).toEqual(["src/bridge/tauri.ts"]);
     const text = read(join(SRC, "bridge", "tauri.ts"));
     const commands = [...text.matchAll(/call(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(commands.length).toBe(46);
+    expect(commands.length).toBe(48);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
   });
 
@@ -114,7 +122,7 @@ describe("static security checks (production sources)", () => {
   });
 
   it("recordings are never persisted or turned into files/URLs by the recorder or dialogs", () => {
-    for (const name of ["lib/recorder.ts", "components/IdentityDialogs.tsx", "components/VoiceRecorder.tsx"]) {
+    for (const name of ["lib/recorder.ts", "components/IdentityDialogs.tsx", "components/VoiceRecorder.tsx", "session.tsx", "home/VoiceControl.tsx"]) {
       const text = code(join(SRC, name));
       expect(text, name).not.toMatch(/MediaRecorder|createObjectURL|indexedDB|FileSystem|showSaveFilePicker|\.download\s*=/);
     }

@@ -47,6 +47,8 @@ const COMMANDS: &[&str] = &[
     "sam_career_outreach",
     "sam_career_send",
     "sam_career_preferences",
+    "sam_voice_wake",
+    "sam_voice_activation",
 ];
 
 fn main() {

@@ -102,6 +102,21 @@ class VoiceUtteranceRequest(_Request):
     audio_base64: str = Field(min_length=1, max_length=MAX_AUDIO_BASE64_CHARS)
     confirmation_id: str | None = Field(default=None, max_length=MAX_ID_CHARS)
     language: LanguageChoice = "auto"
+    # A turn of a hands-free conversation: a whole-utterance stop phrase
+    # ("go to sleep") ends the conversation and is never sent to the agent.
+    hands_free: bool = False
+
+
+# A wake candidate is a few seconds of 16 kHz mono PCM16 at most.
+MAX_WAKE_BASE64_CHARS = 400_000
+
+
+class VoiceWakeRequest(_Request):
+    audio_base64: str = Field(min_length=1, max_length=MAX_WAKE_BASE64_CHARS)
+
+
+class VoiceActivationRequest(_Request):
+    enabled: bool
 
 
 class EnrollBeginRequest(_Request):
@@ -193,6 +208,35 @@ class SpeechProfile(BaseModel):
     languages: list[Literal["fa", "en"]] = ["en"]
 
 
+class SubsystemHealthItem(BaseModel):
+    name: str
+    status: Literal[
+        "ok",
+        "in_memory",
+        "not_configured",
+        "disabled",
+        "degraded",
+        "unavailable",
+        "blocked",
+    ]
+    reason_code: str | None = None
+
+
+class SystemHealthItem(BaseModel):
+    """Phase 17: content-free health. Reason codes only."""
+
+    status: Literal["ready", "degraded", "blocked"]
+    phase: str
+    reason_code: str | None = None
+    storage_mode: Literal["memory", "sqlite"]
+    schema_version: int | None = None
+    last_backup_at: str | None = None
+    backup_count: int = 0
+    scheduler: Literal["off", "on", "on_persistent"]
+    reconciliation_required: int = 0
+    subsystems: list[SubsystemHealthItem]
+
+
 class StatusResponse(BaseModel):
     backend: HealthState
     agent: Capability
@@ -211,6 +255,9 @@ class StatusResponse(BaseModel):
     conversation_history: Literal["session_local"] = "session_local"
     memory_storage: Literal["in_process"] = "in_process"
     principal_label: str
+    health: SystemHealthItem | None = None
+    # Hands-free wake word: "unavailable" without the local voice stack.
+    voice_activation: Literal["on", "off", "unavailable"] = "unavailable"
 
 
 class SourceLocation(BaseModel):
@@ -327,6 +374,17 @@ class VoiceResponse(OperationResult):
     speaker_result: str | None = None
     language: Literal["fa", "en"] | None = None
     direction: Literal["rtl", "ltr"] | None = None
+
+
+class VoiceWakeResponse(OperationResult):
+    """One bit per wake candidate. Never the recognized text."""
+
+    wake: bool = False
+    followed: bool = False
+
+
+class VoiceActivationResponse(OperationResult):
+    voice_activation: Literal["on", "off", "unavailable"] = "unavailable"
 
 
 class SpeakResponse(OperationResult):

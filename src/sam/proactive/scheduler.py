@@ -364,7 +364,13 @@ class ProactiveScheduler:
             task = self._repo.get_task(live.task_id)
             if task is None:
                 return  # deleted mid-run: nothing is surfaced
-            self._apply(task, live, outcome)
+            try:
+                self._apply(task, live, outcome)
+            except Exception:
+                # Phase 17: a storage failure (e.g. a full disk) while recording
+                # the result. Each write group is atomic, so nothing half-done is
+                # stored; the result is dropped, never reported as recorded.
+                logger.warning("proactive run result not recorded")
 
     def _apply(self, task: ProactiveTask, live: _Live, outcome: RunOutcome) -> None:
         completed = self._clock()
@@ -438,12 +444,15 @@ class ProactiveScheduler:
             previous.last_notified_at, now, task.cooldown_hours
         ):
             return RunResult.NO_NOTIFICATION, "cooldown", False
-        safe = self._notify_owner(task, draft, now)
-        if draft.cooldown_applies:
-            state = self._repo.get_condition(task.task_id)
-            self._repo.set_condition(
-                task.task_id, state.model_copy(update={"last_notified_at": now})
-            )
+        # The notification, its dedup key and the cooldown mark are written
+        # together (one transaction on a durable repository).
+        with self._repo.atomic():
+            safe = self._notify_owner(task, draft, now)
+            if draft.cooldown_applies:
+                state = self._repo.get_condition(task.task_id)
+                self._repo.set_condition(
+                    task.task_id, state.model_copy(update={"last_notified_at": now})
+                )
         reason = (
             safe.reason.value
             if safe.withheld is Withheld.NONE
@@ -513,7 +522,8 @@ class ProactiveScheduler:
                     privacy=task.privacy_class,
                 )
                 if not self._repo.dedup.is_duplicate(draft.dedup_key, now):
-                    self._notify_owner(task, draft, now)
+                    with self._repo.atomic():
+                        self._notify_owner(task, draft, now)
             return
         # SKIP_TO_NEXT: one record, no replay, whatever the backlog.
         try:

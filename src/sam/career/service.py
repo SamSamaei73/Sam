@@ -58,6 +58,7 @@ from sam.career.applications import (
     submission_scope,
 )
 from sam.career.attempts import (
+    AttemptConflict,
     AttemptLedger,
     AttemptReference,
     AttemptState,
@@ -66,8 +67,10 @@ from sam.career.attempts import (
     ExternalActionResult,
     ExternalActionStatus,
     Interpretation,
+    LedgerFull,
     interpret,
 )
+from sam.career.attempts import AttemptStore as _AttemptStore
 from sam.career.audit import (
     CareerAuditSink,
     CareerOperation,
@@ -115,10 +118,12 @@ from sam.career.models import (
     QuestionClass,
     SourceKind,
     clean_text,
+    sha256,
 )
 from sam.career.opportunities import ListingRejected, normalize_listing
 from sam.career.outreach import SENDABLE_CHANNELS, build_outreach
 from sam.career.questions import SENSITIVE, make_questions, prefill, unresolved
+from sam.career.readiness import ExternalActionReadiness, ReadinessProbe
 from sam.career.repository import (
     CareerRepository,
     InMemoryCareerRepository,
@@ -149,6 +154,7 @@ from sam.permissions.models import (
     Principal,
     utc_now,
 )
+from sam.storage.errors import StorageError
 
 _R = PermissionResource.CAREER
 _ROOT = PermissionScope.from_path("career")
@@ -276,6 +282,8 @@ class CareerService:
         email: EmailTool | None = None,
         motivation_writer: MotivationWriter | None = None,
         clock: Callable[[], datetime] = utc_now,
+        attempt_store: _AttemptStore | None = None,
+        readiness: ReadinessProbe | None = None,
     ) -> None:
         self._permissions = permission_engine
         self._evidence = evidence
@@ -288,11 +296,104 @@ class CareerService:
         self._writer = motivation_writer
         self._clock = clock
         self._checker = ClaimChecker(evidence, self._papers)
-        self._attempts = AttemptLedger()
+        self._attempts = AttemptLedger(store=attempt_store)
+        # Real SUBMIT / SEND need EVERY readiness condition (durable ledger,
+        # migrations, reconciliation, destination checks, a configured trusted
+        # adapter, permission). No probe means not ready: fail closed.
+        self._readiness = readiness
 
     @property
     def attempts(self) -> AttemptLedger:
         return self._attempts
+
+    def readiness(self, action: ExternalAction) -> ExternalActionReadiness:
+        adapter = self._submitter if action is ExternalAction.SUBMIT else self._email
+        if self._readiness is None:
+            return ExternalActionReadiness.not_ready(
+                adapter_configured=adapter is not None
+            )
+        return self._readiness(action, adapter is not None)
+
+    def _external_ready(self, action: ExternalAction) -> bool:
+        return self.readiness(action).ready
+
+    @_serialized
+    def recover_after_restart(self) -> Mapping[str, int]:
+        """Crash recovery, run once at startup BEFORE any request is served.
+
+        * every attempt that was IN_FLIGHT becomes OUTCOME_UNKNOWN (it may have
+          happened); nothing becomes failed or retryable;
+        * each draft / message follows its attempt: in flight or unknown ->
+          OUTCOME_UNKNOWN, verified success -> SUBMITTED / SENT, verified
+          failure -> SUBMISSION_FAILED / SEND_FAILED;
+        * a draft that was ready or approved but lost its (never persisted)
+          sensitive answers goes back to the owner: approval cleared.
+        """
+
+        now = self._clock()
+        recovered = self._attempts.recover_after_restart(now)
+        drafts = outreach = reopened = 0
+        with self.repository.atomic():
+            for draft in self.repository.list_drafts():
+                updated = self._recover_draft(draft, now)
+                if updated is not draft:
+                    self.repository.put_draft(updated)
+                    drafts += draft.state is S.SUBMITTING
+                    reopened += draft.state is not S.SUBMITTING
+            for message in self.repository.list_outreach():
+                if message.state is not OutreachState.SENDING:
+                    continue
+                attempt = self._attempts.get(message.attempt_id or "")
+                state = {
+                    AttemptState.VERIFIED_SUCCESS: OutreachState.SENT,
+                    AttemptState.VERIFIED_FAILURE: OutreachState.SEND_FAILED,
+                }.get(
+                    attempt.state if attempt else AttemptState.OUTCOME_UNKNOWN,
+                    OutreachState.OUTCOME_UNKNOWN,
+                )
+                self.repository.put_outreach(
+                    message.model_copy(
+                        update={
+                            "state": state,
+                            "last_failure": "interrupted_by_restart",
+                        }
+                    )
+                )
+                outreach += 1
+        return {
+            "attempts_unknown": len(recovered),
+            "drafts_recovered": drafts,
+            "outreach_recovered": outreach,
+            "drafts_reopened": reopened,
+        }
+
+    def _recover_draft(
+        self, draft: ApplicationDraft, now: datetime
+    ) -> ApplicationDraft:
+        if draft.state is S.SUBMITTING:
+            attempt = self._attempts.get(draft.attempt_id or "")
+            target = {
+                AttemptState.VERIFIED_SUCCESS: S.SUBMITTED,
+                AttemptState.VERIFIED_FAILURE: S.SUBMISSION_FAILED,
+            }.get(
+                attempt.state if attempt else AttemptState.OUTCOME_UNKNOWN,
+                S.OUTCOME_UNKNOWN,
+            )
+            return advance(draft, target, now).model_copy(
+                update={
+                    "approved_binding": None,
+                    "last_failure": "interrupted_by_restart",
+                }
+            )
+        if draft.state in (
+            S.READY_FOR_OWNER_REVIEW,
+            S.APPROVED_FOR_SUBMISSION,
+        ) and unresolved(draft.questions, draft.answers):
+            back = advance(draft, S.DRAFTING, now)
+            return advance(back, S.NEEDS_OWNER_INPUT, now).model_copy(
+                update={"approved_binding": None}
+            )
+        return draft
 
     # ------------------------------------------------------------ plumbing
 
@@ -420,8 +521,10 @@ class CareerService:
             follow_ups=self.repository.list_follow_ups(),
             review_queue=self._queue(principal, drafts),
             preferences=self.repository.get_preferences(principal.id),
-            submission_available=self._submitter is not None,
-            sending_available=self._email is not None,
+            submission_available=self._submitter is not None
+            and self._external_ready(ExternalAction.SUBMIT),
+            sending_available=self._email is not None
+            and self._external_ready(ExternalAction.SEND),
         )
         self._record(CareerOperation.READ, principal, "allow", "ok")
         return OpResult("allow", True, data=data)
@@ -1229,6 +1332,8 @@ class CareerService:
             return OpResult("deny", False, "not_approved_for_submission")
         if self._submitter is None:
             return OpResult("deny", False, "submission_unavailable")
+        if not self._external_ready(ExternalAction.SUBMIT):
+            return OpResult("deny", False, "external_actions_not_ready")
         now = self._clock()
         documents = self._documents(draft)
         problems = list(
@@ -1334,28 +1439,42 @@ class CareerService:
                 confirmation_id=pending or confirmation_id,
                 **audit,
             )
-        attempt = self._attempts.start(
-            action=ExternalAction.SUBMIT,
-            owner_id=principal.id,
-            opportunity_id=draft.opportunity_id,
-            item_id=draft_id,
-            item_version=draft.version,
-            manifest_hash=manifest.digest,
-            now=now,
-        )
-        submitting = advance(draft, S.SUBMITTING, now).model_copy(
-            update={"attempt_id": attempt.attempt_id, "last_failure": None}
-        )
-        self.repository.put_draft(submitting)
-        self._record(
-            op,
-            principal,
-            permission,
-            "in_flight",
-            confirmation_id=confirmation_id,
-            attempt_id=attempt.attempt_id,
-            **audit,
-        )
+        # The durable reservation: attempt IN_FLIGHT + draft SUBMITTING + audit,
+        # in ONE transaction. Only after it commits may the adapter be called;
+        # if it cannot commit (disk full, I/O error, a concurrent attempt),
+        # nothing is dispatched.
+        try:
+            with self.repository.atomic():
+                attempt = self._attempts.start(
+                    action=ExternalAction.SUBMIT,
+                    owner_id=principal.id,
+                    opportunity_id=draft.opportunity_id,
+                    item_id=draft_id,
+                    item_version=draft.version,
+                    manifest_hash=manifest.digest,
+                    now=now,
+                    destination=guard.host,
+                )
+                submitting = advance(draft, S.SUBMITTING, now).model_copy(
+                    update={"attempt_id": attempt.attempt_id, "last_failure": None}
+                )
+                self.repository.put_draft(submitting)
+                self._record(
+                    op,
+                    principal,
+                    permission,
+                    "in_flight",
+                    confirmation_id=confirmation_id,
+                    attempt_id=attempt.attempt_id,
+                    **audit,
+                )
+        except AttemptConflict:
+            blocking = self._attempts.blocking(ExternalAction.SUBMIT, draft_id)
+            if blocking is not None:
+                return self._attempt_answer(blocking, draft)
+            return OpResult("deny", False, "already_in_flight")
+        except (StorageError, LedgerFull, RepositoryFull):
+            return OpResult("deny", False, "attempt_not_recorded")
         return _Reserved(
             attempt,
             (
@@ -1369,6 +1488,25 @@ class CareerService:
         )
 
     def _settle_submission(
+        self,
+        principal: Principal,
+        attempt: ExternalActionAttempt,
+        outcome: Interpretation,
+        confirmation_id: str | None,
+    ) -> OpResult[ApplicationDraft]:
+        """Settle in ONE transaction. If the result cannot be written, the
+        durable attempt stays IN_FLIGHT, so a restart makes it OUTCOME_UNKNOWN:
+        a lost receipt never turns into a retry."""
+
+        try:
+            with self.repository.atomic():
+                return self._settle_submission_unsafe(
+                    principal, attempt, outcome, confirmation_id
+                )
+        except (StorageError, RepositoryFull):
+            return OpResult("allow", False, "result_not_recorded")
+
+    def _settle_submission_unsafe(
         self,
         principal: Principal,
         attempt: ExternalActionAttempt,
@@ -1816,6 +1954,8 @@ class CareerService:
             return OpResult("deny", False, "not_approved")
         if self._email is None:
             return OpResult("deny", False, "email_unavailable")
+        if not self._external_ready(ExternalAction.SEND):
+            return OpResult("deny", False, "external_actions_not_ready")
         contact = self.repository.get_contact(draft.contact_id)
         if contact is None or not contact.email:
             return OpResult("deny", False, "no_verified_email")
@@ -1879,32 +2019,42 @@ class CareerService:
             return self._denied(
                 op, principal, permission, reason, pending, source="email_tool", **audit
             )
-        attempt = self._attempts.start(
-            action=ExternalAction.SEND,
-            owner_id=principal.id,
-            opportunity_id=draft.opportunity_id,
-            item_id=outreach_id,
-            item_version=draft.version,
-            manifest_hash=manifest.digest,
-            now=self._clock(),
-        )
-        self.repository.put_outreach(
-            draft.model_copy(
-                update={
-                    "state": OutreachState.SENDING,
-                    "attempt_id": attempt.attempt_id,
-                }
-            )
-        )
-        self._record(
-            op,
-            principal,
-            "allow",
-            "in_flight",
-            confirmation_id=confirmation_id,
-            attempt_id=attempt.attempt_id,
-            **audit,
-        )
+        try:
+            with self.repository.atomic():
+                attempt = self._attempts.start(
+                    action=ExternalAction.SEND,
+                    owner_id=principal.id,
+                    opportunity_id=draft.opportunity_id,
+                    item_id=outreach_id,
+                    item_version=draft.version,
+                    manifest_hash=manifest.digest,
+                    now=self._clock(),
+                    destination="sha256:" + sha256(recipient.strip().casefold()),
+                )
+                self.repository.put_outreach(
+                    draft.model_copy(
+                        update={
+                            "state": OutreachState.SENDING,
+                            "attempt_id": attempt.attempt_id,
+                        }
+                    )
+                )
+                self._record(
+                    op,
+                    principal,
+                    "allow",
+                    "in_flight",
+                    confirmation_id=confirmation_id,
+                    attempt_id=attempt.attempt_id,
+                    **audit,
+                )
+        except AttemptConflict:
+            blocking = self._attempts.blocking(ExternalAction.SEND, outreach_id)
+            if blocking is not None:
+                return self._attempt_answer(blocking, draft)
+            return OpResult("deny", False, "already_in_flight")
+        except (StorageError, LedgerFull, RepositoryFull):
+            return OpResult("deny", False, "attempt_not_recorded")
         message = OutboundEmail(
             attempt.reference, recipient, draft.subject, draft.body, manifest.digest
         )
@@ -1920,6 +2070,25 @@ class CareerService:
         )
 
     def _settle_send(
+        self,
+        principal: Principal,
+        attempt: ExternalActionAttempt,
+        outcome: Interpretation,
+        confirmation_id: str | None,
+    ) -> OpResult[OutreachDraft]:
+        """Settle in ONE transaction. If the result cannot be written, the
+        durable attempt stays IN_FLIGHT, so a restart makes it OUTCOME_UNKNOWN:
+        a lost receipt never turns into a retry."""
+
+        try:
+            with self.repository.atomic():
+                return self._settle_send_unsafe(
+                    principal, attempt, outcome, confirmation_id
+                )
+        except (StorageError, RepositoryFull):
+            return OpResult("allow", False, "result_not_recorded")
+
+    def _settle_send_unsafe(
         self,
         principal: Principal,
         attempt: ExternalActionAttempt,

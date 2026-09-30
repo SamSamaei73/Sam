@@ -1,50 +1,44 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { SamBridge } from "./bridge/bridge";
+import { AppNavigation, type NavEntry } from "./components/AppNavigation";
+import { GuestBanner } from "./components/GuestBanner";
 import {
   IconActivity,
   IconCareer,
-  IconChat,
+  IconHistory,
+  IconHome,
   IconKnowledge,
   IconMemory,
-  IconPanelLeft,
   IconProactive,
   IconProfessional,
   IconSettings,
   IconShield,
   IconTools,
 } from "./components/Icons";
-import type { ChatMessage } from "./components/MessageBubble";
-import { IconButton } from "./components/primitives";
-import { Sidebar, type NavEntry } from "./components/Sidebar";
-import { SystemPanel } from "./components/SystemPanel";
+import type { StringKey } from "./i18n/strings";
+import type { LocalSpeechOutput } from "./lib/localSpeech";
 import type { AudioEnvironment } from "./lib/recorder";
-import { GuestBanner } from "./components/GuestBanner";
+import { StartupScreen } from "./home/StartupScreen";
+import { SessionProvider } from "./session";
 import { SamProvider, useSam } from "./state";
 import { ActivityView } from "./views/ActivityView";
 import { CareerView } from "./views/CareerView";
+import { HistoryView } from "./views/HistoryView";
+import { HomeView } from "./views/HomeView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { MemoryView } from "./views/MemoryView";
 import { PermissionsView } from "./views/PermissionsView";
 import { ProactiveView } from "./views/ProactiveView";
 import { ProfessionalView } from "./views/ProfessionalView";
-import { SamView } from "./views/SamView";
 import { SettingsView } from "./views/SettingsView";
 import { ToolsView } from "./views/ToolsView";
+import type { ViewId } from "./views/viewIds";
 
-export type ViewId =
-  | "sam"
-  | "knowledge"
-  | "professional"
-  | "proactive"
-  | "career"
-  | "memory"
-  | "tools"
-  | "permissions"
-  | "activity"
-  | "settings";
+export type { ViewId } from "./views/viewIds";
 
 const NAV_ICONS: Record<ViewId, ReactNode> = {
-  sam: <IconChat />,
+  home: <IconHome />,
+  history: <IconHistory />,
   knowledge: <IconKnowledge />,
   professional: <IconProfessional />,
   proactive: <IconProactive />,
@@ -55,8 +49,9 @@ const NAV_ICONS: Record<ViewId, ReactNode> = {
   activity: <IconActivity />,
   settings: <IconSettings />,
 };
-const NAV_KEYS = {
-  sam: "nav.chat",
+const NAV_KEYS: Record<ViewId, StringKey> = {
+  home: "nav.home",
+  history: "nav.history",
   knowledge: "nav.knowledge",
   professional: "nav.professional",
   proactive: "nav.proactive",
@@ -66,86 +61,35 @@ const NAV_KEYS = {
   permissions: "nav.permissions",
   activity: "nav.activity",
   settings: "nav.settings",
-} as const;
+};
 const VIEW_ORDER: ViewId[] = [
-  "sam",
-  "knowledge",
+  "home",
   "professional",
-  "proactive",
   "career",
+  "proactive",
+  "knowledge",
   "memory",
   "tools",
-  "permissions",
+  "history",
   "activity",
+  "permissions",
   "settings",
 ];
 
-interface Conversation {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-}
-
-let conversationCounter = 0;
-const newConversation = (): Conversation => ({
-  id: `c${++conversationCounter}`,
-  title: "New chat",
-  messages: [],
-});
-
-function titleFrom(messages: ChatMessage[]): string {
-  const first = messages.find((m) => m.role === "user");
-  if (!first) return "New chat";
-  const text = first.text.replace(/\s+/g, " ").trim();
-  return text.length > 36 ? `${text.slice(0, 36)}…` : text;
-}
-
-function Shell({ audioEnvironment }: { audioEnvironment?: AudioEnvironment | null }) {
-  const { connection, prefs, updatePrefs, status, refreshStatus, t } = useSam();
-  const NAV: (NavEntry & { id: ViewId })[] = VIEW_ORDER.map((id) => ({
+function Shell() {
+  const { connection, prefs, updatePrefs, refreshStatus, t } = useSam();
+  const nav: (NavEntry & { id: ViewId })[] = VIEW_ORDER.map((id) => ({
     id,
     label: t(NAV_KEYS[id]),
     icon: NAV_ICONS[id],
   }));
-  const [view, setView] = useState<ViewId>("sam");
-  const [panelOpen, setPanelOpen] = useState(false);
-  // Conversation history is session-local React state: never persisted.
-  const [conversations, setConversations] = useState<Conversation[]>(() => [newConversation()]);
-  const [activeId, setActiveId] = useState<string>(() => conversations[0]?.id ?? "");
-  const active = conversations.find((c) => c.id === activeId) ?? conversations[0];
-
-  const setMessages = useCallback(
-    (update: React.SetStateAction<ChatMessage[]>) => {
-      setConversations((current) =>
-        current.map((c) => {
-          if (c.id !== activeId) return c;
-          const messages = typeof update === "function" ? update(c.messages) : update;
-          return { ...c, messages, title: titleFrom(messages) };
-        }),
-      );
-    },
-    [activeId],
-  );
-
-  const newChat = () => {
-    setView("sam");
-    if (active && active.messages.length === 0) return;
-    const created = newConversation();
-    setConversations((current) => [created, ...current]);
-    setActiveId(created.id);
-  };
-
-  const select = (id: string) => {
-    setActiveId(id);
-    setView("sam");
-  };
-
+  const [view, setView] = useState<ViewId>("home");
   const collapsed = prefs.sidebarCollapsed;
+  if (connection === "starting") return <StartupScreen />;
   return (
     <div className="app">
-      <div className="pulse" data-state={connection} aria-hidden="true" />
       <GuestBanner />
-      {connection === "unavailable" ? (
+      {connection === "unavailable" && view !== "home" ? (
         <div className="banner" role="alert">
           <span>Can't reach Sam's backend</span>
           <span className="spacer" />
@@ -154,45 +98,21 @@ function Shell({ audioEnvironment }: { audioEnvironment?: AudioEnvironment | nul
           </button>
         </div>
       ) : null}
-      <div className="body" data-collapsed={collapsed ? "true" : "false"}>
-        <Sidebar
-          nav={NAV}
+      <div className="body">
+        <AppNavigation
+          nav={nav}
           view={view}
           onNavigate={(id) => setView(id as ViewId)}
           connection={connection}
-          conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
-          activeConversation={active?.id ?? ""}
-          onSelectConversation={select}
-          onNewChat={newChat}
-          onCollapse={() => updatePrefs({ sidebarCollapsed: true })}
+          collapsed={collapsed}
+          onToggle={() => updatePrefs({ sidebarCollapsed: !collapsed })}
         />
-        {collapsed ? (
-          <div className="reopen">
-            <IconButton label="Expand sidebar" onClick={() => updatePrefs({ sidebarCollapsed: false })}>
-              <IconPanelLeft />
-            </IconButton>
-          </div>
-        ) : null}
-        <main className="main" aria-label={NAV.find((n) => n.id === view)?.label}>
-          <div className="main-col">
-            {view === "sam" && active ? (
-              <SamView
-                messages={active.messages}
-                setMessages={setMessages}
-                conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
-                activeConversation={active.id}
-                onSelectConversation={select}
-                onNewChat={newChat}
-                panelOpen={panelOpen}
-                onTogglePanel={() => setPanelOpen((open) => !open)}
-                onNavigate={setView}
-                audioEnvironment={audioEnvironment}
-              />
-            ) : (
-              <div className="page">{pageFor(view)}</div>
-            )}
-          </div>
-          {view === "sam" && panelOpen ? <SystemPanel status={status} /> : null}
+        <main className="main" aria-label={nav.find((n) => n.id === view)?.label}>
+          {view === "home" ? (
+            <HomeView onNavigate={setView} />
+          ) : (
+            <div className="page">{pageFor(view)}</div>
+          )}
         </main>
       </div>
     </div>
@@ -201,6 +121,8 @@ function Shell({ audioEnvironment }: { audioEnvironment?: AudioEnvironment | nul
 
 function pageFor(view: ViewId): ReactNode {
   switch (view) {
+    case "history":
+      return <HistoryView />;
     case "knowledge":
       return <KnowledgeView />;
     case "professional":
@@ -224,11 +146,22 @@ function pageFor(view: ViewId): ReactNode {
   }
 }
 
-export function App({ bridge, audioEnvironment }: { bridge: SamBridge; audioEnvironment?: AudioEnvironment | null }) {
+export function App({
+  bridge,
+  audioEnvironment,
+  speech,
+}: {
+  bridge: SamBridge;
+  audioEnvironment?: AudioEnvironment | null;
+  /** Local voice for hands-free replies (tests inject a fake). */
+  speech?: LocalSpeechOutput | null;
+}) {
   return (
     <SamProvider bridge={bridge} audioEnvironment={audioEnvironment}>
-      <div className="scene" aria-hidden="true" />
-      <Shell audioEnvironment={audioEnvironment} />
+      <SessionProvider {...(speech !== undefined ? { speech } : {})}>
+        <div className="scene" aria-hidden="true" />
+        <Shell />
+      </SessionProvider>
     </SamProvider>
   );
 }

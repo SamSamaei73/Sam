@@ -31,12 +31,16 @@ async function settings(bridge: ReturnType<typeof mockBridge>, env = fakeAudioEn
   renderApp(bridge, env.env);
   const user = userEvent.setup();
   await screen.findByLabelText("Connection: Connected");
-  await user.click(screen.getByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByRole("button", { name: "Settings" }));
   return { user, env };
 }
 
-async function record(user: ReturnType<typeof userEvent.setup>, env: ReturnType<typeof fakeAudioEnvironment>) {
-  await user.click(screen.getByRole("button", { name: "Record a voice message" }));
+async function record(
+  user: ReturnType<typeof userEvent.setup>,
+  env: ReturnType<typeof fakeAudioEnvironment>,
+  name = "Record a voice message",
+) {
+  await user.click(screen.getByRole("button", { name }));
   act(() => env.emit(new Float32Array(4000).fill(0.1)));
   await user.click(screen.getByRole("button", { name: "Stop recording and send" }));
 }
@@ -255,7 +259,7 @@ describe("Guest Mode", () => {
     });
     await waitFor(() => expect(banner.closest(".guest-banner")).toHaveTextContent("9:57"));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    await user.click(screen.getByRole("button", { name: "Knowledge" }));
+    await user.click(await screen.findByRole("button", { name: "Knowledge" }));
     expect(screen.getByText("Guest Mode is active")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "End Guest Mode" }));
     await waitFor(() => expect(bridge.guestEnd).toHaveBeenCalled());
@@ -282,7 +286,7 @@ describe("Voice results", () => {
     renderApp(bridge, env.env);
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    await record(user, env);
+    await record(user, env, "Talk to Sam");
     return user;
   };
   const base = { ...ok, forwarded_to_agent: false, reply: null, language: null, direction: null };
@@ -320,7 +324,11 @@ describe("Voice results", () => {
         direction: "ltr" as const,
       })),
     });
-    await speak(bridge);
+    const user = await speak(bridge);
+    const latest = screen.getByRole("region", { name: "Latest exchange" });
+    expect(await within(latest).findByText("Guest")).toBeInTheDocument();
+    expect(within(latest).queryByText("You")).toBeNull();
+    await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "History" }));
     const log = screen.getByRole("log");
     const said = await within(log).findByText("tell me a joke");
     expect(said.closest("article")).toHaveAttribute("data-role", "guest");

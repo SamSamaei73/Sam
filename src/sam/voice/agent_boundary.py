@@ -73,6 +73,9 @@ class VoiceAgentOutcome(BaseModel):
     forwarded_to_agent: bool = False
     agent_error: bool = False
     agent_message: str | None = Field(default=None, repr=False)
+    # The transcript was deliberately NOT forwarded because the caller's
+    # ``hold`` check matched it (e.g. a hands-free "go to sleep").
+    held: bool = False
 
 
 def _forwardable_transcript(voice: VoiceProcessingResult) -> str | None:
@@ -109,10 +112,16 @@ class VoiceAgentBoundary:
         self._language_for = language_for
 
     def handle_voice(
-        self, request: VoiceProcessingRequest, *, confirmation_id: str | None = None
+        self,
+        request: VoiceProcessingRequest,
+        *,
+        confirmation_id: str | None = None,
+        hold: Callable[[str], bool] | None = None,
     ) -> VoiceAgentOutcome:
         """Process one explicit voice request. Never raises; forwards to the
-        agent at most once, and only a successfully validated transcript."""
+        agent at most once, and only a successfully validated transcript.
+        ``hold`` may only PREVENT forwarding (never cause it): when it returns
+        True for the transcript, the agent is not called at all."""
 
         try:
             voice = self._gateway.process(request, confirmation_id=confirmation_id)
@@ -129,6 +138,13 @@ class VoiceAgentBoundary:
         transcript = _forwardable_transcript(voice)
         if transcript is None:
             return VoiceAgentOutcome(voice=voice)
+        if hold is not None:
+            try:
+                held = hold(transcript)
+            except Exception:
+                held = True  # fail closed: when in doubt, do not forward
+            if held:
+                return VoiceAgentOutcome(voice=voice, held=True)
         try:
             language = (
                 self._language_for(transcript, voice.language)

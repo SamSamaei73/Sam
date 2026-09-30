@@ -39,7 +39,9 @@ import type {
   SpeakResponse,
   StatusResponse,
   ToolsResponse,
+  VoiceActivationResponse,
   VoiceResponse,
+  VoiceWakeResponse,
 } from "./types";
 
 /**
@@ -77,7 +79,13 @@ export interface SamBridge {
     audioBase64: string,
     confirmationId?: string,
     language?: LanguageChoice,
+    /** A hands-free conversation turn (a stop phrase ends it, unsent). */
+    handsFree?: boolean,
   ): Promise<VoiceResponse>;
+  /** Is this short speech segment Sam's name? LOCAL recognizer; one bit back. */
+  voiceWake(audioBase64: string): Promise<VoiceWakeResponse>;
+  /** The owner-only hands-free switch (refused in Guest Mode). */
+  setVoiceActivation(enabled: boolean): Promise<VoiceActivationResponse>;
   speak(input: {
     text: string;
     voiceProfile: string;
@@ -142,7 +150,8 @@ export interface SamBridge {
   proactiveRun(taskId: string): Promise<OperationResult>;
   proactiveNotification(notificationId: string, action: "read" | "dismiss"): Promise<OperationResult>;
   /** The owner's switch for background scheduling. Turning it on grants nothing. */
-  proactiveScheduler(enabled: boolean): Promise<ProactiveSchedulerResult>;
+  /** ``remember`` keeps scheduling on across restarts (owner choice, default off). */
+  proactiveScheduler(enabled: boolean, remember?: boolean): Promise<ProactiveSchedulerResult>;
 
   // Career & PhD Agent: review first. Sam discovers, analyses and drafts
   // locally. Submitting and sending are separate, confirmed commands bound to
@@ -172,6 +181,7 @@ export class BridgeError extends Error {
 }
 
 export const SAFE_ERROR_MESSAGES: Record<string, string> = {
+  starting: "Sam is starting.",
   unavailable: "Sam's backend isn't reachable.",
   timeout: "Sam's backend took too long to respond.",
   unauthorized: "The desktop app couldn't authenticate with Sam's backend.",

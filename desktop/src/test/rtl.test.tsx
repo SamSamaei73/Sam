@@ -11,8 +11,11 @@ async function chat(bridge: ReturnType<typeof mockBridge>, text: string) {
   renderApp(bridge);
   const user = userEvent.setup();
   await screen.findByLabelText("Connection: Connected");
+  await user.click(screen.getByRole("button", { name: "Type to Sam" }));
   await user.type(screen.getByLabelText("Message Sam"), text);
   await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(screen.getByRole("region", { name: "Latest exchange" }).querySelector(".transient-reply")).not.toBeNull());
+  await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "History" }));
   return user;
 }
 
@@ -63,6 +66,21 @@ describe("Persian / RTL rendering", () => {
     expect(bubble).toHaveAttribute("lang", "en");
   });
 
+  it("renders a Persian reply right-to-left in Home's transient line too", async () => {
+    const bridge = mockBridge({
+      chat: vi.fn(async () => ({ ...ok, reply: FA_REPLY, language: "fa" as const, direction: "rtl" as const })),
+    });
+    renderApp(bridge);
+    const user = userEvent.setup();
+    await screen.findByLabelText("Connection: Connected");
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
+    await user.type(screen.getByLabelText("Message Sam"), "x");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    const latest = screen.getByRole("region", { name: "Latest exchange" });
+    await waitFor(() => expect(latest.querySelector('.transient-reply [dir="rtl"]')).not.toBeNull());
+    expect(document.documentElement.dir).toBe("ltr");
+  });
+
   it("detects a Persian message without backend hints (user's own text)", async () => {
     await chat(mockBridge(), FA_QUESTION);
     const own = (await within(screen.getByRole("log")).findByText(FA_QUESTION)).closest(".bubble") as HTMLElement;
@@ -94,6 +112,7 @@ describe("Persian / RTL rendering", () => {
 
   it("the composer flows naturally for Persian typing (dir=auto)", async () => {
     renderApp(mockBridge());
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Type to Sam" }));
     const box = await screen.findByLabelText("Message Sam");
     expect(box).toHaveAttribute("dir", "auto");
   });
@@ -103,9 +122,10 @@ describe("Persian / RTL rendering", () => {
     renderApp(bridge);
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: "Settings" }));
     await user.selectOptions(await screen.findByRole("combobox", { name: /response language/i }), "fa");
-    await user.click(screen.getByRole("button", { name: "Chat" }));
+    await user.click(await screen.findByRole("button", { name: "Home" }));
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
     await user.type(screen.getByLabelText("Message Sam"), "hello");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(bridge.chat).toHaveBeenCalledWith("hello", "fa", "normal"));
@@ -118,12 +138,12 @@ describe("Persian interface", () => {
     renderApp(mockBridge());
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: "Settings" }));
     await user.selectOptions(await screen.findByRole("combobox", { name: /interface language/i }), "fa");
     expect(document.documentElement.dir).toBe("rtl");
     expect(document.documentElement.lang).toBe("fa");
     const nav = screen.getByRole("navigation", { name: "Main" });
-    expect(within(nav).getByText("گفتگو")).toBeInTheDocument();
+    expect(within(nav).getByText("خانه")).toBeInTheDocument();
     expect(within(nav).getByText("تنظیمات")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "تنظیمات" })).toBeInTheDocument();
     expect(screen.getByText("زبان رابط")).toBeInTheDocument();

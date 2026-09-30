@@ -30,6 +30,7 @@ from sam.career.models import (
     OwnerContactDetails,
     SourceKind,
 )
+from sam.career.readiness import ExternalActionReadiness
 from sam.career.service import CareerService, OutboundEmail
 from sam.career.sources import DestinationGuard, RawListing
 from sam.desktop.career_ports import ProfessionalEvidence
@@ -267,6 +268,7 @@ class CareerRig:
     submitter: FakeSubmitter
     email: FakeEmail
     papers: FakePapers
+    db: Any = None  # the durable database, when a Phase 17 test uses one
 
     @property
     def engine(self) -> Any:
@@ -387,6 +389,21 @@ ALL_CAREER = (
 )
 
 
+def ready_for_tests(action: Any, adapter_configured: bool) -> ExternalActionReadiness:
+    """TEST-ONLY readiness: every safety condition is simulated as met, so the
+    Phase 16 behaviour can be exercised with local fakes."""
+
+    return ExternalActionReadiness(
+        durable_store_ready=True,
+        migrations_ready=True,
+        idempotency_ready=True,
+        reconciliation_ready=True,
+        destination_validation_ready=True,
+        adapter_configured=adapter_configured,
+        permission_ready=True,
+    )
+
+
 def make_rig(
     *,
     grant_all: bool = True,
@@ -396,8 +413,12 @@ def make_rig(
     with_cv: bool = True,
     start: datetime = NOW,
     motivation_writer: Any = None,
+    readiness: Any = ready_for_tests,
+    repository: Any = None,
+    attempt_store: Any = None,
+    pro_repository: Any = None,
 ) -> CareerRig:
-    pro = make_pro_rig()
+    pro = make_pro_rig(repository=pro_repository)
     if with_cv:
         ingest_cv(pro)
     clock = ManualClock(start)
@@ -412,6 +433,9 @@ def make_rig(
         email=email,
         motivation_writer=motivation_writer,
         clock=clock,
+        readiness=readiness,
+        repository=repository,
+        attempt_store=attempt_store,
     )
     rig = CareerRig(pro, service, clock, submitter, email, papers)
     if grant_all:
@@ -454,4 +478,5 @@ __all__ = [
     "result_for",
     "make_rig",
     "must",
+    "ready_for_tests",
 ]

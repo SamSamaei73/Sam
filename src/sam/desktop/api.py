@@ -55,13 +55,27 @@ from sam.desktop.models import (
     SpeakResponse,
     SpeechProfile,
     StatusResponse,
+    SubsystemHealthItem,
+    SystemHealthItem,
     ToolInfo,
     ToolsResponse,
+    VoiceActivationRequest,
+    VoiceActivationResponse,
     VoiceResponse,
     VoiceUtteranceRequest,
+    VoiceWakeRequest,
+    VoiceWakeResponse,
 )
-from sam.desktop.runtime import KNOWLEDGE_COLLECTION, DesktopRuntime
-from sam.desktop.security import bridge_runtime, owner_bridge_runtime
+from sam.desktop.runtime import (
+    KNOWLEDGE_COLLECTION,
+    DesktopRuntime,
+    bootstrap_identity,
+)
+from sam.desktop.security import (
+    bridge_runtime,
+    owner_bridge_runtime,
+    status_bridge_runtime,
+)
 from sam.knowledge.models import (
     GetResourceRequest as _Unused,  # noqa: F401  (kept out of the public surface)
 )
@@ -85,20 +99,31 @@ from sam.models.models import PrivacyClass
 from sam.permissions.errors import ConfirmationError, GrantNotFoundError
 from sam.permissions.models import ConfirmationStatus, GrantStatus, RiskLevel
 from sam.permissions.policy import classify
+from sam.system.health import Component, Overall, system_health
 from sam.tts.agent_boundary import SpeechProposal
 from sam.tts.models import TTSStatus
+from sam.voice.audio import validate_audio
 from sam.voice.models import (
     AudioFormat,
     AudioInput,
+    TranscriptionRequest,
     VoiceProcessingRequest,
     VoiceProcessingStatus,
 )
-from sam.voice_identity.policy import SpeakerClass
+from sam.voice.wake import (
+    MAX_WAKE_SECONDS,
+    MIN_WAKE_SECONDS,
+    detect_wake,
+    is_stop_phrase,
+)
+from sam.voice_identity.policy import SpeakerClass, SpeakerResult
 
 router = APIRouter(prefix="/desktop/v1", tags=["desktop"])
 _runtime = Depends(bridge_runtime)
 # Owner-bound routes: refused while Guest Mode is active (see security.py).
 _owner_runtime = Depends(owner_bridge_runtime)
+# Status stays answerable while startup is BLOCKED (it says why).
+_status_runtime = Depends(status_bridge_runtime)
 
 _PRIVACY = {
     "normal": PrivacyClass.NORMAL,
@@ -157,7 +182,12 @@ _MESSAGES = {
     "invalid_audio": "The voice service returned unusable audio.",
     "output_too_large": "The generated audio was too large.",
     "agent_error": "Sam couldn't reply to that.",
-    "owner_verification_required": "Owner verification required.",
+    "owner_verification_required": "Sam didn't recognize your voice.",
+    "voice_not_enrolled": "Set up your voice so Sam can recognize you.",
+    "voice_identity_unavailable": "Sam can't check your voice right now.",
+    "voice_not_heard": "Sam didn't catch that.",
+    "voice_activation_off": "Voice activation is off.",
+    "conversation_ended": "Okay.",
     "identity_not_configured": "Voice needs owner voice identity to be set up first.",
     "language_unsupported": "No trusted voice speaks that language: text only.",
 }
@@ -298,13 +328,13 @@ def _profile_languages(
 
 
 @router.get("/status", response_model=StatusResponse)
-def status(runtime: DesktopRuntime = _runtime) -> StatusResponse:
+def status(runtime: DesktopRuntime = _status_runtime) -> StatusResponse:
     registry = runtime.mcp_registry
     tools = registry.list_tools()
     servers = registry.list_servers()
     return StatusResponse(
         backend=HealthState(
-            status="ok",
+            status="ok" if runtime.blocked_reason is None else "degraded",
             service=runtime.settings.app_name,
             environment=runtime.settings.app_env,
         ),
@@ -334,6 +364,56 @@ def status(runtime: DesktopRuntime = _runtime) -> StatusResponse:
             else "not_configured"
         ),
         principal_label=runtime.principal.id,
+        health=_health(runtime),
+        voice_activation=_voice_activation(runtime),
+    )
+
+
+_OVERALL: dict[Overall, Literal["ready", "degraded", "blocked"]] = {
+    Overall.READY: "ready",
+    Overall.DEGRADED: "degraded",
+    Overall.BLOCKED: "blocked",
+}
+_COMPONENT: dict[
+    Component,
+    Literal[
+        "ok",
+        "in_memory",
+        "not_configured",
+        "disabled",
+        "degraded",
+        "unavailable",
+        "blocked",
+    ],
+] = {
+    Component.OK: "ok",
+    Component.IN_MEMORY: "in_memory",
+    Component.NOT_CONFIGURED: "not_configured",
+    Component.DISABLED: "disabled",
+    Component.DEGRADED: "degraded",
+    Component.UNAVAILABLE: "unavailable",
+    Component.BLOCKED: "blocked",
+}
+
+
+def _health(runtime: DesktopRuntime) -> SystemHealthItem:
+    health = system_health(runtime)
+    return SystemHealthItem(
+        status=_OVERALL[health.status],
+        phase=health.phase,
+        reason_code=health.reason_code,
+        storage_mode="sqlite" if health.storage_mode == "sqlite" else "memory",
+        schema_version=health.schema_version,
+        last_backup_at=health.last_backup_at,
+        backup_count=health.backup_count,
+        scheduler=health.scheduler,
+        reconciliation_required=health.reconciliation_required,
+        subsystems=[
+            SubsystemHealthItem(
+                name=s.name, status=_COMPONENT[s.status], reason_code=s.reason_code
+            )
+            for s in health.subsystems
+        ],
     )
 
 
@@ -644,6 +724,12 @@ def revoke(
             reason_code="resource_not_found",
             message=_message("resource_not_found"),
         )
+    if grant.metadata.get("origin") == "desktop_bootstrap":
+        # Phase 17: the owner's revocation of a trusted default must survive a
+        # restart (otherwise a restart would silently restore the access).
+        runtime.owner_settings.revoke_bootstrap_grant(
+            bootstrap_identity(grant.resource, grant.action, grant.scope)
+        )
     runtime.activity.add("permission", "Grant revoked", "revoked")
     return OperationResult(status="ok")
 
@@ -844,10 +930,13 @@ def voice_utterance(
     speaker_result = decision.result.value
     if decision.speaker_class is SpeakerClass.BLOCKED:
         runtime.activity.add("voice", "Speaker blocked", decision.result.value)
+        # Say WHY (safely): a missing profile is a setup step, not a failed
+        # identity check. Never a score, threshold or embedding.
+        blocked = _BLOCKED_REASON.get(decision.result, "owner_verification_required")
         return VoiceResponse(
             status="denied",
-            reason_code="owner_verification_required",
-            message=_message("owner_verification_required"),
+            reason_code=blocked,
+            message=_message(blocked),
             speaker_result=speaker_result,
         )
     if decision.speaker_class is SpeakerClass.GUEST:
@@ -883,6 +972,18 @@ def voice_utterance(
             confirmation_id=None
             if guest_context is not None
             else payload.confirmation_id,
+            hold=is_stop_phrase if payload.hands_free else None,
+        )
+    if outcome.held:
+        # A hands-free stop phrase: the conversation ends and nothing is sent
+        # to the agent (no model call, no transcript returned).
+        runtime.activity.add("voice", "Conversation ended", "ok")
+        return VoiceResponse(
+            status="ok",
+            reason_code="conversation_ended",
+            message=_message("conversation_ended"),
+            speaker=speaker,
+            speaker_result=speaker_result,
         )
     voice = outcome.voice
     if guest_context is None and voice.error_category is not None:
@@ -935,6 +1036,113 @@ def voice_utterance(
     )
     return VoiceResponse(
         **base.model_dump(), speaker=speaker, speaker_result=speaker_result
+    )
+
+
+_BLOCKED_REASON = {
+    SpeakerResult.NOT_ENROLLED: "voice_not_enrolled",
+    SpeakerResult.VERIFICATION_ERROR: "voice_identity_unavailable",
+    SpeakerResult.INSUFFICIENT_AUDIO: "voice_not_heard",
+}
+
+WAKE_TIMEOUT_SECONDS = 10.0
+
+
+def _voice_activation(runtime: DesktopRuntime) -> Literal["on", "off", "unavailable"]:
+    if runtime.wake_transcriber is None or runtime.identity is None:
+        return "unavailable"
+    return "on" if runtime.owner_settings.voice_activation() else "off"
+
+
+@router.post("/voice/wake", response_model=VoiceWakeResponse)
+def voice_wake(
+    payload: VoiceWakeRequest, runtime: DesktopRuntime = _runtime
+) -> VoiceWakeResponse:
+    """Was this short speech segment Sam's name? LOCAL recognizer only.
+
+    The recognized text is used for this one comparison and dropped: it is
+    never returned, logged, audited, stored, or given to the agent or any
+    provider. Waking grants nothing (the next turn is still identity-checked
+    and every action is still authorized). Bounded by a rate limit."""
+
+    if _voice_activation(runtime) != "on" or runtime.wake_transcriber is None:
+        return VoiceWakeResponse(
+            status="denied",
+            reason_code="voice_activation_off",
+            message=_message("voice_activation_off"),
+        )
+    audio = _decode(payload.audio_base64)
+    if not audio:
+        return VoiceWakeResponse(
+            status="rejected",
+            reason_code="malformed_audio",
+            message=_message("malformed_audio"),
+        )
+    try:
+        validated = validate_audio(
+            AudioInput(content=audio, declared_format=AudioFormat.WAV_PCM16)
+        )
+    except Exception:
+        return VoiceWakeResponse(
+            status="rejected",
+            reason_code="malformed_audio",
+            message=_message("malformed_audio"),
+        )
+    seconds = validated.metadata.duration_seconds
+    if seconds < MIN_WAKE_SECONDS or seconds > MAX_WAKE_SECONDS:
+        return VoiceWakeResponse(status="ok")  # not a wake candidate
+    if not runtime.wake_limiter.allow():
+        return VoiceWakeResponse(
+            status="rejected",
+            reason_code="rate_limited",
+            message=_message("rate_limited"),
+        )
+    try:
+        raw = runtime.wake_transcriber.transcribe(
+            TranscriptionRequest(
+                session_id="wake",
+                utterance_id=uuid4().hex,
+                audio=validated,
+                language_hint="en",
+            ),
+            timeout_seconds=WAKE_TIMEOUT_SECONDS,
+        )
+        text = raw.get("text") if isinstance(raw, dict) else raw
+        match = detect_wake(text if isinstance(text, str) else "")
+    except Exception:
+        return VoiceWakeResponse(
+            status="failed",
+            reason_code="voice_identity_unavailable",
+            message=_message("voice_identity_unavailable"),
+        )
+    # The recognized text goes no further than detect_wake.
+    return VoiceWakeResponse(status="ok", wake=match.wake, followed=match.followed)
+
+
+@router.post("/voice/activation", response_model=VoiceActivationResponse)
+def voice_activation(
+    payload: VoiceActivationRequest, runtime: DesktopRuntime = _owner_runtime
+) -> VoiceActivationResponse:
+    """The owner-only switch for hands-free wake-word listening. Guest Mode is
+    refused before this body is read; no model, tool or remote content can
+    reach this route. Turning it on grants no permission."""
+
+    if _voice_activation(runtime) == "unavailable":
+        return VoiceActivationResponse(
+            status="not_configured",
+            reason_code="not_configured",
+            message=_message("not_configured"),
+        )
+    runtime.owner_settings.set_voice_activation(payload.enabled)
+    if payload.enabled:
+        runtime.warm_wake_recognizer()
+    runtime.activity.add(
+        "voice",
+        "Voice activation on" if payload.enabled else "Voice activation off",
+        "ok",
+    )
+    return VoiceActivationResponse(
+        status="ok", voice_activation=_voice_activation(runtime)
     )
 
 

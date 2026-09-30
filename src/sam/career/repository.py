@@ -1,13 +1,16 @@
 """Persistence contract for the Career & PhD Agent.
 
-``CareerRepository`` is an abstraction; Phase 16 ships ONLY
-``InMemoryCareerRepository``: no SQLite, no file persistence, no cloud
-persistence. Everything is lost on restart. Every collection is bounded.
+``CareerRepository`` is an abstraction. ``InMemoryCareerRepository`` is the
+process-local implementation (tests, development); Phase 17 adds the durable
+``sam.storage.career.SQLiteCareerRepository`` behind the same protocol. Every
+collection is bounded. ``atomic()`` groups several writes (and the
+external-action ledger's, on the same database) into one transaction.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from threading import RLock
 from typing import Protocol, TypeVar
 
@@ -51,6 +54,7 @@ class CareerRepository(Protocol):
     def list_follow_ups(self) -> tuple[FollowUp, ...]: ...
     def get_preferences(self, owner_id: str) -> CareerPreferences: ...
     def set_preferences(self, owner_id: str, prefs: CareerPreferences) -> None: ...
+    def atomic(self) -> AbstractContextManager[None]: ...
 
 
 class _Table[V]:
@@ -157,6 +161,13 @@ class InMemoryCareerRepository:
     def set_preferences(self, owner_id: str, prefs: CareerPreferences) -> None:
         with self._lock:
             self._preferences[owner_id] = prefs
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """Process-local: the caller's single-flight lock already serializes."""
+
+        with self._lock:
+            yield
 
 
 __all__ = ["CareerRepository", "InMemoryCareerRepository", "RepositoryFull"]

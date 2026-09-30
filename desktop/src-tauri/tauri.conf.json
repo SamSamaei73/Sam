@@ -17,10 +17,11 @@
         "title": "Sam",
         "width": 1440,
         "height": 900,
-        "minWidth": 1050,
-        "minHeight": 700,
+        "minWidth": 900,
+        "minHeight": 640,
         "resizable": true,
-        "center": true
+        "center": true,
+        "theme": "Dark"
       }
     ],
     "security": {

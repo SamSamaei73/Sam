@@ -196,7 +196,7 @@ async function openProfessional(bridge: ReturnType<typeof mockBridge>) {
   renderApp(bridge);
   const user = userEvent.setup();
   await screen.findByLabelText("Connection: Connected");
-  await user.click(screen.getByRole("button", { name: "Professional" }));
+  await user.click(await screen.findByRole("button", { name: "Professional" }));
   await screen.findByRole("heading", { name: "Professional" });
   return user;
 }
@@ -224,7 +224,7 @@ describe("Professional view", () => {
     const view = renderApp(mockBridge({ professionalProfile: vi.fn(async () => populated) }));
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    await user.click(screen.getByRole("button", { name: "Professional" }));
+    await user.click(await screen.findByRole("button", { name: "Professional" }));
     await user.click(await screen.findByRole("tab", { name: "Skills" }));
     const python = await screen.findByLabelText("Claim Technology: Python");
     expect(within(python).getByText("Single source")).toBeInTheDocument();
@@ -309,7 +309,7 @@ describe("Professional view", () => {
     const view = renderApp(mockBridge({ professionalProfile: vi.fn(async () => populated) }));
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    await user.click(screen.getByRole("button", { name: "Professional" }));
+    await user.click(await screen.findByRole("button", { name: "Professional" }));
     await user.click(await screen.findByRole("tab", { name: "Publications" }));
     const paper = await screen.findByLabelText(/Publication Semantic Embeddings/);
     expect(within(paper).getByText("You are author #1.")).toBeInTheDocument();
@@ -362,7 +362,7 @@ describe("Professional view", () => {
     renderApp(mockBridge({ professionalIngest: ingest }));
     const user = userEvent.setup({ applyAccept: false });
     await screen.findByLabelText("Connection: Connected");
-    await user.click(screen.getByRole("button", { name: "Professional" }));
+    await user.click(await screen.findByRole("button", { name: "Professional" }));
     const input = await screen.findByLabelText("Choose a professional document");
     await user.upload(input, new File(["x"], "resume.docx"));
     expect(await screen.findByText(/file type isn't supported/i)).toBeInTheDocument();

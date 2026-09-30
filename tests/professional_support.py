@@ -201,6 +201,7 @@ def make_rig(
     candidate_extractor: CandidateExtractor | None = None,
     now: datetime = NOW,
     clock_advance: timedelta | None = None,
+    repository: Any = None,
 ) -> Rig:
     clock_state = {"now": now}
 
@@ -246,7 +247,7 @@ def make_rig(
             PermissionAction.DELETE,
             PermissionScope.from_path("profile"),
         )
-    repo = InMemoryProfessionalRepository()
+    repo = repository if repository is not None else InMemoryProfessionalRepository()
     audit = InMemoryProfessionalAuditSink()
     service = ProfessionalService(
         repository=repo,

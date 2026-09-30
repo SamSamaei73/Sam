@@ -20,6 +20,7 @@ Nothing here writes to Memory or Knowledge on its own.
 from __future__ import annotations
 
 import hmac
+import threading
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -28,7 +29,10 @@ from threading import RLock
 from typing import Literal
 
 from sam.agent.core import AgentCore
+from sam.career.attempts import AttemptStore, ExternalAction
 from sam.career.audit import InMemoryCareerAuditSink
+from sam.career.readiness import ExternalActionReadiness
+from sam.career.repository import CareerRepository, InMemoryCareerRepository
 from sam.career.service import CareerService
 from sam.core.config import Settings
 from sam.desktop.career_ports import KnowledgePapers, ProfessionalEvidence
@@ -36,12 +40,12 @@ from sam.desktop.identity import DesktopVoiceIdentity
 from sam.knowledge.audit import InMemoryKnowledgeAuditSink
 from sam.knowledge.engine import KnowledgeEngine
 from sam.knowledge.index import InMemoryLexicalIndex
-from sam.knowledge.store import InMemoryKnowledgeStore
+from sam.knowledge.store import InMemoryKnowledgeStore, KnowledgeStore
 from sam.language.hint import HintedTranscriptionProvider
 from sam.language.policy import LanguagePolicy, LanguagePreference
 from sam.mcp.registry import MCPRegistryAdmin, MCPRegistryReader
 from sam.memory.engine import MemoryEngine
-from sam.memory.store import InMemoryMemoryStore
+from sam.memory.store import InMemoryMemoryStore, MemoryStore
 from sam.memory.working import InMemoryWorkingMemoryStore
 from sam.models.factory import ModelSettingsStore
 from sam.models.models import PrivacyClass
@@ -50,6 +54,7 @@ from sam.permissions.audit import InMemoryAuditSink
 from sam.permissions.confirmation import InMemoryConfirmationProvider
 from sam.permissions.engine import PermissionEngine
 from sam.permissions.models import (
+    GrantStatus,
     PermissionAction,
     PermissionGrant,
     PermissionResource,
@@ -71,12 +76,32 @@ from sam.proactive.observers import (
     professional_conflicts_entry,
     provider_status_entry,
 )
+from sam.proactive.repository import (
+    InMemoryProactiveRepository,
+    ProactiveRepository,
+)
 from sam.proactive.service import ProactiveService
 from sam.professional.audit import InMemoryProfessionalAuditSink
 from sam.professional.candidates import RouterCandidateExtractor
 from sam.professional.identity import OwnerProfessionalIdentity
-from sam.professional.repository import InMemoryProfessionalRepository
+from sam.professional.repository import (
+    InMemoryProfessionalRepository,
+    ProfessionalRepository,
+)
 from sam.professional.service import ProfessionalService
+from sam.storage.audit import (
+    DurableCareerAuditSink,
+    DurablePermissionAuditSink,
+)
+from sam.storage.career import SQLiteCareerRepository
+from sam.storage.knowledge import SQLiteKnowledgeStore, rebuild_index
+from sam.storage.memory import SQLiteMemoryStore
+from sam.storage.migrations import CURRENT_VERSION
+from sam.storage.proactive import SQLiteProactiveRepository
+from sam.storage.professional import SQLiteProfessionalRepository
+from sam.storage.settings import InMemoryOwnerSettings, OwnerSettingsStore
+from sam.system.secrets import CredentialReport
+from sam.system.startup import DurableState, StartupPhase, StartupReport
 from sam.tts.agent_boundary import TTSAgentBoundary
 from sam.tts.audit import InMemoryTTSAuditSink
 from sam.tts.credentials import (
@@ -95,6 +120,7 @@ from sam.voice.audit import InMemoryVoiceAuditSink
 from sam.voice.gateway import VoiceGateway
 from sam.voice.models import StartSessionRequest
 from sam.voice.transcription import TranscriptionProvider
+from sam.voice.wake import WakeRateLimiter
 from sam.voice_identity.providers import SpeakerEmbeddingProvider
 from sam.voice_identity.store import VoiceProfileStore
 
@@ -150,8 +176,19 @@ class DesktopRuntime:
         speaker_embedder: SpeakerEmbeddingProvider | None = None,
         profile_store: VoiceProfileStore | None = None,
         clock: Callable[[], datetime] = utc_now,
+        durable: DurableState | None = None,
+        startup: StartupReport | None = None,
+        credentials: CredentialReport | None = None,
     ) -> None:
         self.settings = settings
+        # Phase 17: durable state (None = in-memory development / tests) and
+        # the startup report. A BLOCKED startup serves only its status.
+        self.durable = durable
+        self.startup = startup or StartupReport()
+        self.credentials = credentials
+        self.owner_settings: OwnerSettingsStore = (
+            durable.owner_settings if durable is not None else InMemoryOwnerSettings()
+        )
         self.principal = LOCAL_PRINCIPAL
         self.agent = agent
         self.agent_configured = agent_configured
@@ -162,7 +199,11 @@ class DesktopRuntime:
 
         self.grants = InMemoryPermissionStore()
         self.confirmations = InMemoryConfirmationProvider()
-        self.permission_audit = InMemoryAuditSink()
+        self.permission_audit = (
+            DurablePermissionAuditSink(durable.audit)
+            if durable is not None
+            else InMemoryAuditSink()
+        )
         self.permissions = PermissionEngine(
             store=self.grants,
             confirmation_provider=self.confirmations,
@@ -170,9 +211,16 @@ class DesktopRuntime:
             clock=clock,
         )
 
+        # Phase 17: durable repositories load here (REPOSITORY_INIT). A persisted
+        # record that fails validation BLOCKS startup (fail closed); there is
+        # never a silent fallback to empty state for durable data.
+        repos = _repositories(durable, self.startup)
+        knowledge_index = InMemoryLexicalIndex()
+        if isinstance(repos.knowledge, SQLiteKnowledgeStore):
+            rebuild_index(repos.knowledge, knowledge_index)
         self.knowledge = KnowledgeEngine(
-            store=InMemoryKnowledgeStore(),
-            index=InMemoryLexicalIndex(),
+            store=repos.knowledge,
+            index=knowledge_index,
             permission_engine=self.permissions,
             audit_sink=InMemoryKnowledgeAuditSink(),
             clock=clock,
@@ -182,7 +230,7 @@ class DesktopRuntime:
         # goes through the Phase 13 router, so its privacy and cost policy apply.
         self.professional_audit = InMemoryProfessionalAuditSink()
         self.professional = ProfessionalService(
-            repository=InMemoryProfessionalRepository(),
+            repository=repos.professional,
             permission_engine=self.permissions,
             audit_sink=self.professional_audit,
             candidate_extractor=(
@@ -197,13 +245,20 @@ class DesktopRuntime:
         # and Knowledge papers through read-only ports; drafts stay local. No
         # submission adapter and no e-mail tool are configured, so nothing can be
         # submitted or sent from this runtime (fail closed).
-        self.career_audit = InMemoryCareerAuditSink()
+        self.career_audit = (
+            DurableCareerAuditSink(durable.audit)
+            if durable is not None
+            else InMemoryCareerAuditSink()
+        )
         self.career = CareerService(
             permission_engine=self.permissions,
             evidence=ProfessionalEvidence(self.professional),
             papers=KnowledgePapers(self.knowledge, KNOWLEDGE_COLLECTION),
+            repository=repos.career,
             audit_sink=self.career_audit,
             clock=clock,
+            attempt_store=repos.attempts,
+            readiness=self._career_readiness,
         )
         # Proactive Agent (Phase 15): owner-defined reminders, summaries and
         # condition watches. In-memory only. Every run is authorized by the
@@ -213,13 +268,14 @@ class DesktopRuntime:
         self.proactive_audit = InMemoryProactiveAuditSink()
         self.proactive = ProactiveService(
             permission_engine=self.permissions,
+            repository=repos.proactive,
             registry=_proactive_registry(self),
             router=model_router,
             audit_sink=self.proactive_audit,
             clock=clock,
         )
         self.memory = MemoryEngine(
-            store=InMemoryMemoryStore(),
+            store=repos.memory,
             working_store=InMemoryWorkingMemoryStore(),
         )
         self.activity = ActivityLog()
@@ -229,6 +285,11 @@ class DesktopRuntime:
 
         self.voice_boundary: VoiceAgentBoundary | None = None
         self.voice_gateway: VoiceGateway | None = None
+        # Hands-free wake word: ONLY a local recognizer (set by create_runtime
+        # from the local voice stack, or by a trusted test composition). Never
+        # a cloud STT provider. Room audio is bounded by the rate limiter.
+        self.wake_transcriber: TranscriptionProvider | None = None
+        self.wake_limiter = WakeRateLimiter()
         self._voice_session: str | None = None
         self._voice_lock = RLock()
         if transcription_provider is not None:
@@ -282,7 +343,51 @@ class DesktopRuntime:
                     else frozenset({"en"})
                 )
 
+        if durable is not None and not self.startup.blocked:
+            # Crash recovery for Career items (their attempts were recovered at
+            # the RECOVERY phase): nothing that was in flight becomes retryable.
+            self.startup.recovery.update(self.career.recover_after_restart())
+        self.startup.done(StartupPhase.REPOSITORY_INIT)
         bootstrap_grants(self)
+        self.startup.done(StartupPhase.SECURITY_BOUNDARY_INIT)
+
+    # ---------------------------------------------------------- phase 17
+
+    @property
+    def blocked_reason(self) -> str | None:
+        return self.startup.reason_code if self.startup.blocked else None
+
+    def _career_readiness(
+        self, action: ExternalAction, adapter_configured: bool
+    ) -> ExternalActionReadiness:
+        """Real SUBMIT / SEND readiness, from facts only this runtime knows.
+        Phase 17 configures no adapter, so this is never fully ready."""
+
+        durable = self.durable is not None and not self.startup.blocked
+        resource_action = (
+            PermissionAction.SUBMIT
+            if action is ExternalAction.SUBMIT
+            else PermissionAction.SEND
+        )
+        granted = any(
+            g.status is GrantStatus.ACTIVE
+            for g in self.grants.list_grants(
+                self.principal,
+                resource=PermissionResource.CAREER,
+                action=resource_action,
+            )
+        )
+        return ExternalActionReadiness(
+            durable_store_ready=durable and self.career.attempts.durable,
+            migrations_ready=durable and self.startup.schema_version == CURRENT_VERSION,
+            idempotency_ready=durable and self.career.attempts.durable,
+            # a trusted adapter must also support read-only reconciliation;
+            # none is configured in this build
+            reconciliation_ready=False,
+            destination_validation_ready=True,
+            adapter_configured=adapter_configured,
+            permission_ready=granted,
+        )
 
     # ------------------------------------------------------------ step-up
 
@@ -320,6 +425,15 @@ class DesktopRuntime:
             count += 1
             self._step_up_failures[key] = (count, now)
             return "locked" if count >= MAX_STEP_UP_ATTEMPTS else "failed"
+
+    def warm_wake_recognizer(self) -> None:
+        """Load the local wake recognizer in the background (no download)."""
+
+        preload = getattr(self.wake_transcriber, "preload", None)
+        if callable(preload):
+            threading.Thread(
+                target=preload, name="sam-wake-warmup", daemon=True
+            ).start()
 
     def voice_boundary_for(
         self, preference: LanguagePreference
@@ -362,6 +476,48 @@ class DesktopRuntime:
         if self.speech_boundary is None or self.speech_profiles is None:
             return []
         return [p.profile_id for p in self.speech_profiles.list_profiles() if p.enabled]
+
+
+@dataclass(frozen=True)
+class _Repositories:
+    memory: MemoryStore
+    knowledge: KnowledgeStore
+    professional: ProfessionalRepository
+    career: CareerRepository
+    proactive: ProactiveRepository
+    attempts: AttemptStore | None
+
+
+def _repositories(
+    durable: DurableState | None, startup: StartupReport
+) -> _Repositories:
+    """Durable repositories when storage is ready, in-memory otherwise.
+
+    Short-term working memory, confirmations and step-up state are never
+    among them: they are intentionally ephemeral."""
+
+    if durable is not None and not startup.blocked:
+        db = durable.db
+        try:
+            return _Repositories(
+                memory=SQLiteMemoryStore(db),
+                knowledge=SQLiteKnowledgeStore(db),
+                professional=SQLiteProfessionalRepository(db),
+                career=SQLiteCareerRepository(db),
+                proactive=SQLiteProactiveRepository(db),
+                attempts=durable.attempt_store,
+            )
+        except Exception:
+            # Reason code only: never the record, the path or the error text.
+            startup.fail(StartupPhase.REPOSITORY_INIT, "repository_load_failed")
+    return _Repositories(
+        memory=InMemoryMemoryStore(),
+        knowledge=InMemoryKnowledgeStore(),
+        professional=InMemoryProfessionalRepository(),
+        career=InMemoryCareerRepository(),
+        proactive=InMemoryProactiveRepository(),
+        attempts=None,
+    )
 
 
 def _owner_identity(settings: Settings) -> OwnerProfessionalIdentity | None:
@@ -424,6 +580,12 @@ def _proactive_registry(runtime: DesktopRuntime) -> ConditionRegistry:
     return ConditionRegistry.of(entries)
 
 
+def bootstrap_identity(
+    resource: PermissionResource, action: PermissionAction, scope: PermissionScope
+) -> str:
+    return f"{resource.value}:{action.value}:{scope.as_text()}"
+
+
 def bootstrap_grants(runtime: DesktopRuntime) -> None:
     """Create the trusted local defaults — the ONLY place grants are made.
 
@@ -441,6 +603,7 @@ def bootstrap_grants(runtime: DesktopRuntime) -> None:
     now = runtime.clock()
     principal = runtime.principal
     seq = 0
+    revoked = runtime.owner_settings.revoked_bootstrap_grants()
 
     def grant(
         resource: PermissionResource,
@@ -471,6 +634,10 @@ def bootstrap_grants(runtime: DesktopRuntime) -> None:
                 metadata={"origin": "desktop_bootstrap"},
             )
         )
+        # An owner's revocation of a trusted default survives restarts: the
+        # grant is shown, but revoked (only narrowing is ever persisted).
+        if bootstrap_identity(resource, action, scope) in revoked:
+            runtime.grants.revoke_grant(f"bootstrap-{seq:02d}", now=now)
 
     coll = KNOWLEDGE_COLLECTION
     grant(
@@ -645,14 +812,22 @@ def build_desktop_runtime(
     speaker_embedder: SpeakerEmbeddingProvider | None = None,
     profile_store: VoiceProfileStore | None = None,
     clock: Callable[[], datetime] = utc_now,
+    durable: DurableState | None = None,
+    startup: StartupReport | None = None,
+    credentials: CredentialReport | None = None,
+    wake_transcriber: TranscriptionProvider | None = None,
 ) -> DesktopRuntime:
     """Compose the runtime from trusted configuration.
+
+    ``wake_transcriber`` (tests / trusted composition) must be a LOCAL
+    recognizer; production uses the local voice stack's recognizer only.
 
     ``mcp_admin`` exists so a trusted composition/test can pre-register tools;
     the runtime keeps only ``mcp_admin.reader()``. Production passes nothing,
     which yields an empty registry (no connectors are configured)."""
 
     extra_speech_providers: list[SpeechSynthesisProvider] = []
+    local_wake = wake_transcriber
     if speech_provider is None and speech_profiles is None:
         configured = fish_speech_from_settings(settings)
         if configured is not None:
@@ -681,11 +856,12 @@ def build_desktop_runtime(
             speaker_embedder = stack.embedder
             profile_store = stack.store
             transcription_provider = stack.transcriber
+            local_wake = stack.transcriber
     if transcription_provider is not None:
         # Lets the user's language preference nudge the recognizer, per request.
         transcription_provider = HintedTranscriptionProvider(transcription_provider)
     admin = mcp_admin or MCPRegistryAdmin()
-    return DesktopRuntime(
+    runtime = DesktopRuntime(
         settings=settings,
         agent=agent,
         agent_configured=(
@@ -703,7 +879,17 @@ def build_desktop_runtime(
         speaker_embedder=speaker_embedder,
         profile_store=profile_store,
         clock=clock,
+        durable=durable,
+        startup=startup,
+        credentials=credentials,
     )
+    # Wake detection needs owner identity too: without it no turn could ever
+    # be verified, so there is nothing to wake for.
+    if runtime.identity is not None:
+        runtime.wake_transcriber = local_wake
+        if runtime.owner_settings.voice_activation():
+            runtime.warm_wake_recognizer()
+    return runtime
 
 
 __all__ = [
@@ -713,6 +899,7 @@ __all__ = [
     "ActivityLog",
     "DesktopRuntime",
     "bootstrap_grants",
+    "bootstrap_identity",
     "build_desktop_runtime",
     "PERSIAN_SPEECH_PROFILE",
     "fish_speech_from_settings",

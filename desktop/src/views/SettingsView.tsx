@@ -1,5 +1,6 @@
 import type { Capability } from "../bridge/types";
 import { Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
+import { BUILD_INFO } from "../build";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
 import { useState } from "react";
 import { ModelSettings } from "../components/ModelSettings";
@@ -144,6 +145,8 @@ export function SettingsView() {
         </p>
       </section>
 
+      {identity?.guest.active ? null : <VoiceActivation />}
+
       <section className="glass panel" aria-labelledby="guest-h">
         <h3 id="guest-h">{t("settings.guestMode")}</h3>
         <div className="card-row" style={{ marginBottom: 12 }}>
@@ -273,11 +276,84 @@ export function SettingsView() {
         </div>
       </section>
 
+      <About />
+
       <Notice live={false}>
         Privacy: conversation history is kept only in this window and disappears when you close it. Only the
         interface preferences above are stored on this device — never messages, transcripts, documents or
         credentials.
       </Notice>
     </div>
+  );
+}
+
+/** Which build is running: version, commit, build time and shell type. */
+function About() {
+  const { status, t } = useSam();
+  const shell = status?.desktop_build;
+  return (
+    <section className="glass panel" aria-labelledby="about-h">
+      <h3 id="about-h">{t("about.title")}</h3>
+      <dl className="about-list">
+        <dt>{t("about.version")}</dt>
+        <dd>{BUILD_INFO.version}</dd>
+        <dt>{t("about.build")}</dt>
+        <dd>
+          <bdi dir="ltr">{BUILD_INFO.commit}</bdi>
+          {BUILD_INFO.modified ? <span className="faint"> · {t("about.modified")}</span> : null}
+        </dd>
+        <dt>{t("about.builtAt")}</dt>
+        <dd>
+          <bdi dir="ltr">{BUILD_INFO.builtAt}</bdi>
+        </dd>
+        {shell ? (
+          <>
+            <dt>{t("about.shell")}</dt>
+            <dd>{shell === "release" ? t("about.release") : t("about.development")}</dd>
+          </>
+        ) : null}
+      </dl>
+    </section>
+  );
+}
+
+/**
+ * The owner-only hands-free switch. Hidden in Guest Mode (and the backend
+ * refuses it there anyway). It changes nothing else: no permission, no
+ * scheduler, no confirmation.
+ */
+function VoiceActivation() {
+  const { status, bridge, refreshStatus, t } = useSam();
+  const [busy, setBusy] = useState(false);
+  const state = status?.voice_activation ?? "unavailable";
+  const toggle = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      await bridge.setVoiceActivation(enabled);
+    } catch {
+      // The switch simply stays as it was; status below is the truth.
+    } finally {
+      setBusy(false);
+      void refreshStatus();
+    }
+  };
+  return (
+    <section className="glass panel" aria-labelledby="va-h">
+      <h3 id="va-h">{t("settings.voiceActivation.title")}</h3>
+      <p className="muted">{t("settings.voiceActivation.body")}</p>
+      {state === "unavailable" ? (
+        <p className="faint">{t("settings.voiceActivation.unavailable")}</p>
+      ) : (
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={state === "on"}
+            disabled={busy}
+            onChange={(event) => void toggle(event.target.checked)}
+          />
+          <span>{t("settings.voiceActivation.toggle")}</span>
+        </label>
+      )}
+    </section>
   );
 }

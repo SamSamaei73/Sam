@@ -98,7 +98,7 @@ async function openAutomations(bridge: ReturnType<typeof mockBridge>) {
   renderApp(bridge);
   const user = userEvent.setup();
   await screen.findByLabelText("Connection: Connected");
-  await user.click(screen.getByRole("button", { name: "Automations" }));
+  await user.click(await screen.findByRole("button", { name: "Automations" }));
   await screen.findByRole("heading", { name: "Automations" });
   return user;
 }

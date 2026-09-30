@@ -4,6 +4,7 @@ import type { ActivityItem } from "../bridge/types";
 import { EmptyState, NeonButton, Notice, SectionHeader, StatusPill, type Tone } from "../components/primitives";
 import { formatTime, humanize } from "../lib/format";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 const RISK_TONES = new Set(["low", "medium", "high", "critical"]);
 
@@ -44,9 +45,7 @@ export function ActivityView() {
       </Notice>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {items === null && !error ? (
-        <p className="muted" role="status">
-          Loading…
-        </p>
+        <Loader />
       ) : null}
       {items && items.length === 0 ? (
         <EmptyState title="No activity yet" body="Actions Sam takes will be listed here as they happen." />

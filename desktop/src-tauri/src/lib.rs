@@ -12,17 +12,19 @@
 mod backend;
 #[cfg(test)]
 mod config_tests;
+mod sidecar;
 mod validate;
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
-use backend::{Backend, BridgeError, Route};
+use backend::{Backend, BackendSlot, BridgeError, Route, Slot};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::State;
 
 pub struct AppState {
-    backend: Backend,
+    backend: Arc<BackendSlot>,
 }
 
 type CommandResult = Result<Value, String>;
@@ -40,7 +42,18 @@ fn invalid<T>(result: Result<T, BridgeError>) -> Result<T, String> {
 
 #[tauri::command]
 fn sam_status(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::Status, None)
+    let mut status = run(&state, Route::Status, None)?;
+    // Which shell is running, so a stale or development build is obvious in
+    // About. A fixed label only: no path, port, token or environment value.
+    if let Some(map) = status.as_object_mut() {
+        let build = if cfg!(debug_assertions) {
+            "development"
+        } else {
+            "release"
+        };
+        map.insert("desktop_build".to_string(), json!(build));
+    }
+    Ok(status)
 }
 
 #[tauri::command]
@@ -177,16 +190,50 @@ fn sam_voice_utterance(
     state: State<'_, AppState>,
     audio_base64: String,
     confirmation_id: Option<String>,
+    language: Option<String>,
+    hands_free: Option<bool>,
 ) -> CommandResult {
     invalid(validate::base64_payload(
         &audio_base64,
         validate::MAX_AUDIO_BASE64,
     ))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
+    let language = language.unwrap_or_else(|| "auto".to_string());
+    invalid(validate::language(&language))?;
     run(
         &state,
         Route::VoiceUtterance,
-        Some(json!({ "audio_base64": audio_base64, "confirmation_id": confirmation_id })),
+        Some(json!({
+            "audio_base64": audio_base64,
+            "confirmation_id": confirmation_id,
+            "language": language,
+            "hands_free": hands_free.unwrap_or(false),
+        })),
+    )
+}
+
+/// One short speech segment: was it Sam's name? The backend answers with one
+/// bit (never the recognized text), using its LOCAL recognizer only.
+#[tauri::command]
+fn sam_voice_wake(state: State<'_, AppState>, audio_base64: String) -> CommandResult {
+    invalid(validate::base64_payload(
+        &audio_base64,
+        validate::MAX_WAKE_BASE64,
+    ))?;
+    run(
+        &state,
+        Route::VoiceWake,
+        Some(json!({ "audio_base64": audio_base64 })),
+    )
+}
+
+/// The owner-only hands-free switch (the backend refuses it in Guest Mode).
+#[tauri::command]
+fn sam_voice_activation(state: State<'_, AppState>, enabled: bool) -> CommandResult {
+    run(
+        &state,
+        Route::VoiceActivation,
+        Some(json!({ "enabled": enabled })),
     )
 }
 
@@ -613,14 +660,21 @@ fn sam_proactive_notification(
     )
 }
 
-/// The owner's switch for background scheduling: a single boolean, nothing
-/// else. The backend refuses it in Guest Mode and requires PROACTIVE/UPDATE.
+/// The owner's switch for background scheduling: two booleans (on/off, and
+/// whether to keep it on across restarts), nothing else. The backend refuses
+/// it in Guest Mode and requires PROACTIVE/UPDATE.
 #[tauri::command]
-fn sam_proactive_scheduler(state: State<'_, AppState>, enabled: bool) -> CommandResult {
+fn sam_proactive_scheduler(
+    state: State<'_, AppState>,
+    enabled: bool,
+    remember: Option<bool>,
+) -> CommandResult {
+    // `remember` (Phase 17): the owner's explicit choice to keep scheduling on
+    // across restarts. Only a boolean; the backend honours it only when enabling.
     run(
         &state,
         Route::ProactiveScheduler,
-        Some(json!({ "enabled": enabled })),
+        Some(json!({ "enabled": enabled, "remember": remember.unwrap_or(false) })),
     )
 }
 
@@ -957,11 +1011,58 @@ fn sam_models_preferences(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Release builds own their backend (the bundled, trusted sidecar); a debug
+/// build talks to the developer's backend configured in its environment. A
+/// release build NEVER falls back to an environment-configured backend: if its
+/// own backend cannot start (bounded by `sidecar::READY_TIMEOUT`), every
+/// bridge call is `unavailable`.
+///
+/// The window opens immediately; while the owned backend starts on a
+/// background thread, bridge calls answer `starting` so the webview can show
+/// Sam starting up instead of an error.
+fn start_backend(slot: Arc<BackendSlot>, owned: Arc<Mutex<Owned>>) {
+    if cfg!(debug_assertions) {
+        slot.set(Slot::Ready(Backend::from_env()));
+        return;
+    }
+    std::thread::spawn(move || match sidecar::start_owned() {
+        Ok(mut sidecar) => {
+            let Ok(mut guard) = owned.lock() else {
+                sidecar.stop();
+                return;
+            };
+            if guard.exiting {
+                // Sam quit while its backend was starting: never leave it behind.
+                sidecar.stop();
+                return;
+            }
+            slot.set(Slot::Ready(Backend::new(
+                sidecar.port,
+                Some(sidecar.token.clone()),
+            )));
+            guard.sidecar = Some(sidecar);
+        }
+        Err(_) => slot.set(Slot::Failed),
+    });
+}
+
+#[derive(Default)]
+struct Owned {
+    sidecar: Option<sidecar::Sidecar>,
+    exiting: bool,
+}
+
+/// Headless verification of a built artifact (see `sidecar::self_test`).
+pub fn self_test(data_dir: &str) -> i32 {
+    sidecar::self_test(data_dir)
+}
+
 pub fn run_app() {
+    let slot = Arc::new(BackendSlot::new(Slot::Starting));
+    let owned = Arc::new(Mutex::new(Owned::default()));
+    start_backend(slot.clone(), owned.clone());
     tauri::Builder::default()
-        .manage(AppState {
-            backend: Backend::from_env(),
-        })
+        .manage(AppState { backend: slot })
         .invoke_handler(tauri::generate_handler![
             sam_status,
             sam_chat,
@@ -1009,7 +1110,19 @@ pub fn run_app() {
             sam_career_outreach,
             sam_career_send,
             sam_career_preferences,
+            sam_voice_wake,
+            sam_voice_activation,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Sam desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building Sam desktop")
+        .run(move |_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Ok(mut guard) = owned.lock() {
+                    guard.exiting = true;
+                    if let Some(mut backend) = guard.sidecar.take() {
+                        backend.stop();
+                    }
+                }
+            }
+        });
 }

@@ -39,12 +39,15 @@ export const tauriBridge: SamBridge = {
   activity: () => call("sam_activity"),
   decideConfirmation: (confirmationId, approved, stepUp) =>
     call("sam_decide_confirmation", { confirmationId, approved, stepUp: stepUp ?? null }),
-  voiceUtterance: (audioBase64, confirmationId, language) =>
+  voiceUtterance: (audioBase64, confirmationId, language, handsFree) =>
     call("sam_voice_utterance", {
       audioBase64,
       confirmationId: confirmationId ?? null,
       language: language ?? "auto",
+      handsFree: handsFree ?? false,
     }),
+  voiceWake: (audioBase64) => call("sam_voice_wake", { audioBase64 }),
+  setVoiceActivation: (enabled) => call("sam_voice_activation", { enabled }),
   speak: ({ text, voiceProfile, language, confirmationId }) =>
     call("sam_speak", {
       text,
@@ -134,7 +137,8 @@ export const tauriBridge: SamBridge = {
   proactiveRun: (taskId) => call("sam_proactive_run", { taskId }),
   proactiveNotification: (notificationId, action) =>
     call("sam_proactive_notification", { notificationId, action }),
-  proactiveScheduler: (enabled) => call("sam_proactive_scheduler", { enabled }),
+  proactiveScheduler: (enabled, remember) =>
+    call("sam_proactive_scheduler", remember === undefined ? { enabled } : { enabled, remember }),
   careerOverview: () => call("sam_career_overview"),
   careerOpportunity: (input) =>
     call("sam_career_opportunity", {

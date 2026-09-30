@@ -4,6 +4,7 @@ import type { MemoryItem } from "../bridge/types";
 import { EmptyState, NeonButton, Notice, SectionHeader, StatusPill } from "../components/primitives";
 import { humanize } from "../lib/format";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 function MemoryCard({ item }: { item: MemoryItem }) {
   return (
@@ -77,9 +78,7 @@ export function MemoryView() {
         <NeonButton type="submit">Search</NeonButton>
       </form>
       {items === null ? (
-        <p className="muted" role="status">
-          Loading…
-        </p>
+        <Loader />
       ) : empty ? (
         <EmptyState title="Nothing remembered yet" body="When Sam stores a memory it will appear here, labelled by type and source." />
       ) : (

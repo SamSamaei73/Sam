@@ -243,7 +243,7 @@ def test_non_owner_is_blocked_before_any_transcription_or_agent_call() -> None:
     calls_before = b.voice_stt.call_count
     r = b.utter(OTHER_VOICE)
     assert r["status"] == "denied" and r["reason_code"] == "owner_verification_required"
-    assert r["message"] == "Owner verification required."
+    assert r["message"] == "Sam didn't recognize your voice."
     assert r["transcript"] is None and r["reply"] is None
     assert b.voice_stt.call_count == calls_before and b.agent.messages == []
     text = json.dumps(r)
@@ -270,7 +270,8 @@ def test_no_profile_speaker_is_not_owner_and_nothing_reaches_the_agent() -> None
     for voice in (OTHER_VOICE, OWNER_VOICE):
         r = b.utter(voice)
         assert r["status"] == "denied"
-        assert r["reason_code"] == "owner_verification_required"
+        # Still fail-closed, but it says what to do: set up the voice profile.
+        assert r["reason_code"] == "voice_not_enrolled"
         assert r["speaker_result"] == "not_enrolled"
         assert r.get("speaker") is None
     assert b.agent.messages == []  # owner-only conversation does not unlock
@@ -337,7 +338,7 @@ def test_identity_runtime_missing_blocks_voice_and_guest_and_ignores_overrides()
 def test_no_profile_never_falls_back_to_the_legacy_owner_voice_session() -> None:
     b = IdentityBridge(text="what is the weather")
     r = b.utter(OWNER_VOICE)
-    assert r["status"] == "denied" and r["reason_code"] == "owner_verification_required"
+    assert r["status"] == "denied" and r["reason_code"] == "voice_not_enrolled"
     assert b.agent.messages == []
     assert b.post("/chat", {"message": "hi"}).status_code == 200  # text still works
     assert b.agent.messages == ["hi"]

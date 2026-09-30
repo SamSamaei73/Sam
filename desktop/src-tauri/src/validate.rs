@@ -18,6 +18,8 @@ const MAX_CONDITION_PARAM_CHARS: usize = 200;
 pub const MAX_ID_CHARS: usize = 100;
 pub const MAX_DOCUMENT_BASE64: usize = 28_000_000;
 pub const MAX_AUDIO_BASE64: usize = 11_500_000;
+/// A wake candidate is a few seconds of 16 kHz mono PCM16 at most.
+pub const MAX_WAKE_BASE64: usize = 400_000;
 
 pub fn text(value: &str, max: usize) -> Result<(), BridgeError> {
     if value.trim().is_empty() || value.chars().count() > max {

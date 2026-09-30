@@ -4,6 +4,7 @@ import type { GrantInfo } from "../bridge/types";
 import { EmptyState, Notice, SectionHeader } from "../components/primitives";
 import { PermissionCard } from "../components/PermissionCard";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 export function PermissionsView() {
   const { bridge } = useSam();
@@ -46,9 +47,7 @@ export function PermissionsView() {
       </Notice>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {grants === null && !error ? (
-        <p className="muted" role="status">
-          Loading…
-        </p>
+        <Loader />
       ) : null}
       {grants && grants.length === 0 ? (
         <EmptyState title="No active permissions" body="Sam isn't currently allowed to do anything on your behalf." />

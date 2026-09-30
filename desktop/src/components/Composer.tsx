@@ -15,14 +15,22 @@ export function Composer({
   onSend,
   leading,
   trailing,
+  value,
+  onChange,
 }: {
+  /** Disables SENDING only; typing is never blocked. */
   disabled: boolean;
   onSend: (text: string) => void;
   leading?: ReactNode;
   trailing?: ReactNode;
+  /** Optional controlled draft (kept by the caller, e.g. across the overlay closing). */
+  value?: string;
+  onChange?: (text: string) => void;
 }) {
   const { t } = useSam();
-  const [text, setText] = useState("");
+  const [own, setOwn] = useState("");
+  const text = value ?? own;
+  const setText = onChange ?? setOwn;
   const ref = useRef<HTMLTextAreaElement>(null);
   const trimmed = text.trim();
   const tooLong = text.length > MAX_COMPOSER_CHARS;

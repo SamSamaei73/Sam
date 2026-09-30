@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Sam records audio only while you hold the microphone button, to understand your voice message.</string>
+  <string>Sam uses the microphone only after you press Talk to Sam, and stops when you stop or cancel. Recordings are not saved.</string>
 </dict>
 </plist>

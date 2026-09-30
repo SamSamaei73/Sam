@@ -7,6 +7,7 @@
  */
 import { BridgeError, type SamBridge } from "./bridge";
 import { detectLanguage, directionFor } from "../lib/language";
+import { bytesToBase64, encodeWav } from "../lib/wav";
 import type {
   ActivityItem,
   IdentityStatus,
@@ -36,7 +37,35 @@ const empty = {
 const wait = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms));
 const iso = () => new Date().toISOString();
 
+/**
+ * DEV-only visual QA fixtures, chosen by `?fixture=` in the dev server URL:
+ * voice (voice input on; a slow reply; audible synthesized speech), guest,
+ * attention (items waiting for the owner) and degraded (no language model).
+ */
+type Fixture = "voice" | "handsfree" | "stranger" | "guest" | "attention" | "degraded" | "setup" | null;
+const FIXTURES = ["voice", "handsfree", "stranger", "guest", "attention", "degraded", "setup"] as const;
+function fixtureFromUrl(): Fixture {
+  const value = new URLSearchParams(globalThis.location?.search ?? "").get("fixture");
+  return (FIXTURES as readonly string[]).includes(value ?? "") ? (value as Fixture) : null;
+}
+
+/** A soft 3-second tone, so "speaking" is real audio playback in the demo. */
+function demoTone(): string {
+  const rate = 16_000;
+  const samples = new Float32Array(rate * 3);
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / rate;
+    samples[i] = 0.12 * Math.sin(2 * Math.PI * 220 * t) * (0.6 + 0.4 * Math.sin(2 * Math.PI * 3 * t));
+  }
+  return bytesToBase64(encodeWav(samples, rate));
+}
+
 export function demoBridge(): SamBridge {
+  const fixture = fixtureFromUrl();
+  // Hands-free demo: the demo has no recognizer, so ANY speech segment counts
+  // as the wake word (visual QA only; the real backend checks for "Sam").
+  const handsFree = fixture === "handsfree" || fixture === "stranger";
+  let activation: "on" | "off" = handsFree ? "on" : "off";
   const models = {
     prefs: {
       preferred_provider: null,
@@ -109,7 +138,12 @@ export function demoBridge(): SamBridge {
     paid_fallback: "off",
     max_provider_attempts: 2,
   });
-  const identity = { enrolled: false, samples: 0, session: null as string | null, guestUntil: 0 };
+  const identity = {
+    enrolled: fixture === "guest" || fixture === "attention" || handsFree,
+    samples: 0,
+    session: null as string | null,
+    guestUntil: fixture === "guest" ? Date.now() + 15 * 60_000 : 0,
+  };
   const snapshot = (): IdentityStatus => {
     const remaining = Math.max(0, Math.round((identity.guestUntil - Date.now()) / 1000));
     return {
@@ -117,7 +151,7 @@ export function demoBridge(): SamBridge {
       enrolled: identity.enrolled,
       mode: remaining > 0 ? "guest_mode" : "owner_only",
       guest: { active: remaining > 0, seconds_remaining: remaining },
-      last_verification: identity.enrolled ? "verified" : null,
+      last_verification: fixture === "attention" ? "not_verified" : identity.enrolled ? "verified" : null,
       speaker_model: "configured",
       local_stt: "configured",
       persian_tts: "not_configured",
@@ -171,13 +205,14 @@ export function demoBridge(): SamBridge {
       await wait(60);
       return {
         backend: { status: "ok", service: "Sam", environment: "demo" },
-        agent: "configured",
+        agent: fixture === "degraded" ? "not_configured" : "configured",
         knowledge: "available",
         memory: "available",
         tools: "foundation_ready",
         tool_count: 0,
         server_count: 0,
-        voice_input: "not_configured",
+        voice_input: fixture === "voice" || handsFree || fixture === "setup" ? "configured" : "not_configured",
+        voice_activation: fixture === "voice" ? "unavailable" : activation,
         speech_output: "configured",
         speech_profiles: [{ profile_id: "sam_default", languages: ["en"] }],
         voice_identity: "configured",
@@ -304,7 +339,46 @@ export function demoBridge(): SamBridge {
       log("permission", "Confirmation answered", isApproved ? "approved" : "denied");
       return { status: isApproved ? "approved" : "denied", confirmation_id: confirmationId };
     },
+    async voiceWake() {
+      await wait(250);
+      return { ...empty, status: "ok", wake: activation === "on", followed: false };
+    },
+    async setVoiceActivation(enabled) {
+      await wait(100);
+      activation = enabled ? "on" : "off";
+      return { ...empty, status: "ok", voice_activation: activation };
+    },
     async voiceUtterance() {
+      if (fixture === "stranger") {
+        await wait(1200);
+        return {
+          ...empty,
+          status: "denied",
+          reason_code: "owner_verification_required",
+          message: "Sam didn't recognize your voice.",
+          transcript: null,
+          forwarded_to_agent: false,
+          reply: null,
+          speaker: null,
+          speaker_result: "owner_not_verified",
+          language: null,
+          direction: null,
+        };
+      }
+      if (fixture === "voice" || handsFree) {
+        await wait(handsFree ? 2500 : 4000);
+        return {
+          ...empty,
+          status: "ok",
+          transcript: "What should I focus on this afternoon?",
+          forwarded_to_agent: true,
+          reply: "The grant proposal is the priority this afternoon; your review call is at 4 pm, and nothing else is urgent.",
+          speaker: "owner",
+          speaker_result: "owner_verified",
+          language: "en",
+          direction: "ltr",
+        };
+      }
       await wait();
       return {
         ...empty,
@@ -321,6 +395,11 @@ export function demoBridge(): SamBridge {
       };
     },
     async speak() {
+      if (fixture === "voice" || handsFree) {
+        await wait(300);
+        const audio = demoTone();
+        return { ...empty, status: "ok", audio_base64: audio, audio_format: "wav", byte_length: audio.length };
+      }
       await wait();
       return {
         ...empty,
@@ -531,7 +610,13 @@ export function demoBridge(): SamBridge {
         contacts: [],
         outreach: [],
         follow_ups: [],
-        review_queue: [],
+        review_queue:
+          fixture === "attention"
+            ? [
+                { kind: "application", label: "Application draft ready for review", opportunity_id: null, item_id: "ap_demo" },
+                { kind: "outreach", label: "Outreach draft ready for review", opportunity_id: null, item_id: "or_demo" },
+              ]
+            : [],
         preferences: null,
         submission_available: false,
         sending_available: false,

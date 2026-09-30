@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { baseStatus, fakeAudioEnvironment, mockBridge, ok, renderApp } from "./helpers";
+import { baseIdentity, baseStatus, fakeAudioEnvironment, mockBridge, ok, renderApp } from "./helpers";
 
 const voiceStatus = { ...baseStatus, voice_input: "configured" as const };
 const speechStatus = {
@@ -22,7 +22,7 @@ describe("voice input", () => {
   it("never starts the microphone on load", async () => {
     const fake = fakeAudioEnvironment();
     renderApp(mockBridge({ status: vi.fn(async () => voiceStatus) }), fake.env);
-    await screen.findByRole("button", { name: "Record a voice message" });
+    await screen.findByRole("button", { name: "Talk to Sam" });
     expect(fake.getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -43,7 +43,7 @@ describe("voice input", () => {
     });
     renderApp(bridge, fake.env);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Record a voice message" }));
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
     expect(fake.getUserMedia).toHaveBeenCalledTimes(1);
     expect(await screen.findByText(/Recording/)).toBeInTheDocument();
     act(() => fake.emit(new Float32Array(3200).fill(0.1)));
@@ -52,10 +52,12 @@ describe("voice input", () => {
     expect(fake.track.stop).toHaveBeenCalled();
     const audio = (bridge.voiceUtterance as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(atob(audio).startsWith("RIFF")).toBe(true);
-    const log = screen.getByRole("log");
-    expect(await within(log).findByText("what's the weather")).toBeInTheDocument();
-    expect(await screen.findByText("Sunny.")).toBeInTheDocument();
+    const latest = screen.getByRole("region", { name: "Latest exchange" });
+    expect(await within(latest).findByText("what's the weather")).toBeInTheDocument();
+    expect(await within(latest).findByText("Sunny.")).toBeInTheDocument();
     expect(screen.queryByText(/Recording/)).toBeNull();
+    await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "History" }));
+    expect(within(screen.getByRole("log")).getByText("what's the weather")).toBeInTheDocument();
   });
 
   it("cancel discards the audio and releases the microphone", async () => {
@@ -63,7 +65,7 @@ describe("voice input", () => {
     const bridge = mockBridge({ status: vi.fn(async () => voiceStatus) });
     renderApp(bridge, fake.env);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Record a voice message" }));
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
     await user.click(await screen.findByRole("button", { name: "Cancel recording" }));
     expect(fake.track.stop).toHaveBeenCalled();
     expect(bridge.voiceUtterance).not.toHaveBeenCalled();
@@ -76,7 +78,7 @@ describe("voice input", () => {
     });
     renderApp(mockBridge({ status: vi.fn(async () => voiceStatus) }), fake.env);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Record a voice message" }));
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
     expect(await screen.findByText("Microphone access was declined.")).toBeInTheDocument();
   });
 
@@ -100,7 +102,7 @@ describe("voice input", () => {
     });
     renderApp(bridge, fake.env);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Record a voice message" }));
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
     act(() => fake.emit(new Float32Array(1600).fill(0.1)));
     await user.click(screen.getByRole("button", { name: "Stop recording and send" }));
     expect(await screen.findByText(/withheld/)).toBeInTheDocument();
@@ -111,9 +113,78 @@ describe("voice input", () => {
     const fake = fakeAudioEnvironment();
     renderApp(mockBridge({ status: vi.fn(async () => voiceStatus) }), fake.env);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Record a voice message" }));
-    await user.click(screen.getByRole("button", { name: "Knowledge" }));
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
+    await user.click(await screen.findByRole("button", { name: "Knowledge" }));
     expect(fake.track.stop).toHaveBeenCalled();
+  });
+});
+
+describe("Sam presence follows real state", () => {
+  const presence = () => document.querySelector(".presence") as HTMLElement;
+
+  it("is idle, then listening with the real mic level, then thinking, then idle", async () => {
+    const fake = fakeAudioEnvironment();
+    let release: (value: unknown) => void = () => undefined;
+    const bridge = mockBridge({
+      status: vi.fn(async () => voiceStatus),
+      voiceUtterance: vi.fn(() => new Promise((resolve) => (release = resolve))) as never,
+    });
+    renderApp(bridge, fake.env);
+    const user = userEvent.setup();
+    await screen.findByRole("img", { name: "Sam is ready" });
+    expect(presence().dataset.state).toBe("idle");
+    expect(presence().style.getPropertyValue("--level")).toBe("0.000");
+
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
+    await waitFor(() => expect(presence().dataset.state).toBe("listening"));
+    expect(screen.getByText("Listening")).toBeInTheDocument();
+    act(() => fake.emit(new Float32Array(1600).fill(0.1)));
+    await waitFor(() => expect(Number(presence().style.getPropertyValue("--level"))).toBeGreaterThan(0));
+
+    await user.click(screen.getByRole("button", { name: "Stop recording and send" }));
+    await waitFor(() => expect(presence().dataset.state).toBe("thinking"));
+    expect(screen.getByRole("img", { name: "Sam is thinking" })).toBeInTheDocument();
+    expect(presence().style.getPropertyValue("--level")).toBe("0.000");
+    // Nothing can start a new capture while Sam is thinking.
+    expect(screen.getByRole("button", { name: "Talk to Sam" })).toBeDisabled();
+
+    act(() =>
+      release({
+        ...ok,
+        transcript: "hello",
+        forwarded_to_agent: true,
+        reply: "Hi.",
+        speaker: "owner",
+        speaker_result: "owner_verified",
+        language: "en",
+        direction: "ltr",
+      }),
+    );
+    await waitFor(() => expect(presence().dataset.state).toBe("idle"));
+  });
+
+  it("shows the error state briefly when the microphone is refused", async () => {
+    const fake = fakeAudioEnvironment();
+    fake.env.getUserMedia = vi.fn(async () => {
+      throw Object.assign(new Error("x"), { name: "NotAllowedError" });
+    });
+    renderApp(mockBridge({ status: vi.fn(async () => voiceStatus) }), fake.env);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Talk to Sam" }));
+    await waitFor(() => expect(presence().dataset.state).toBe("error"));
+  });
+
+  it("marks Guest Mode on the presence without implying the owner", async () => {
+    renderApp(
+      mockBridge({
+        identityStatus: vi.fn(async () => ({
+          ...baseIdentity,
+          available: true,
+          enrolled: true,
+          guest: { active: true, seconds_remaining: 120 },
+        })),
+      }),
+    );
+    await waitFor(() => expect(presence().dataset.guest).toBe("true"));
   });
 });
 
@@ -155,10 +226,11 @@ describe("read aloud", () => {
     renderApp(mockBridge());
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
     await user.type(screen.getByLabelText("Message Sam"), "hi");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await screen.findByText("Hello from Sam");
-    expect(screen.queryByRole("button", { name: "Read aloud" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Speak reply" })).toBeNull();
   });
 
   it("never auto-plays: nothing is synthesized until the button is clicked", async () => {
@@ -166,9 +238,10 @@ describe("read aloud", () => {
     renderApp(bridge);
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
     await user.type(screen.getByLabelText("Message Sam"), "hi");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await screen.findByRole("button", { name: "Read aloud" });
+    await screen.findByRole("button", { name: "Speak reply" });
     expect(bridge.speak).not.toHaveBeenCalled();
   });
 
@@ -181,9 +254,10 @@ describe("read aloud", () => {
     renderApp(bridge);
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
     await user.type(screen.getByLabelText("Message Sam"), "hi");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await user.click(await screen.findByRole("button", { name: "Read aloud" }));
+    await user.click(await screen.findByRole("button", { name: "Speak reply" }));
     await waitFor(() => expect(bridge.speak).toHaveBeenCalled());
     expect(bridge.speak).toHaveBeenCalledWith({
       text: "Hello from Sam",
@@ -193,7 +267,9 @@ describe("read aloud", () => {
     });
     expect(created).toHaveLength(1);
     await waitFor(() => expect(instances).toHaveLength(1));
+    await screen.findByRole("img", { name: "Sam is speaking" });
     act(() => instances[0]?.onended?.());
+    await screen.findByRole("img", { name: "Sam is ready" });
     expect(revoked).toEqual(created);
     expect(window.localStorage.length).toBe(0);
   });
@@ -213,9 +289,10 @@ describe("read aloud", () => {
     renderApp(bridge);
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
     await user.type(screen.getByLabelText("Message Sam"), "hi");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await user.click(await screen.findByRole("button", { name: "Read aloud" }));
+    await user.click(await screen.findByRole("button", { name: "Speak reply" }));
     expect(await screen.findByText("The voice service timed out.")).toBeInTheDocument();
   });
 });

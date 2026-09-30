@@ -26,6 +26,8 @@ const METHODS = [
   "activity",
   "decideConfirmation",
   "voiceUtterance",
+  "voiceWake",
+  "setVoiceActivation",
   "speak",
   "identityStatus",
   "identityEnrollBegin",

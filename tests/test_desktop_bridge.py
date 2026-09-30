@@ -645,6 +645,8 @@ def test_router_has_only_the_documented_routes() -> None:
             ("GET", "/desktop/v1/activity"),
             ("POST", "/desktop/v1/confirmations/decide"),
             ("POST", "/desktop/v1/voice/utterance"),
+            ("POST", "/desktop/v1/voice/wake"),
+            ("POST", "/desktop/v1/voice/activation"),
             ("POST", "/desktop/v1/tts/speak"),
             # Phase 12: owner voice identity and Guest Mode
             ("GET", "/desktop/v1/voice/identity"),
@@ -713,7 +715,7 @@ def test_desktop_source_has_no_generic_capabilities() -> None:
     assert "PermissionGrant(" not in api_text
     assert "create_grant" not in api_text
     assert "allow_all" not in api_text
-    assert inspect.getsource(desktop_api).count("@router.") == 14
+    assert inspect.getsource(desktop_api).count("@router.") == 16
 
 
 # --------------------------------------------- CRITICAL step-up / audit

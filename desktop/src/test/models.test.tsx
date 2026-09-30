@@ -9,7 +9,7 @@ async function openSettings(bridge: ReturnType<typeof mockBridge>) {
   renderApp(bridge);
   const user = userEvent.setup();
   await screen.findByLabelText("Connection: Connected");
-  await user.click(screen.getByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByRole("button", { name: "Settings" }));
   await screen.findByText("AI Providers");
   return user;
 }
@@ -37,7 +37,7 @@ describe("AI Providers settings", () => {
     const view = renderApp(mockBridge());
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: "Settings" }));
     await screen.findByText("AI Providers");
     const text = view.container.textContent ?? "";
     for (const forbidden of ["AIza", "sk-ant", "Bearer", "api_key", "x-goog-api-key", "OAuth", "ANTHROPIC_API_KEY"]) {
@@ -167,16 +167,22 @@ describe("Private chat marking", () => {
     renderApp(bridge);
     const user = userEvent.setup();
     await screen.findByLabelText("Connection: Connected");
-    const chip = await screen.findByRole("button", { name: "Private" });
-    expect(chip).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
+    expect(await screen.findByRole("button", { name: "Private" })).toHaveAttribute("aria-pressed", "false");
     await user.type(screen.getByLabelText("Message Sam"), "normal question{Enter}");
     await waitFor(() => expect(bridge.chat).toHaveBeenCalledTimes(1));
     expect(bridge.chat.mock.calls[0]?.[2]).toBe("normal");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Type to Sam" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
+    const chip = await screen.findByRole("button", { name: "Private" });
     await user.click(chip);
     expect(chip).toHaveAttribute("aria-pressed", "true");
     await user.type(screen.getByLabelText("Message Sam"), "a private thought{Enter}");
     await waitFor(() => expect(bridge.chat).toHaveBeenCalledTimes(2));
     expect(bridge.chat.mock.calls[1]?.[2]).toBe("private");
+    // Private is per message: the next message starts normal again.
+    await user.click(screen.getByRole("button", { name: "Type to Sam" }));
+    expect(await screen.findByRole("button", { name: "Private" })).toHaveAttribute("aria-pressed", "false");
   });
 });
 

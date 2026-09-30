@@ -12,6 +12,7 @@ import type {
   ProvidersStatus,
   StatusResponse,
 } from "../bridge/types";
+import type { LocalSpeechOutput } from "../lib/localSpeech";
 import type { AudioEnvironment } from "../lib/recorder";
 
 export const ok: OperationResult = {
@@ -221,6 +222,11 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
       language: null,
       direction: null,
     })),
+    voiceWake: vi.fn(async () => ({ ...ok, wake: false, followed: false })),
+    setVoiceActivation: vi.fn(async (enabled: boolean) => ({
+      ...ok,
+      voice_activation: enabled ? ("on" as const) : ("off" as const),
+    })),
     speak: vi.fn(async () => ({
       ...ok,
       audio_base64: null,
@@ -274,8 +280,12 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
   return { ...base, ...overrides } as MockBridge;
 }
 
-export function renderApp(bridge: SamBridge, audioEnvironment?: AudioEnvironment | null) {
-  return render(<App bridge={bridge} audioEnvironment={audioEnvironment} />);
+export function renderApp(
+  bridge: SamBridge,
+  audioEnvironment?: AudioEnvironment | null,
+  speech?: LocalSpeechOutput | null,
+) {
+  return render(<App bridge={bridge} audioEnvironment={audioEnvironment} speech={speech} />);
 }
 
 export function fakeAudioEnvironment() {

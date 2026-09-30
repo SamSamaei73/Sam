@@ -17,6 +17,7 @@ import { EmptyState, IconButton, NeonButton, Notice, SectionHeader, StatusPill, 
 import { MAX_UPLOAD_BYTES, humanize, resourceKindFor } from "../lib/format";
 import { bytesToBase64 } from "../lib/wav";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 type Tab =
   | "overview"
@@ -484,7 +485,7 @@ export function ProfessionalView() {
     <div className="page-narrow">
       <SectionHeader
         title="Professional"
-        description="Your evidence-backed professional profile. Every fact shows where it came from and how strongly it is supported. Kept in memory for this session only."
+        description="Your evidence-backed professional profile. Every fact shows where it came from and how strongly it is supported. Stored only on this Mac, in Sam's owner-only data folder (a development build keeps it for this session only)."
         actions={
           <NeonButton disabled={busy} onClick={() => fileRef.current?.click()}>
             <IconUpload /> Add source
@@ -556,9 +557,7 @@ export function ProfessionalView() {
 
       <div role="tabpanel" id={`pro-panel-${tab}`} aria-labelledby={`pro-tab-${tab}`}>
         {profile === null ? (
-          <p className="muted" role="status">
-            Loading…
-          </p>
+          <Loader />
         ) : null}
 
         {profile !== null && tab === "overview" ? (

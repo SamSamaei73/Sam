@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-voice-activation"
+description = "Enables the sam_voice_activation command without any pre-configured scope."
+commands.allow = ["sam_voice_activation"]
+
+[[permission]]
+identifier = "deny-sam-voice-activation"
+description = "Denies the sam_voice_activation command without any pre-configured scope."
+commands.deny = ["sam_voice_activation"]

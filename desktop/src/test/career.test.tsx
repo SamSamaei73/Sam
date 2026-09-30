@@ -97,7 +97,7 @@ async function openCareer(bridge: ReturnType<typeof mockBridge>) {
   renderApp(bridge);
   const user = userEvent.setup();
   await screen.findByLabelText("Connection: Connected");
-  await user.click(screen.getByRole("button", { name: "Career" }));
+  await user.click(await screen.findByRole("button", { name: "Career" }));
   await screen.findByRole("heading", { name: "Career" });
   return user;
 }

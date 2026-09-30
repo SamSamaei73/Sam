@@ -42,7 +42,19 @@ def _host_name(header: str) -> str:
 
 
 def bridge_runtime(request: Request) -> DesktopRuntime:
-    """FastAPI dependency: authenticate the caller, return the runtime."""
+    """FastAPI dependency: authenticate the caller, return the runtime.
+
+    Phase 17: while startup is BLOCKED (storage, migration, integrity or
+    configuration failure) nothing but the status route is served."""
+
+    runtime = status_bridge_runtime(request)
+    if runtime.blocked_reason is not None:
+        raise _deny(503, "storage_unavailable")
+    return runtime
+
+
+def status_bridge_runtime(request: Request) -> DesktopRuntime:
+    """Authenticate the caller; the runtime may be BLOCKED (status only)."""
 
     settings = request.app.state.settings
     token = settings.desktop_bridge_token
@@ -92,4 +104,9 @@ def owner_bridge_runtime(request: Request) -> DesktopRuntime:
     return runtime
 
 
-__all__ = ["TOKEN_HEADER", "bridge_runtime", "owner_bridge_runtime"]
+__all__ = [
+    "TOKEN_HEADER",
+    "bridge_runtime",
+    "owner_bridge_runtime",
+    "status_bridge_runtime",
+]

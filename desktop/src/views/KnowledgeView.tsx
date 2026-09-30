@@ -7,6 +7,7 @@ import { SourceCard } from "../components/SourceCard";
 import { MAX_UPLOAD_BYTES, formatBytes, humanize, resourceKindFor } from "../lib/format";
 import { bytesToBase64 } from "../lib/wav";
 import { useSam } from "../state";
+import { Loader } from "../components/Loader";
 
 function messageFor(error: unknown): string {
   return (error instanceof BridgeError ? error : toBridgeError(error)).message;
@@ -169,9 +170,7 @@ export function KnowledgeView() {
 
       <h3 style={{ margin: "0 0 10px" }}>Documents</h3>
       {resources === null ? (
-        <p className="muted" role="status">
-          Loading…
-        </p>
+        <Loader />
       ) : resources.length === 0 ? (
         <EmptyState
           title="No documents yet"

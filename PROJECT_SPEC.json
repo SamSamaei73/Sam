@@ -501,9 +501,26 @@
       "name": "production_integration_hardening",
       "scope": [
         "production integration",
-        "hardening"
+        "hardening",
+        "state classification (must / should / ephemeral)",
+        "owner-only SQLite in the platform app-data directory",
+        "explicit ordered migrations with rollback and future-schema refusal",
+        "durable restart-safe external-action attempt ledger with database-enforced uniqueness and monotonic transitions",
+        "crash recovery (IN_FLIGHT becomes OUTCOME_UNKNOWN, never retryable)",
+        "durable outbox order (commit IN_FLIGHT before dispatch)",
+        "explicit startup phases with BLOCKED / DEGRADED health",
+        "verified local backup and restore",
+        "Keychain credential boundary without plaintext fallback",
+        "single-instance lock",
+        "durable bounded metadata-only audit",
+        "redacted bounded logging",
+        "scheduler restart policy (off unless the owner opted in)",
+        "external-action readiness gate",
+        "production configuration fail-closed",
+        "packaging checks"
       ],
-      "status": "not_started"
+      "status": "implementation_in_progress",
+      "scope_note": "Phase 17 turns Sam into a durable local-production system without new product features. State is classified (must survive for safety / should survive / intentionally ephemeral); only classified state is persisted, in ONE owner-only SQLite database (0600 files, 0700 directories, symlinks refused, WAL + synchronous=FULL, foreign_keys, secure_delete, parameterized fixed SQL only) in the platform app-data directory (macOS ~/Library/Application Support/app.sam.desktop, never the repository). Explicit ordered migrations run one transaction each; failure rolls back and blocks startup; future schemas are refused; destructive migrations require a verified backup. Durable repositories (Career, Professional, Proactive) keep the proven in-memory logic with transactional write-through mirroring (memory is rolled back if the write fails). The Career ExternalActionAttempt ledger is durable: an attempt is committed IN_FLIGHT (with the draft and audit row, in one transaction) before any dispatch; a partial UNIQUE index allows one blocking attempt per item even across processes; a trigger allows only monotonic transitions; attempts are never deleted; startup recovery turns IN_FLIGHT into OUTCOME_UNKNOWN (never retryable) and aligns drafts/messages. Confirmations never persist; bootstrap grants are recreated and only owner revocations persist. Sensitive Career answers and sensitive preferences are never written to disk. Explicit startup phases end READY or BLOCKED (status only, 503 elsewhere); corrupt databases are never repaired or recreated; a second instance is refused (flock). Local verified backups (sha256 manifest, atomic completion, bounded) and CLI restore (Sam stopped, validate first, safety backup, atomic swap). Credentials resolve environment first, then the macOS Keychain (native backend only) with no plaintext fallback. Content-free health in /status and the System panel. Redacted, bounded, owner-only logs; durable bounded metadata-only audit (not tamper-proof). Scheduler stays OFF unless the owner explicitly chose to keep it on across restarts. Real Career SUBMIT/SEND remain unavailable behind an ExternalActionReadiness gate (no trusted adapter; reconciliation not ready). Implementation in progress: pending independent review; not approved."
     }
   ],
   "mcp_integrations": {
@@ -782,9 +799,9 @@
     "important": "Never silently continue into the next phase."
   },
   "current_state": {
-    "phase": 16,
-    "status": "approved",
-    "next_phase": 17,
+    "phase": 17,
+    "status": "implementation_in_progress",
+    "next_phase": null,
     "approval_required_before_next_phase": true
   },
   "definition_of_done": {

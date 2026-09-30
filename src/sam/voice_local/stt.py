@@ -10,6 +10,7 @@ Persian-English code-switching is handled best-effort (documented).
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from pathlib import Path
@@ -58,6 +59,13 @@ class LocalWhisperTranscriptionProvider:
             )
             self.load_seconds = time.monotonic() - started
             return self._whisper
+
+    def preload(self) -> None:
+        """Load the verified local model ahead of the first request (hands-free
+        wake latency). Never downloads; a failure is left for the request."""
+
+        with contextlib.suppress(Exception):
+            self._load()
 
     def transcribe(
         self, request: TranscriptionRequest, *, timeout_seconds: float

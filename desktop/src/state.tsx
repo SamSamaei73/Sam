@@ -46,6 +46,8 @@ interface SamContextValue {
    * PermissionEngine decides again — the UI never assumes it was allowed.
    */
   confirmable: <T extends OperationResult>(run: (confirmationId?: string) => Promise<T>) => Promise<T>;
+  /** True while the owner is being asked to approve something (real state). */
+  confirmationPending: boolean;
 }
 
 const SamContext = createContext<SamContextValue | null>(null);
@@ -68,6 +70,9 @@ interface PendingConfirmation {
 }
 
 export const STATUS_POLL_MS = 30_000;
+/** While the app's own backend starts, ask again quickly, for a bounded time. */
+export const STARTUP_POLL_MS = 400;
+export const STARTUP_LIMIT_MS = 60_000;
 
 export function SamProvider({
   bridge,
@@ -85,17 +90,31 @@ export function SamProvider({
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const alive = useRef(true);
 
+  const startedAt = useRef(Date.now());
+  const startupRetry = useRef<number | undefined>(undefined);
   const refreshStatus = useCallback(async () => {
+    window.clearTimeout(startupRetry.current);
     try {
       const next = await bridge.status();
       if (!alive.current) return;
       setStatus(next);
       setFailed(false);
-    } catch {
+    } catch (error) {
       if (!alive.current) return;
+      // "starting" means the app's backend is genuinely still starting (the
+      // shell bounds that); only after the bounded window is it a failure.
+      const starting = toBridgeError(error).code === "starting";
+      if (starting && Date.now() - startedAt.current < STARTUP_LIMIT_MS) {
+        startupRetry.current = window.setTimeout(() => void refreshStatusRef.current(), STARTUP_POLL_MS);
+        return;
+      }
       setFailed(true);
     }
   }, [bridge]);
+  const refreshStatusRef = useRef(refreshStatus);
+  useEffect(() => {
+    refreshStatusRef.current = refreshStatus;
+  });
 
   const refreshIdentity = useCallback(async () => {
     try {
@@ -117,6 +136,7 @@ export function SamProvider({
     return () => {
       alive.current = false;
       window.clearInterval(timer);
+      window.clearTimeout(startupRetry.current);
     };
   }, [refreshStatus, refreshIdentity]);
 
@@ -197,8 +217,22 @@ export function SamProvider({
       prefs,
       updatePrefs,
       confirmable,
+      confirmationPending: pending !== null,
     }),
-    [bridge, status, failed, refreshStatus, identity, refreshIdentity, t, audioEnvironment, prefs, updatePrefs, confirmable],
+    [
+      bridge,
+      status,
+      failed,
+      refreshStatus,
+      identity,
+      refreshIdentity,
+      t,
+      audioEnvironment,
+      prefs,
+      updatePrefs,
+      confirmable,
+      pending,
+    ],
   );
 
   return (

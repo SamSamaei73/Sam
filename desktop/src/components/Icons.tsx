@@ -155,3 +155,21 @@ export const IconSparkle = () => (
     <path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
   </Base>
 );
+export const IconHome = () => (
+  <Base>
+    <circle cx="12" cy="12" r="3.2" />
+    <circle cx="12" cy="12" r="7.5" opacity="0.55" />
+  </Base>
+);
+export const IconHistory = () => (
+  <Base>
+    <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" />
+    <path d="M4.5 4.5v3h3M12 8v4.2l2.8 1.8" />
+  </Base>
+);
+export const IconKeyboard = () => (
+  <Base>
+    <rect x="3.5" y="6.5" width="17" height="11" rx="2.5" />
+    <path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M8 14h8" />
+  </Base>
+);

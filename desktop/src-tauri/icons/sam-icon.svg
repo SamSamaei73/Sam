@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Sam app icon source. macOS grid: 824px rounded square inset 100px.
+       Regenerate every size with: npx tauri icon src-tauri/icons/sam-icon-1024.png -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#101a3f"/>
+      <stop offset="100%" stop-color="#040817"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="30%" stop-color="#3f7dff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#0a1a6e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="42%" cy="38%" r="70%">
+      <stop offset="0%" stop-color="#f2f8ff"/>
+      <stop offset="22%" stop-color="#9fd0ff"/>
+      <stop offset="55%" stop-color="#3f7dff"/>
+      <stop offset="100%" stop-color="#0a1a6e"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8fd8ff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#8fd8ff" stop-opacity="0.05"/>
+    </linearGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="185" ry="185"/>
+    </clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bg)"/>
+  <g clip-path="url(#tile)">
+    <circle cx="512" cy="512" r="400" fill="url(#glow)"/>
+    <circle cx="512" cy="512" r="300" fill="none" stroke="#7cc8ff" stroke-opacity="0.22" stroke-width="4"/>
+    <g fill="none" stroke="#bfe6ff" stroke-width="14" stroke-linecap="round" stroke-opacity="0.85">
+      <path d="M512 262 A250 250 0 0 1 762 512"/>
+      <path d="M512 762 A250 250 0 0 1 262 512"/>
+    </g>
+    <g fill="none" stroke="#5aa8ff" stroke-width="8" stroke-linecap="round" stroke-opacity="0.7">
+      <path d="M512 306 A206 206 0 0 0 306 512"/>
+      <path d="M512 718 A206 206 0 0 0 718 512"/>
+    </g>
+    <circle cx="512" cy="512" r="165" fill="#5aa8ff" opacity="0.6" filter="url(#blur)"/>
+    <circle cx="512" cy="512" r="150" fill="url(#core)"/>
+    <ellipse cx="465" cy="452" rx="62" ry="38" fill="#ffffff" opacity="0.35"/>
+  </g>
+  <rect x="101" y="101" width="822" height="822" rx="184" ry="184" fill="none" stroke="url(#edge)" stroke-width="2"/>
+</svg>

@@ -66,6 +66,34 @@ export interface StatusResponse {
   conversation_history: "session_local";
   memory_storage: "in_process";
   principal_label: string;
+  /** Phase 17: content-free health (reason codes only). */
+  health?: SystemHealth | null;
+  /** Added by the desktop shell: which shell build is running. */
+  desktop_build?: "release" | "development";
+  /** Hands-free "Sam" wake word: an owner-only switch (off until turned on). */
+  voice_activation?: VoiceActivationState;
+}
+
+export type HealthComponent =
+  | "ok"
+  | "in_memory"
+  | "not_configured"
+  | "disabled"
+  | "degraded"
+  | "unavailable"
+  | "blocked";
+
+export interface SystemHealth {
+  status: "ready" | "degraded" | "blocked";
+  phase: string;
+  reason_code: string | null;
+  storage_mode: "memory" | "sqlite";
+  schema_version: number | null;
+  last_backup_at: string | null;
+  backup_count: number;
+  scheduler: "off" | "on" | "on_persistent";
+  reconciliation_required: number;
+  subsystems: { name: string; status: HealthComponent; reason_code: string | null }[];
 }
 
 export interface SourceLocation {
@@ -645,10 +673,13 @@ export interface ProactiveOverview extends OperationResult {
   live_runs: number;
   /** Background scheduling is off by default and after every restart. */
   scheduler_enabled: boolean;
+  /** Phase 17: the owner chose to keep scheduling on across restarts. */
+  scheduler_persistent?: boolean;
 }
 
 export interface ProactiveSchedulerResult extends OperationResult {
   scheduler_enabled: boolean;
+  scheduler_persistent?: boolean;
 }
 
 export interface ProactiveTaskResult extends OperationResult {
@@ -911,4 +942,16 @@ export interface CareerPreferencesInput {
   contactPhone: string | null;
   portfolioUrl: string | null;
   linkedinUrl: string | null;
+}
+
+export type VoiceActivationState = "on" | "off" | "unavailable";
+
+/** One wake candidate: one bit (never the recognized text). */
+export interface VoiceWakeResponse extends OperationResult {
+  wake: boolean;
+  followed: boolean;
+}
+
+export interface VoiceActivationResponse extends OperationResult {
+  voice_activation: VoiceActivationState;
 }

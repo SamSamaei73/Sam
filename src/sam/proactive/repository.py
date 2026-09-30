@@ -1,9 +1,12 @@
 """Persistence contract for the proactive engine.
 
-``ProactiveRepository`` is an abstraction; Phase 15 ships ONLY
-``InMemoryProactiveRepository``: no SQLite, no file, no cloud persistence.
-Tasks, watch state, notifications and history live for the process lifetime
-and are gone after a restart (so there is never a backlog to replay).
+``ProactiveRepository`` is an abstraction. ``InMemoryProactiveRepository``
+is process-local (tests, development). Phase 17 adds the durable
+``sam.storage.proactive.SQLiteProactiveRepository`` behind the same protocol:
+tasks, watch state (including the cooldown's ``last_notified_at``), the
+dedup ledger, notifications and history survive a restart. A restart never
+replays a backlog: missed recurring runs still SKIP_TO_NEXT at the next tick,
+and a persisted dedup key is never notified twice.
 
 Every collection is bounded: task counts are enforced on insert and edit, and
 notifications and history keep only the newest entries.
@@ -12,7 +15,8 @@ notifications and history keep only the newest entries.
 from __future__ import annotations
 
 from collections import OrderedDict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from threading import RLock
 from typing import Protocol
 
@@ -48,6 +52,7 @@ class ProactiveRepository(Protocol):
     def remove_notification(self, notification_id: str) -> bool: ...
     def add_history(self, record: RunRecord) -> None: ...
     def list_history(self) -> tuple[RunRecord, ...]: ...
+    def atomic(self) -> AbstractContextManager[None]: ...
 
 
 class InMemoryProactiveRepository:
@@ -140,6 +145,11 @@ class InMemoryProactiveRepository:
     def list_history(self) -> tuple[RunRecord, ...]:
         with self._lock:
             return tuple(reversed(self._history))
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        with self._lock:
+            yield
 
 
 __all__ = [

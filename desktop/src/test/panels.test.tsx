@@ -18,7 +18,7 @@ const grant = (over: Partial<GrantInfo> = {}): GrantInfo => ({
 
 async function goto(name: string) {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name }));
+  await user.click(await screen.findByRole("button", { name }));
   return user;
 }
 

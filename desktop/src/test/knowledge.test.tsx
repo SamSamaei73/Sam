@@ -5,7 +5,7 @@ import { mockBridge, ok, renderApp } from "./helpers";
 
 async function goto(name: string) {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name }));
+  await user.click(await screen.findByRole("button", { name }));
   return user;
 }
 

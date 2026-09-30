@@ -64,6 +64,8 @@ export class Recorder {
   constructor(
     private readonly env: AudioEnvironment | null = browserAudioEnvironment(),
     private readonly onLimit: () => void = () => undefined,
+    /** The real input level (RMS, 0..1) of each captured frame, for the UI. */
+    private readonly onLevel: (level: number) => void = () => undefined,
   ) {}
 
   get isRecording(): boolean {
@@ -105,6 +107,9 @@ export class Recorder {
 
   private capture(frame: Float32Array): void {
     if (!this.active) return;
+    let sum = 0;
+    for (const sample of frame) sum += sample * sample;
+    this.onLevel(Math.min(1, Math.sqrt(sum / Math.max(1, frame.length)) * 4));
     const rate = this.context?.sampleRate ?? TARGET_SAMPLE_RATE;
     const limit = Math.floor((MAX_RECORDING_SAMPLES * rate) / TARGET_SAMPLE_RATE);
     const room = limit - this.total;
