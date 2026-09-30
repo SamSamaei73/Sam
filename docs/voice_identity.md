@@ -158,7 +158,9 @@ a lock-screen.
 
 ## Local models: provenance and setup
 
-Model acquisition is an explicit, one-time step, never part of a request:
+Model acquisition is an explicit, one-time step, never part of a request.
+In the app the owner starts it from Settings (see `docs/voice-activation.md`,
+*Voice components*); the admin CLI does the same:
 
 ```bash
 uv sync --group voice-local                       # macOS / Apple silicon only

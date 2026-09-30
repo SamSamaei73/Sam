@@ -373,3 +373,49 @@ def test_turning_activation_on_warms_the_local_recognizer() -> None:
     b.runtime.wake_transcriber = Warmable("Sam")
     b.activate()
     assert warmed.wait(5)
+
+
+def test_sleeping_mode_privacy_counters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While Sam waits for its name, every sleeping-mode check is local and
+    leaves nothing behind: counted explicitly across silence, ordinary
+    speech, a secret-looking phrase and the name itself."""
+
+    from sam.tts.provider import FakeSpeechSynthesisProvider
+
+    tts = FakeSpeechSynthesisProvider()
+    b = WakeBridge(wake_text="Sam", tts=tts)
+    b.activate()
+    monkeypatch.chdir(tmp_path)  # any stray relative write would land here
+    memory_before = b.post("/memory/search", {"text": ""}).json()["items"]
+    knowledge_before = b.get("/knowledge/resources").json()["resources"]
+    permission_events = len(b.runtime.permission_audit.list_events())
+    phrases = [
+        "",  # silence / nothing recognised
+        "what time is the meeting tomorrow",
+        "my bank password is hunter2",
+        "Samuel called yesterday",
+        "Sam",
+        "Sam",
+    ]
+    woke = 0
+    for text in phrases:
+        b.wake._result = text
+        answer = b.wake_clip()
+        assert set(answer) >= {"status", "wake", "followed"}
+        assert text == "" or text not in str(answer)
+        woke += bool(answer["wake"])
+    assert woke == 2  # only the name wakes Sam
+    # Wake checks are not permission-checked operations: no audit event, so
+    # no audit entry can ever carry sleeping-mode content.
+    assert len(b.runtime.permission_audit.list_events()) == permission_events
+    assert b.agent.messages == []  # zero Claude / Gemini / any model calls
+    assert tts.call_count == 0  # zero speech-provider calls
+    assert b.voice_stt.call_count == 0  # the conversation path never ran
+    assert b.post("/memory/search", {"text": ""}).json()["items"] == memory_before
+    assert b.get("/knowledge/resources").json()["resources"] == knowledge_before
+    activity = str(b.get("/activity").json()["items"])
+    for text in phrases:
+        assert not text or text not in activity
+    assert list(tmp_path.iterdir()) == []  # no audio or transcript file

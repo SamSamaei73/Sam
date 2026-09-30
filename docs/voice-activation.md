@@ -111,9 +111,18 @@ sleep.
   Previously a missing profile was reported as the generic "Owner
   verification required".
 - **Step-up secret:** enrollment requires the step-up secret. In production
-  it now resolves from the Keychain, like every credential. It is set with
-  `python -m sam.system.cli secret-set desktop_step_up_secret` (read with no
-  echo; at least 16 characters; shorter values fail closed).
+  it resolves from the Keychain, like every credential.
+  - **Normal setup (no Terminal):** Settings › Owner voice › *Set up owner
+    verification*. The owner chooses the secret (typed twice, password
+    fields, at least 16 characters). The backend stores it only through the
+    Keychain boundary (a write-only capability for this one credential),
+    keeps it in memory like a secret resolved at startup, and begins
+    enrollment in the same request. The app clears both fields before the
+    request is sent and never stores the value. This works only while no
+    step-up secret exists; Guest Mode is refused.
+  - **Admin / recovery:** `python -m sam.system.cli secret-set
+    desktop_step_up_secret` (no echo) remains, and is the only way to
+    *replace* an existing secret.
 
 ## Authorization is unchanged
 
@@ -160,3 +169,38 @@ voice barge-in is future work and is **not** faked.
 
 Voice activation is **off** by default. The Settings text explains exactly
 what it does before the owner turns it on.
+
+Each setup stage is its own state, with its own message and action (never a
+generic "Owner verification required"):
+
+| `setup_state` | Owner sees | Action |
+|---|---|---|
+| `models_missing` | Install voice components (size, source, licenses) | owner-started install |
+| `restart_required` | Components installed and verified | Restart Sam's engine |
+| `setup_required` | Set up owner verification | choose step-up secret, then enroll |
+| `not_enrolled` | Set up your voice | enroll 3–5 samples |
+| `enrolled` | ready | – |
+| `voice_unavailable` | voice identity is off or the Keychain is unusable | – |
+
+Text works in every state.
+
+### Voice components (models)
+
+Nothing is bundled and nothing downloads on launch. The owner starts the
+install from Settings (`POST /desktop/v1/voice/models/install`,
+`sam.voice_local.install`):
+
+- exactly the registry's pinned files: SpeechBrain ECAPA (Apache-2.0) and
+  Whisper `small` (MIT), ≈ 570 MB, each pinned to a commit, a size and a
+  SHA-256;
+- `https://huggingface.co/<repo>/resolve/<commit>/<file>`; redirects are
+  followed manually, HTTPS only, to `huggingface.co` or `*.hf.co`, at most
+  5; proxies and other environment settings are ignored;
+- connect 15 s, read 60 s, one-hour overall deadline;
+- streamed into a private staging directory, cut off above the pinned size,
+  hashed while streaming, and renamed into place only as a complete,
+  verified set. A failure leaves voice unavailable and the app usable;
+- no telemetry, token or account; no code is executed from a download.
+
+Verified models activate through a backend restart (the normal startup
+path), never by hot-wiring a running backend.

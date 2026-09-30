@@ -410,3 +410,68 @@ def test_guest_mode_cannot_reach_setup_or_install(tmp_path: Path) -> None:
     assert written == []
     assert bridge.runtime.voice_installer is not None
     assert bridge.runtime.voice_installer.status().state is InstallState.NOT_INSTALLED
+
+
+# ------------------------------------------- each safety layer on its own
+
+
+def test_the_stream_check_alone_rejects_a_tampered_file(tmp_path: Path) -> None:
+    spec = MODEL.files[0]
+    tampered = FakeSource(files={"weights.bin": b"x" * len(ALPHA), "config.json": BETA})
+    with pytest.raises(InstallError) as caught:
+        install_mod.download_file(
+            MODEL, spec, tmp_path / "weights.bin", tampered, deadline=float("inf")
+        )
+    assert caught.value.code == "verification_failed"
+
+
+def test_an_endless_body_is_cut_off_at_the_pinned_size(tmp_path: Path) -> None:
+    spec = MODEL.files[0]
+    served = {"chunks": 0}
+
+    @contextmanager
+    def endless(url: str) -> Iterator[tuple[int, str | None, Iterator[bytes]]]:
+        def chunks() -> Iterator[bytes]:
+            # "Endless" for the installer, but bounded here (4x the pin) so a
+            # regression that removed the cap fails the test instead of
+            # filling the disk.
+            for _ in range(4 * spec.size // 64):
+                served["chunks"] += 1
+                yield b"z" * 64
+
+        yield 200, None, chunks()
+
+    with pytest.raises(InstallError) as caught:
+        install_mod.download_file(
+            MODEL, spec, tmp_path / "weights.bin", endless, deadline=float("inf")
+        )
+    assert caught.value.code == "verification_failed"
+    assert served["chunks"] <= spec.size // 64 + 2  # stopped right after the pin
+    assert (tmp_path / "weights.bin").stat().st_size <= spec.size + 64
+
+
+def test_nothing_unverified_is_ever_activated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Even if the streaming check were wrong, the staged set is verified
+    BEFORE it is renamed into place."""
+
+    def faulty_download(model: Any, spec: Any, dest: Path, *_a: Any, **_k: Any) -> None:
+        dest.write_bytes(b"not the pinned bytes")  # and no error raised
+
+    monkeypatch.setattr(install_mod, "download_file", faulty_download)
+    with pytest.raises(InstallError) as caught:
+        install_models((MODEL,), tmp_path, FakeSource())
+    assert caught.value.code == "verification_failed"
+    target = model_dir(tmp_path, MODEL)
+    assert not target.exists()
+    assert not list(target.parent.glob(".staging-*"))
+
+
+def test_the_http_client_ignores_the_environment_and_never_auto_redirects() -> None:
+    source = install_mod._HttpxSource()
+    try:
+        assert source._client.trust_env is False  # no proxy / netrc / env CAs
+        assert source._client.follow_redirects is False  # every hop is checked
+    finally:
+        source.close()
