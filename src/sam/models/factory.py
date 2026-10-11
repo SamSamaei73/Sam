@@ -15,7 +15,7 @@ from sam.models.models import (
     GeminiFreeAttestation,
     ProviderId,
 )
-from sam.models.policies import OwnerPreferences, PersonalContentPolicy
+from sam.models.policies import CostPolicy, OwnerPreferences, PersonalContentPolicy
 from sam.models.provider import ModelProvider
 from sam.models.providers.claude_subscription import (
     ClaudeSubscriptionProvider,
@@ -25,6 +25,7 @@ from sam.models.providers.claude_subscription import (
 from sam.models.providers.gemini import GeminiFreeProvider
 from sam.models.providers.grok import GrokProvider
 from sam.models.providers.openai import OpenAIProvider
+from sam.models.providers.openrouter import OpenRouterProvider
 from sam.models.registry import build_registry
 from sam.models.router import ModelRouter
 
@@ -34,11 +35,11 @@ class ModelSettingsStore:
 
     They change only through the Desktop settings route (step-up authenticated
     when they loosen privacy), never from a prompt, a model, or a provider.
-    In-memory: they reset to the safe defaults on restart.
+    In-memory: they reset to trusted bootstrap defaults on restart.
     """
 
-    def __init__(self) -> None:
-        self._preferences = OwnerPreferences()
+    def __init__(self, *, preferences: OwnerPreferences | None = None) -> None:
+        self._preferences = preferences or OwnerPreferences()
         self._content = PersonalContentPolicy()
         self._lock = RLock()
 
@@ -84,18 +85,36 @@ def build_model_router(
     store: ModelSettingsStore | None = None,
     audit: RoutingAuditSink | None = None,
     gemini_transport: httpx.BaseTransport | None = None,
+    openrouter_transport: httpx.BaseTransport | None = None,
     claude_runner: Runner = run_bounded,
 ) -> tuple[ModelRouter, ModelSettingsStore]:
-    """Build the router. OpenAI and Grok get disabled adapters that make zero
-    calls; no paid credential is read from anywhere."""
+    """Build the router from trusted settings. An OpenRouter key opts in to
+    that provider as the default primary, without enabling any paid fallback.
+    An explicitly supplied store retains the owner's existing preferences.
+    Direct OpenAI and Grok adapters remain disabled and make zero calls.
+    """
 
-    store = store or ModelSettingsStore()
+    openrouter_key = settings.openrouter_api_key
+    openrouter_credential = (
+        ProviderCredential(openrouter_key.get_secret_value())
+        if openrouter_key
+        else None
+    )
+    store = store or ModelSettingsStore(
+        preferences=OwnerPreferences(
+            preferred_provider=(
+                ProviderId.OPENROUTER if openrouter_credential else None
+            )
+        )
+    )
     key = settings.gemini_api_key
     credential = ProviderCredential(key.get_secret_value()) if key else None
     registry = build_registry(
         gemini_configured=credential is not None,
         claude_enabled=settings.claude_subscription_enabled,
         deployment_mode=settings.deployment_mode,
+        openrouter_configured=openrouter_credential is not None,
+        openrouter_model=settings.openrouter_model,
     )
     providers: dict[ProviderId, ModelProvider] = {
         ProviderId.CLAUDE_SUBSCRIPTION: ClaudeSubscriptionProvider(
@@ -110,6 +129,11 @@ def build_model_router(
         ),
         ProviderId.OPENAI_API: OpenAIProvider(),
         ProviderId.GROK_API: GrokProvider(),
+        ProviderId.OPENROUTER: OpenRouterProvider(
+            openrouter_credential,
+            model_id=settings.openrouter_model,
+            transport=openrouter_transport,
+        ),
     }
     router = ModelRouter(
         registry=registry,
@@ -117,6 +141,13 @@ def build_model_router(
         preferences=store.preferences,
         content_policy=store.content,
         audit=audit or InMemoryRoutingAuditSink(),
+        cost=CostPolicy(
+            allowed_paid_providers=(
+                frozenset({ProviderId.OPENROUTER})
+                if openrouter_credential
+                else frozenset()
+            )
+        ),
     )
     return router, store
 

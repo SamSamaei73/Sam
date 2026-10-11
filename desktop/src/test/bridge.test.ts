@@ -26,6 +26,7 @@ const METHODS = [
   "activity",
   "decideConfirmation",
   "voiceUtterance",
+  "endVoiceConversation",
   "voiceWake",
   "setVoiceActivation",
   "speak",
@@ -88,6 +89,19 @@ describe("tauri bridge", () => {
     const commands = invoke.mock.calls.map((call) => call[0]);
     expect(commands).toEqual(["sam_status", "sam_chat", "sam_knowledge_query", "sam_decide_confirmation"]);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
+  });
+
+  it("voice context uses only an opaque id and a fixed erase operation", async () => {
+    invoke.mockResolvedValue({});
+    const conversationId = "a".repeat(32);
+    await tauriBridge.voiceUtterance("AAAA", undefined, "en", true, conversationId);
+    expect(invoke).toHaveBeenLastCalledWith("sam_voice_utterance", {
+      audioBase64: "AAAA", confirmationId: null, language: "en", handsFree: true, conversationId,
+    });
+    await tauriBridge.endVoiceConversation(conversationId);
+    expect(invoke).toHaveBeenLastCalledWith("sam_voice_conversation_end", { conversationId });
+    await tauriBridge.endVoiceConversation();
+    expect(invoke).toHaveBeenLastCalledWith("sam_voice_conversation_end", { conversationId: null });
   });
 
   it("never sends principal, scope, risk, permission, endpoint or credentials", async () => {

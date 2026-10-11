@@ -28,6 +28,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from sam.models.openrouter_config import validate_openrouter_model_id
 from sam.permissions.models import (
     PermissionAction,
     PermissionResource,
@@ -47,7 +48,7 @@ MAX_TTS_TIMEOUT_SECONDS = 60.0
 MAX_TTS_PROFILE_ID_LENGTH = 64
 MAX_TTS_PROVIDER_ID_LENGTH = 64
 MAX_TTS_REFERENCE_LENGTH = 64
-MAX_TTS_MODEL_LENGTH = 64
+MAX_TTS_MODEL_LENGTH = 160
 MAX_TTS_REQUEST_ID_LENGTH = 100
 MAX_TTS_PROFILES = 64
 MAX_TRACKED_TTS_REQUEST_IDS = 10_000
@@ -150,11 +151,19 @@ class TrustedVoiceProfile(BaseModel):
     provider_voice_reference: str = Field(
         min_length=1, max_length=MAX_TTS_REFERENCE_LENGTH, pattern=_REFERENCE_RE.pattern
     )
-    provider_model: str = Field(
-        min_length=1, max_length=MAX_TTS_MODEL_LENGTH, pattern=_MODEL_RE.pattern
-    )
+    provider_model: str = Field(min_length=1, max_length=MAX_TTS_MODEL_LENGTH)
     output_format: TTSAudioFormat = TTSAudioFormat.MP3
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_provider_model(self) -> Self:
+        if self.provider_id == "openrouter-tts":
+            validate_openrouter_model_id(self.provider_model)
+        elif len(self.provider_model) > 64 or not _MODEL_RE.fullmatch(
+            self.provider_model
+        ):
+            raise ValueError("voice model is malformed")
+        return self
 
 
 # --------------------------------------------------------------------- #

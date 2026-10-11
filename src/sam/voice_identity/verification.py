@@ -7,13 +7,14 @@ and a store read *failure* is never reported as "not enrolled".
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from sam.voice.models import DEFAULT_VOICE_PROVIDER_TIMEOUT_SECONDS, ValidatedAudio
-from sam.voice_identity.errors import ProfileStoreError
+from sam.voice_identity.errors import InsufficientSpeechError, ProfileStoreError
 from sam.voice_identity.models import OwnerTemplate, SpeakerVerification, utc_now
 from sam.voice_identity.policy import (
     MAX_EMBEDDING_DIMENSION,
@@ -26,9 +27,28 @@ from sam.voice_identity.providers import (
     CosineSpeakerVerification,
     SpeakerEmbeddingProvider,
     SpeakerVerificationProvider,
+    embed_speaker,
 )
 from sam.voice_identity.quality import quality_problem
 from sam.voice_identity.store import VoiceProfileStore
+
+logger = logging.getLogger(__name__)
+_DIAGNOSTIC_RESULTS = frozenset(result.value for result in SpeakerResult)
+_DIAGNOSTIC_REASONS = frozenset(
+    {
+        "audio_too_short",
+        "audio_too_quiet",
+        "audio_clipped",
+        "profile_unreadable",
+        "not_enrolled",
+        "model_mismatch",
+        "provider_error",
+        "provider_timeout",
+        "provider_invalid",
+        "speaker_match",
+        "speaker_mismatch",
+    }
+)
 
 
 def valid_embedding(raw: object, dimension: int) -> tuple[float, ...] | None:
@@ -83,7 +103,33 @@ class SpeakerVerifier:
             return None
 
     def verify(self, audio: ValidatedAudio) -> SpeakerVerification:
-        return self._verify(audio)[0]
+        started = time.monotonic()
+        verification = self._verify(audio)[0]
+        # Local operational metadata only: distinguish capture length/quality
+        # failures from a mismatch. Never log similarity, audio, a digest,
+        # transcript, template, embedding, or provider exception text. Duration
+        # remains total WAV duration; it is not a measurement of voiced speech.
+        result = (
+            verification.result
+            if verification.result in _DIAGNOSTIC_RESULTS
+            else "verification_error"
+        )
+        reason = (
+            verification.reason_code
+            if verification.reason_code in _DIAGNOSTIC_REASONS
+            else "unknown"
+        )
+        try:
+            logger.info(
+                "Speaker verification result=%s reason=%s duration_ms=%d elapsed_ms=%d",
+                result,
+                reason,
+                round(audio.metadata.duration_seconds * 1000),
+                max(0, round((time.monotonic() - started) * 1000)),
+            )
+        except Exception:
+            pass  # diagnostics can never change the verification result
+        return verification
 
     def verify_diagnostic(
         self, audio: ValidatedAudio
@@ -133,7 +179,16 @@ class SpeakerVerifier:
             )
         deadline = time.monotonic() + self._timeout
         try:
-            raw = self._embedder.embed(audio, timeout_seconds=self._timeout)
+            raw = embed_speaker(
+                self._embedder,
+                audio,
+                minimum_speech_seconds=MIN_VERIFICATION_SECONDS,
+                timeout_seconds=self._timeout,
+            )
+        except InsufficientSpeechError:
+            return self._result(
+                SpeakerResult.INSUFFICIENT_AUDIO, "audio_too_short", audio
+            )
         except Exception:
             return self._result(
                 SpeakerResult.VERIFICATION_ERROR, "provider_error", audio

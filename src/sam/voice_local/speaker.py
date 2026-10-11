@@ -10,6 +10,7 @@ loads ``custom.py``, and never touches the network.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections.abc import Sequence
@@ -18,6 +19,7 @@ from typing import Any
 
 from sam.voice.models import ValidatedAudio
 from sam.voice_identity.errors import ModelSetupError
+from sam.voice_identity.policy import MIN_VERIFICATION_SECONDS
 from sam.voice_local.audio import to_16k_numpy
 from sam.voice_local.registry import (
     SPEAKER_MODEL,
@@ -25,12 +27,16 @@ from sam.voice_local.registry import (
     model_dir,
     require_verified,
 )
+from sam.voice_local.speaker_audio import (
+    SPEAKER_PREPROCESSING_REVISION,
+    prepare_speaker_waveform,
+)
 
 
 class SpeechBrainEcapaEmbeddingProvider:
     provider_id = "speechbrain-ecapa"
     model_id = SPEAKER_MODEL.repo_id
-    model_revision = SPEAKER_MODEL.revision
+    model_revision = f"{SPEAKER_MODEL.revision}:{SPEAKER_PREPROCESSING_REVISION}"
     dimension = 192
 
     def __init__(self, model_root: Path | None = None) -> None:
@@ -54,6 +60,8 @@ class SpeechBrainEcapaEmbeddingProvider:
                 raise ModelSetupError(
                     "install the voice-local dependency group"
                 ) from None
+            # A small desktop voice request must not claim every CPU core.
+            torch.set_num_threads(2)
             features = Fbank(n_mels=80)
             norm = InputNormalization(norm_type="sentence", std_norm=False)
             model = ECAPA_TDNN(
@@ -76,19 +84,55 @@ class SpeechBrainEcapaEmbeddingProvider:
             self.load_seconds = time.monotonic() - started
             return self._modules
 
+    def preload(self) -> None:
+        """Warm verified local weights only, without audio or a voice profile.
+
+        An unavailable model stays unavailable. A later verification still
+        attempts the normal loader and fails closed; warmup never supplies an
+        embedding or a speaker decision.
+        """
+
+        with contextlib.suppress(Exception):
+            self._load()
+
     def embed(
         self, audio: ValidatedAudio, *, timeout_seconds: float
     ) -> Sequence[float]:
-        import torch
+        return self.embed_speech(
+            audio,
+            minimum_speech_seconds=MIN_VERIFICATION_SECONDS,
+            timeout_seconds=timeout_seconds,
+        )
 
-        features, norm, model = self._load()
-        wav = torch.from_numpy(to_16k_numpy(audio)).unsqueeze(0)
-        lengths = torch.ones(1)
-        with torch.no_grad():
-            feats = features(wav)
-            feats = norm(feats, lengths)
-            embedding = model(feats, lengths)
-        return [float(x) for x in embedding.squeeze().tolist()]
+    def embed_speech(
+        self,
+        audio: ValidatedAudio,
+        *,
+        minimum_speech_seconds: float,
+        timeout_seconds: float,
+    ) -> Sequence[float]:
+        original = to_16k_numpy(audio)
+        prepared: Any = None
+        try:
+            # The identical preparation serves both enrollment and verification.
+            # Do not load ECAPA at all for a clip without enough speech.
+            prepared = prepare_speaker_waveform(
+                original, minimum_speech_seconds=minimum_speech_seconds
+            )
+            import torch
+
+            features, norm, model = self._load()
+            wav = torch.from_numpy(prepared).unsqueeze(0)
+            lengths = torch.ones(1)
+            with torch.inference_mode():
+                feats = features(wav)
+                feats = norm(feats, lengths)
+                embedding = model(feats, lengths)
+            return [float(x) for x in embedding.squeeze().tolist()]
+        finally:
+            original.fill(0)
+            if prepared is not None:
+                prepared.fill(0)
 
     def __repr__(self) -> str:
         return f"SpeechBrainEcapaEmbeddingProvider(model={self.model_id!r})"

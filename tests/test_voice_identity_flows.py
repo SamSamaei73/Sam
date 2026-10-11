@@ -349,7 +349,7 @@ def test_guest_is_classified_only_while_active_and_unknowns_stay_blocked() -> No
     assert d.guest is not None and d.guest.capabilities == {
         GuestCapability.CONVERSATION
     }
-    short = h.coordinator.decide(h.audio(OTHER_VOICE, frames=4_000))
+    short = h.coordinator.decide(h.audio(OTHER_VOICE, frames=3_999))
     assert (
         short.speaker_class is SpeakerClass.BLOCKED
     )  # unclassifiable speech never becomes a guest

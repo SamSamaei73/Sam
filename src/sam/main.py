@@ -72,6 +72,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         report.done(StartupPhase.READY)
         yield
     finally:
+        if runtime is not None:
+            runtime.voice_conversations.end(runtime.principal)
         if scheduler is not None:
             scheduler.shutdown()
         if provider is not None:

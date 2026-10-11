@@ -4,7 +4,14 @@ import logging
 from collections.abc import Sequence
 
 from sam.agent.errors import AgentError, AgentExecutionError, InvalidRequestError
-from sam.agent.models import AgentRequest, AgentResponse, Message, MessageRole
+from sam.agent.models import (
+    MAX_HISTORY_CHARS,
+    MAX_HISTORY_MESSAGES,
+    AgentRequest,
+    AgentResponse,
+    Message,
+    MessageRole,
+)
 from sam.agent.provider import LLMProvider
 from sam.language.policy import INSTRUCTIONS
 
@@ -26,12 +33,16 @@ class AgentCore:
         execution_id: str = "direct",
         *,
         response_language: str | None = None,
+        history: Sequence[Message] = (),
     ) -> AgentResponse:
         """Execute at most the configured number of provider turns.
 
         ``response_language`` is supplied by trusted code (the language
         policy), not by the request: it only selects a fixed, reviewed
         instruction about which language to answer in and is never authority.
+        ``history`` is supplied by the trusted, ephemeral conversation store,
+        never by the public request. It contains completed user/assistant pairs
+        only; it cannot inject a system instruction or a tool result.
         """
 
         message = request.message.strip()
@@ -39,9 +50,22 @@ class AgentCore:
             raise InvalidRequestError("message must not be blank")
         if response_language is not None and response_language not in INSTRUCTIONS:
             raise InvalidRequestError("unsupported response language")
+        if (
+            len(history) > MAX_HISTORY_MESSAGES
+            or len(history) % 2
+            or sum(len(item.content) for item in history) > MAX_HISTORY_CHARS
+            or any(
+                item.role
+                is not (MessageRole.USER if index % 2 == 0 else MessageRole.ASSISTANT)
+                or not item.content.strip()
+                for index, item in enumerate(history)
+            )
+        ):
+            raise InvalidRequestError("invalid conversation history")
 
         logger.info("Agent execution started id=%s", execution_id)
         messages: Sequence[Message] = [
+            *(Message(role=item.role, content=item.content) for item in history),
             Message(role=MessageRole.USER, content=message),
         ]
         if response_language is not None:

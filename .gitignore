@@ -6,10 +6,13 @@ __pycache__/
 .venv/
 venv/
 .env
+.codex/local/
+.codex/config.toml
 .DS_Store
 *.egg-info/
 dist/
 build/
+desktop/public/voice/
 
 # Local Obsidian vault - personal data, never commit
 Obsidian/

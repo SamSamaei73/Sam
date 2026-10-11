@@ -367,7 +367,7 @@ class TestStaticHygiene:
                         offenders.append(f"{name}: {m}")
         assert offenders == []
 
-    def test_the_only_network_library_is_httpx_and_only_in_the_two_adapters(
+    def test_the_only_network_library_is_httpx_and_only_in_reviewed_adapters(
         self,
     ) -> None:
         users = {
@@ -383,7 +383,7 @@ class TestStaticHygiene:
                 and (node.module or "").split(".")[0] == "httpx"
             )
         }
-        assert users == {"fish_audio.py", "gemini_tts.py"}
+        assert users == {"fish_audio.py", "gemini_tts.py", "openrouter.py"}
 
     def test_no_environment_shell_sleep_thread_or_retry_escape_hatches(self) -> None:
         bad_attrs = {"environ", "getenv", "system", "popen", "sleep", "Thread", "Timer"}
@@ -445,6 +445,7 @@ class TestStaticHygiene:
                     not in {
                         "https://api.fish.audio/v1/tts",
                         "https://generativelanguage.googleapis.com/v1beta/interactions",
+                        "https://openrouter.ai/api/v1/audio/speech",
                     }
                 ):
                     offenders.append(f"{name}:{node.lineno}")

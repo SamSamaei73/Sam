@@ -59,8 +59,8 @@ describe("static security checks (production sources)", { timeout: 60_000 }, () 
     const users = productionSources.filter((f) => /@tauri-apps\/api/.test(read(f)));
     expect(users.map((f) => relative(ROOT, f))).toEqual(["src/bridge/tauri.ts"]);
     const text = read(join(SRC, "bridge", "tauri.ts"));
-    const commands = [...text.matchAll(/call(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(commands.length).toBe(51);
+    const commands = [...text.matchAll(/(?:call|invoke)(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]);
+    expect(commands.length).toBe(54);
     for (const command of commands) expect(command).toMatch(/^sam_[a-z_]+$/);
   });
 

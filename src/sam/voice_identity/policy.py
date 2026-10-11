@@ -20,11 +20,12 @@ from enum import StrEnum
 MIN_ENROLLMENT_SAMPLES = 3
 MAX_ENROLLMENT_SAMPLES = 5
 MIN_SAMPLE_SECONDS = 2.0
-MIN_VERIFICATION_SECONDS = 1.0
+MIN_VERIFICATION_SECONDS = 0.25
 MIN_RMS_PCM16 = 150.0  # of 32768: rejects near-silence
 MAX_CLIPPED_FRACTION = 0.2  # rejects heavily clipped audio
 DUPLICATE_SIMILARITY = 0.9995  # a re-submitted identical sample
 MIN_SELF_CONSISTENCY = 0.30  # samples must plausibly be one speaker
+MIN_ENROLLMENT_MATCH_THRESHOLD = 0.50  # long enrollment samples remain stricter
 ENROLLMENT_SESSION_TTL = timedelta(minutes=15)
 
 # ---- verification threshold ------------------------------------------------
@@ -126,6 +127,7 @@ __all__ = [
     "MAX_TRACKED_CHALLENGES",
     "MAX_TRACKED_PROOFS",
     "MIN_EMBEDDING_DIMENSION",
+    "MIN_ENROLLMENT_MATCH_THRESHOLD",
     "MIN_ENROLLMENT_SAMPLES",
     "MIN_RMS_PCM16",
     "MIN_SAMPLE_SECONDS",

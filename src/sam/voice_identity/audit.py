@@ -13,6 +13,7 @@ from datetime import datetime
 from threading import RLock
 from typing import Protocol
 
+from sam.language.catalog import SUPPORTED_LANGUAGE_CODES
 from sam.voice_identity.models import utc_now
 
 ALLOWED_EVENTS = frozenset(
@@ -63,6 +64,8 @@ class InMemoryVoiceIdentityAuditSink:
             raise ValueError("invalid audit event")
         if detail is not None and not _REASON.match(detail):
             raise ValueError("invalid audit detail")
+        if event == "language_detected" and detail not in SUPPORTED_LANGUAGE_CODES:
+            raise ValueError("invalid audit language")
         with self._lock:
             self._events.append(
                 VoiceIdentityAuditEvent(event, reason_code, utc_now(), detail)

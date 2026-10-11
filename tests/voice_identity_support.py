@@ -23,7 +23,7 @@ from sam.voice_identity.challenge import ChallengeService
 from sam.voice_identity.coordinator import VoiceIdentityCoordinator
 from sam.voice_identity.enrollment import EnrollmentService
 from sam.voice_identity.guest import GuestSessionManager
-from sam.voice_identity.policy import ThresholdPolicy
+from sam.voice_identity.policy import DEFAULT_THRESHOLD, ThresholdPolicy
 from sam.voice_identity.providers import FakeSpeakerEmbeddingProvider, normalize
 from sam.voice_identity.store import InMemoryVoiceProfileStore
 from sam.voice_identity.verification import SpeakerVerifier
@@ -74,7 +74,7 @@ class Harness:
     def __init__(
         self,
         *,
-        threshold: float = 0.5,
+        threshold: float = DEFAULT_THRESHOLD,
         stt_text: Any = "hello there",
         embedder: FakeSpeakerEmbeddingProvider | None = None,
         store: InMemoryVoiceProfileStore | None = None,

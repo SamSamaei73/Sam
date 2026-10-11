@@ -13,13 +13,14 @@ from sam.voice.transcription import TranscriptionProvider
 from sam.voice_identity.providers import SpeakerEmbeddingProvider
 from sam.voice_identity.store import MacOSKeychainVoiceProfileStore, VoiceProfileStore
 from sam.voice_local.registry import (
-    SPEAKER_MODEL,
     default_model_root,
     model_dir,
+    speaker_model,
     stt_model,
     verify_model,
 )
 from sam.voice_local.speaker import SpeechBrainEcapaEmbeddingProvider
+from sam.voice_local.speaker_wespeaker import WeSpeakerEmbeddingProvider
 from sam.voice_local.stt import LocalWhisperTranscriptionProvider
 
 
@@ -39,9 +40,10 @@ def local_voice_readiness(settings: Settings, model_root: Path | None = None) ->
     if not settings.voice_identity_enabled or sys.platform != "darwin":
         return "disabled"
     root = model_root or default_model_root()
+    speaker = speaker_model(settings.local_speaker_model)
     stt = stt_model(settings.local_stt_model)
     if not (
-        verify_model(model_dir(root, SPEAKER_MODEL), SPEAKER_MODEL)
+        verify_model(model_dir(root, speaker), speaker)
         and verify_model(model_dir(root, stt), stt)
     ):
         return "models_missing"
@@ -58,9 +60,10 @@ def local_voice_from_settings(
     if not settings.voice_identity_enabled or sys.platform != "darwin":
         return None
     root = model_root or default_model_root()
+    speaker = speaker_model(settings.local_speaker_model)
     stt = stt_model(settings.local_stt_model)
     if not (
-        verify_model(model_dir(root, SPEAKER_MODEL), SPEAKER_MODEL)
+        verify_model(model_dir(root, speaker), speaker)
         and verify_model(model_dir(root, stt), stt)
     ):
         return None  # models are acquired explicitly (sam.voice_local.setup)
@@ -69,7 +72,11 @@ def local_voice_from_settings(
     except Exception:
         return None
     return LocalVoiceStack(
-        embedder=SpeechBrainEcapaEmbeddingProvider(root),
+        embedder=(
+            WeSpeakerEmbeddingProvider(root)
+            if settings.local_speaker_model == "wespeaker"
+            else SpeechBrainEcapaEmbeddingProvider(root)
+        ),
         store=store,
         transcriber=LocalWhisperTranscriptionProvider(settings.local_stt_model, root),
     )

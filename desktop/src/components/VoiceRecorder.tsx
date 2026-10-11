@@ -28,14 +28,17 @@ export function VoiceRecorder({
   const { t, audioEnvironment } = useSam();
   const env = environment !== undefined ? environment : audioEnvironment;
   const errorText = (code: string): string =>
-    t(`mic.${code === "denied" || code === "unsupported" || code === "empty" ? code : "failed"}` as "mic.failed");
+    t(`mic.${code === "denied" || code === "unsupported" || code === "empty" || code === "limit" ? code : "failed"}` as "mic.failed");
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const recorder = useRef<Recorder | null>(null);
   const finishRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    return () => recorder.current?.cancel();
+    return () => {
+      recorder.current?.cancel();
+      recorder.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -63,12 +66,15 @@ export function VoiceRecorder({
   });
 
   const begin = async () => {
+    if (recorder.current) return;
     const next = new Recorder(env, () => finishRef.current());
     recorder.current = next;
     try {
       await next.start();
+      if (recorder.current !== next || !next.isRecording) return;
       setRecording(true);
     } catch (error) {
+      if (recorder.current !== next) return;
       recorder.current = null;
       onError(errorText(error instanceof RecorderError ? error.code : "failed"));
     }

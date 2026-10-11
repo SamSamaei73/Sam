@@ -679,7 +679,7 @@ def test_only_the_claude_adapter_starts_processes_or_reads_the_environment() -> 
         code = _code_only(path)
         if path.name != "claude_subscription.py":
             assert "subprocess" not in code and "os.environ" not in code, path.name
-        if path.name not in {"gemini.py", "factory.py"}:
+        if path.name not in {"gemini.py", "openrouter.py", "factory.py"}:
             assert "httpx" not in code, path.name
         # No Anthropic/OpenAI/xAI SDK is imported anywhere in the model layer.
         assert not re.search(r"^\s*(import|from)\s+(anthropic|openai|xai)", code, re.M)

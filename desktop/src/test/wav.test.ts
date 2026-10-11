@@ -44,8 +44,38 @@ describe("wav encoding", () => {
   it("resamples to the target length and bounds the recording", () => {
     const out = resample(new Float32Array(48_000), 48_000, TARGET_SAMPLE_RATE);
     expect(out.length).toBe(16_000);
-    expect(MAX_RECORDING_SAMPLES).toBe(TARGET_SAMPLE_RATE * 30);
-    // 30 s (the Phase 9 backend limit) of 16-bit mono stays far below the backend's audio size limit.
+    expect(MAX_RECORDING_SAMPLES).toBe(TARGET_SAMPLE_RATE * 60);
+    // 60 s of 16-bit mono stays below the backend's audio size limit.
     expect(MAX_RECORDING_SAMPLES * 2 + 44).toBeLessThan(8 * 1024 * 1024);
+  });
+
+  it.each([44_100, 48_000])("preserves speech-band PCM and rejects aliased frequencies at %i Hz", (rate) => {
+    const amplitude = 0.4;
+    const outputRms = (frequency: number) => {
+      const input = Float32Array.from({ length: rate }, (_, i) => amplitude * Math.sin(2 * Math.PI * frequency * i / rate));
+      const wav = encodeWav(resample(input, rate, TARGET_SAMPLE_RATE), TARGET_SAMPLE_RATE);
+      const pcm = new DataView(wav.buffer, 44);
+      let sum = 0;
+      const margin = 100; // omit the finite clip boundaries, not the filter response
+      const length = pcm.byteLength / 2;
+      for (let i = margin; i < length - margin; i++) sum += (pcm.getInt16(i * 2, true) / 32768) ** 2;
+      expect(input[1]).not.toBe(0); // resampling does not mutate capture buffers
+      return Math.sqrt(sum / (length - margin * 2));
+    };
+    const reference = amplitude / Math.sqrt(2);
+    expect(outputRms(1_000) / reference).toBeCloseTo(1, 2);
+    expect(outputRms(6_000) / reference).toBeGreaterThan(0.98);
+    for (const frequency of [9_000, 10_000, 18_000]) {
+      expect(outputRms(frequency) / reference).toBeLessThan(0.01); // at least 40 dB rejection
+    }
+  });
+
+  it.each([44_100, 48_000])("preserves duration and constant level at filtered clip boundaries (%i Hz)", (rate) => {
+    const input = new Float32Array(rate).fill(0.25);
+    const output = resample(input, rate, TARGET_SAMPLE_RATE);
+    expect(output.length).toBe(TARGET_SAMPLE_RATE);
+    expect(output[0]).toBeCloseTo(0.25, 6);
+    expect(output[output.length - 1]).toBeCloseTo(0.25, 6);
+    expect(input[0]).toBe(0.25);
   });
 });

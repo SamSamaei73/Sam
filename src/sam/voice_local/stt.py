@@ -1,21 +1,23 @@
-"""Local Whisper (faster-whisper) transcription for Persian and English.
+"""Local multilingual Whisper (faster-whisper) transcription.
 
 Implements the Phase 9 ``TranscriptionProvider`` protocol. Offline after
 setup: the model is loaded from a hash-verified local directory only
 (``local_files_only`` semantics: a directory path, never a Hub id), so no
 network access and no runtime download. Only multilingual models from the
 trusted allowlist are used. Whisper decodes one language per audio window, so
-Persian-English code-switching is handled best-effort (documented).
+Code-switching within an utterance is handled best-effort.
 """
 
 from __future__ import annotations
 
 import contextlib
+import math
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+from sam.language.catalog import SUPPORTED_LANGUAGE_CODES
 from sam.voice.models import TranscriptionRequest
 from sam.voice_identity.errors import ModelSetupError
 from sam.voice_local.audio import to_16k_numpy
@@ -25,8 +27,39 @@ from sam.voice_local.registry import (
     require_verified,
     stt_model,
 )
+from sam.voice_local.whisper_decode import decode_bounded_audio
 
-SUPPORTED_LANGUAGES = frozenset({"fa", "en"})
+SUPPORTED_LANGUAGES = SUPPORTED_LANGUAGE_CODES
+
+
+def _supported_language(probabilities: object) -> tuple[str, float]:
+    """Use the detector's actual winning language before the single decode."""
+
+    if not isinstance(probabilities, list | tuple) or not (
+        0 < len(probabilities) <= len(SUPPORTED_LANGUAGES)
+    ):
+        raise ValueError("speech language could not be determined")
+    scores: dict[str, float] = {}
+    for entry in probabilities:
+        if not isinstance(entry, list | tuple) or len(entry) != 2:
+            raise ValueError("speech language could not be determined")
+        language, probability = entry
+        if (
+            not isinstance(language, str)
+            or language not in SUPPORTED_LANGUAGES
+            or isinstance(probability, bool)
+            or not isinstance(probability, int | float)
+            or not math.isfinite(probability)
+            or not 0 <= probability <= 1
+            or language in scores
+        ):
+            raise ValueError("speech language could not be determined")
+        scores[language] = float(probability)
+    language = max(scores, key=lambda code: scores[code])
+    winner = scores[language]
+    if winner == 0 or sum(score == winner for score in scores.values()) != 1:
+        raise ValueError("speech language could not be determined")
+    return language, winner
 
 
 class LocalWhisperTranscriptionProvider:
@@ -55,7 +88,12 @@ class LocalWhisperTranscriptionProvider:
                     "install the voice-local dependency group"
                 ) from None
             self._whisper = WhisperModel(
-                str(self._dir), device="cpu", compute_type="int8", local_files_only=True
+                str(self._dir),
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=2,
+                num_workers=1,
+                local_files_only=True,
             )
             self.load_seconds = time.monotonic() - started
             return self._whisper
@@ -77,26 +115,17 @@ class LocalWhisperTranscriptionProvider:
             if request.language_hint in SUPPORTED_LANGUAGES
             else None
         )
-        segments, info = whisper.transcribe(
-            to_16k_numpy(request.audio),
-            language=hint,  # None -> Whisper detects fa/en
-            task="transcribe",
-            beam_size=5,
-            vad_filter=False,
-            condition_on_previous_text=False,
-            word_timestamps=False,
-        )
-        parts: list[str] = []
-        for segment in segments:  # cooperative timeout between segments
-            if time.monotonic() > deadline:
-                raise TimeoutError
-            parts.append(segment.text)
-        text = "".join(parts).strip()
-        return {
-            "text": text or "",
-            "language": info.language if info.language in SUPPORTED_LANGUAGES else None,
-            "confidence": max(0.0, min(1.0, float(info.language_probability))),
-        }
+        audio = to_16k_numpy(request.audio)
+        try:
+            return decode_bounded_audio(
+                whisper,
+                audio,
+                language_hint=hint,
+                language_for=_supported_language,
+                deadline=deadline,
+            )
+        finally:
+            audio.fill(0)
 
     def __repr__(self) -> str:
         return f"LocalWhisperTranscriptionProvider(model={self.model_size!r})"

@@ -15,15 +15,17 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from sam.core.config import Settings
 from sam.voice_identity.errors import ModelSetupError
 from sam.voice_local.registry import (
     HF_ENDPOINT,
-    SPEAKER_MODEL,
+    SPEAKER_MODELS,
     STT_MODELS,
     TrustedModel,
     default_model_root,
     model_dir,
     sha256_file,
+    speaker_model,
     verify_model,
 )
 
@@ -70,14 +72,22 @@ def main(argv: list[str] | None = None) -> int:
         description="Acquire Sam's trusted local voice models."
     )
     parser.add_argument(
-        "--speaker", action="store_true", help="speaker-verification model (~83 MB)"
+        "--speaker", action="store_true", help="configured speaker-verification model"
+    )
+    parser.add_argument(
+        "--speaker-model",
+        choices=sorted(SPEAKER_MODELS),
+        help="explicit trusted speaker model (otherwise LOCAL_SPEAKER_MODEL)",
     )
     parser.add_argument(
         "--stt", choices=sorted(STT_MODELS), help="speech-to-text model size"
     )
     parser.add_argument("--root", type=Path, default=default_model_root())
     args = parser.parse_args(argv)
-    wanted = ([SPEAKER_MODEL] if args.speaker else []) + (
+    if args.speaker_model and not args.speaker:
+        parser.error("--speaker-model requires --speaker")
+    selected = args.speaker_model or Settings().local_speaker_model
+    wanted = ([speaker_model(selected)] if args.speaker else []) + (
         [STT_MODELS[args.stt]] if args.stt else []
     )
     if not wanted:

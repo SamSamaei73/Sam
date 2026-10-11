@@ -50,6 +50,26 @@ async function record(
 afterEach(() => vi.useRealTimers());
 
 describe("Owner voice settings", () => {
+  it("keeps an incompatible saved profile and explicitly re-enrolls it", async () => {
+    const begin = vi.fn(async () => ({ ...ok, session_id: "updated-profile", samples_needed: 3 }));
+    const bridge = mockBridge({
+      identityStatus: vi.fn(async () => ({
+        ...enrolled, setup_state: "not_enrolled" as const, profile_compatible: false,
+      })),
+      identityEnrollBegin: begin,
+    });
+    const { user } = await settings(bridge);
+    expect(await screen.findByText(/Your saved voice profile does not match Sam's current voice model/)).toHaveTextContent("Your existing profile is kept until you finish.");
+    expect(screen.getByRole("button", { name: "Start Guest Mode" })).toBeDisabled();
+    expect(begin).not.toHaveBeenCalled();
+    expect(bridge.identityDelete).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Re-enroll" }));
+    await user.type(screen.getByLabelText("Step-up secret"), "long-enough-test-secret");
+    await user.click(screen.getByRole("button", { name: "Begin" }));
+    expect(begin).toHaveBeenCalledWith({ stepUp: "long-enough-test-secret", reEnroll: true });
+    expect(bridge.identityDelete).not.toHaveBeenCalled();
+  });
+
   it("says so plainly when identity isn't configured", async () => {
     await settings(mockBridge());
     expect(await screen.findByText(/Owner voice identity isn't configured/)).toBeInTheDocument();
@@ -63,7 +83,7 @@ describe("Owner voice settings", () => {
     });
     await settings(bridge);
     expect(await screen.findByText("Enrolled")).toBeInTheDocument();
-    expect(screen.getByText("Not the owner")).toBeInTheDocument();
+    expect(screen.getByText("Voice didn't match")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Re-enroll" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
     const text = document.body.textContent ?? "";
@@ -149,7 +169,7 @@ describe("Enrollment", () => {
     expect(await within(dialog).findByText("Your voice is enrolled.")).toBeInTheDocument();
   });
 
-  it("shows Persian and English phrase suggestions and warns about a rejected sample", async () => {
+  it("offers three English examples for language-independent enrollment and explains a rejected sample", async () => {
     const bridge = mockBridge({
       identityStatus: vi.fn(async () => available),
       identityEnrollSample: vi.fn(async () => ({ ...ok, status: "rejected" as const, accepted: false, sample_count: 0, samples_needed: 3, message: "That recording is too short. Speak for a few seconds." })),
@@ -159,7 +179,10 @@ describe("Enrollment", () => {
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Step-up secret"), "secret-value-22");
     await user.click(within(dialog).getByRole("button", { name: "Begin" }));
-    await within(dialog).findByText(/سلام سام/);
+    await within(dialog).findByText(/Sam, please help me plan my day/);
+    expect(within(dialog).getByText(/After lunch, remind me to review my notes/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/When I ask a question, give me a clear answer/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Any language is fine/)).toBeInTheDocument();
     await record(user, env);
     expect(await within(dialog).findByText(/too short/)).toBeInTheDocument();
   });
@@ -174,6 +197,29 @@ describe("Enrollment", () => {
     await within(dialog).findByRole("button", { name: "Finish enrollment" });
     await user.keyboard("{Escape}");
     await waitFor(() => expect(bridge.identityEnrollCancel).toHaveBeenCalledWith("enroll-1"));
+  });
+
+  it("starts only one pending enrollment microphone and closes a late grant after the dialog is dismissed", async () => {
+    const env = fakeAudioEnvironment();
+    let grant: ((stream: MediaStream) => void) | undefined;
+    env.env.getUserMedia = vi.fn(() => new Promise<MediaStream>((resolve) => { grant = resolve; }));
+    const bridge = mockBridge({ identityStatus: vi.fn(async () => available) });
+    const { user } = await settings(bridge, env);
+    await user.click(await screen.findByRole("button", { name: "Enroll" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Step-up secret"), "synthetic-step-up-value");
+    await user.click(within(dialog).getByRole("button", { name: "Begin" }));
+    const recordButton = await within(dialog).findByRole("button", { name: "Record a voice message" });
+    await user.click(recordButton);
+    await user.click(recordButton);
+    expect(env.env.getUserMedia).toHaveBeenCalledTimes(1);
+    await user.keyboard("{Escape}");
+    await act(async () => grant?.({ getTracks: () => [env.track] } as unknown as MediaStream));
+    expect(env.track.stop).toHaveBeenCalledExactlyOnceWith();
+    expect(env.context.createMediaStreamSource).not.toHaveBeenCalled();
+    expect(bridge.identityEnrollSample).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText(/Recording/)).toBeNull();
   });
 
   it("re-enrollment uses the re-enroll flag", async () => {
@@ -342,8 +388,10 @@ describe("Voice results", () => {
     await speak(bridge);
     await waitFor(() => expect(bridge.voiceUtterance).toHaveBeenCalled());
     const args = (bridge.voiceUtterance as ReturnType<typeof vi.fn>).mock.calls[0] ?? [];
-    expect(args).toHaveLength(3);
+    expect(args).toHaveLength(5);
     expect(args[2]).toBe("auto");
+    expect(args[3]).toBe(false);
+    expect(args[4]).toBeUndefined(); // First turn has no text-context handle.
   });
 });
 

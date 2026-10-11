@@ -82,6 +82,7 @@ def test_status_reports_trusted_provider_state_and_no_secrets() -> None:
         "gemini_free",
         "openai_api",
         "grok_api",
+        "openrouter",
     }
     assert by_id["claude_subscription"]["cost_class"] == "subscription_included"
     assert by_id["claude_subscription"]["state"] == "available"

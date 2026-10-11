@@ -9,11 +9,12 @@ const BUILD_RS: &str = include_str!("../build.rs");
 const LIB_RS: &str = include_str!("lib.rs");
 const BACKEND_RS: &str = include_str!("backend.rs");
 const SIDECAR_RS: &str = include_str!("sidecar.rs");
+const LOCAL_SPEECH_RS: &str = include_str!("local_speech.rs");
 const MAIN_RS: &str = include_str!("main.rs");
 const CARGO: &str = include_str!("../Cargo.toml");
 const BACKEND_PATHS: &str = include_str!("../../../src/sam/storage/paths.py");
 
-const COMMANDS: [&str; 51] = [
+const COMMANDS: [&str; 54] = [
     "sam_status",
     "sam_chat",
     "sam_knowledge_list",
@@ -27,7 +28,10 @@ const COMMANDS: [&str; 51] = [
     "sam_activity",
     "sam_decide_confirmation",
     "sam_voice_utterance",
+    "sam_voice_conversation_end",
     "sam_speak",
+    "sam_local_speak",
+    "sam_local_stop",
     "sam_identity_status",
     "sam_identity_enroll_begin",
     "sam_identity_enroll_sample",
@@ -148,13 +152,18 @@ fn csp_is_restrictive_and_has_no_remote_sources() {
     assert!(!csp.contains("script-src 'self' 'unsafe-inline'"));
     assert!(!csp.contains("https:"));
     assert!(!csp.contains(" *"));
-    // No direct network from the webview: only the Tauri IPC scheme.
+    assert!(csp.contains("'wasm-unsafe-eval'"));
+    assert!(csp.contains("worker-src 'self'"));
+    // Only bundled model/runtime assets and the Tauri IPC scheme.
     let connect: Vec<&str> = csp
         .split(';')
         .map(str::trim)
         .filter(|d| d.starts_with("connect-src"))
         .collect();
-    assert_eq!(connect, vec!["connect-src ipc: http://ipc.localhost"]);
+    assert_eq!(
+        connect,
+        vec!["connect-src 'self' ipc: http://ipc.localhost"]
+    );
 }
 
 #[test]
@@ -183,7 +192,7 @@ fn build_script_declares_the_same_command_list_as_the_handler() {
             "handler missing {command}"
         );
     }
-    assert_eq!(BUILD_RS.matches("\"sam_").count(), 51);
+    assert_eq!(BUILD_RS.matches("\"sam_").count(), COMMANDS.len());
 }
 
 #[test]
@@ -210,7 +219,7 @@ fn no_generic_or_privileged_commands_exist() {
             "backend.rs must not contain {banned}"
         );
     }
-    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), 51);
+    assert_eq!(LIB_RS.matches("#[tauri::command]").count(), COMMANDS.len());
 }
 
 /// The ONLY exception to the "no URL arguments" rule, reviewed for Phase 16:
@@ -351,8 +360,8 @@ fn tauri_dependency_does_not_enable_devtools_or_extra_features() {
     assert!(!CARGO.contains("protocol-asset"));
 }
 
-/// Phase 17 remediation: the ONLY process the app ever starts is its own
-/// bundled backend, by argv, with a cleared environment and no credential.
+/// The bundled backend has fixed argv and a clean credential allowlist.
+/// Local speech separately invokes the fixed macOS system synthesizer.
 #[test]
 fn the_backend_is_spawned_only_by_the_sidecar_with_fixed_argv_and_clean_env() {
     // Production code only: no comments, no unit tests.
@@ -364,7 +373,7 @@ fn the_backend_is_spawned_only_by_the_sidecar_with_fixed_argv_and_clean_env() {
         .filter(|l| !l.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(SIDECAR_RS.matches("Command::new(").count(), 1);
+    assert_eq!(code.matches("Command::new(").count(), 1);
     for source in [LIB_RS, BACKEND_RS, MAIN_RS] {
         assert!(
             !source.contains("Command::new"),
@@ -385,7 +394,8 @@ fn the_backend_is_spawned_only_by_the_sidecar_with_fixed_argv_and_clean_env() {
         "\"sh\"",
         "bash",
         "\"-c\"",
-        "API_KEY",
+        "OPENAI_API_KEY",
+        "GROK_API_KEY",
         "GEMINI",
         "ANTHROPIC",
         "FISH",
@@ -395,6 +405,41 @@ fn the_backend_is_spawned_only_by_the_sidecar_with_fixed_argv_and_clean_env() {
         ".venv",
     ] {
         assert!(!code.contains(banned), "sidecar must not contain {banned}");
+    }
+    assert!(code.contains("openrouter_environment"));
+    assert!(code.contains("\"OPENROUTER_API_KEY\""));
+    assert!(!code.contains("std::env::vars("));
+    assert!(!code.contains("std::env::vars_os("));
+}
+
+#[test]
+fn local_speech_is_a_fixed_offline_operation_and_stops_on_exit() {
+    assert_eq!(LOCAL_SPEECH_RS.matches("Command::new(").count(), 2);
+    assert_eq!(
+        LOCAL_SPEECH_RS
+            .matches("Command::new(\"/usr/bin/say\")")
+            .count(),
+        2
+    );
+    assert!(LOCAL_SPEECH_RS.contains(".args([\"-v\", \"?\"])"));
+    assert!(
+        LOCAL_SPEECH_RS.contains(".args([\"-v\", voice.as_str(), \"-r\", \"180\", \"-f\", \"-\"])")
+    );
+    assert!(LOCAL_SPEECH_RS.contains(".env_clear()"));
+    assert!(LOCAL_SPEECH_RS.contains("stdin.write_all(text.as_bytes())"));
+    assert!(LIB_RS.contains("local_speech.stop_all()"));
+    for banned in [
+        "\"-o\"",
+        "\"-n\"",
+        "\"-c\"",
+        ".arg(text)",
+        "Command::new(voice)",
+        "API_KEY",
+    ] {
+        assert!(
+            !LOCAL_SPEECH_RS.contains(banned),
+            "no destination or command authority: {banned}"
+        );
     }
 }
 

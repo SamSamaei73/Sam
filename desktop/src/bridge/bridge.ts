@@ -1,5 +1,6 @@
 import type {
   ActivityResponse,
+  ResponseLanguage,
   ChallengeResponse,
   ChatResponse,
   DecisionResponse,
@@ -82,7 +83,11 @@ export interface SamBridge {
     language?: LanguageChoice,
     /** A hands-free conversation turn (a stop phrase ends it, unsent). */
     handsFree?: boolean,
+    /** Context only: the recording must still independently verify its owner. */
+    conversationId?: string,
   ): Promise<VoiceResponse>;
+  /** Erase temporary context; omission also cancels an in-flight first turn. */
+  endVoiceConversation(conversationId?: string): Promise<OperationResult>;
   /** Is this short speech segment Sam's name? LOCAL recognizer; one bit back. */
   voiceWake(audioBase64: string): Promise<VoiceWakeResponse>;
   /** The owner-only hands-free switch (refused in Guest Mode). */
@@ -91,7 +96,7 @@ export interface SamBridge {
     text: string;
     voiceProfile: string;
     /** Language of the text; the backend refuses a voice that can't speak it. */
-    language?: "fa" | "en";
+    language?: ResponseLanguage;
     confirmationId?: string;
   }): Promise<SpeakResponse>;
 

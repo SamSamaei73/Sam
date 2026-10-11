@@ -178,10 +178,12 @@ def test_the_log_file_is_owner_only_and_bounded(tmp_path: Path) -> None:
 
 NETWORK_MODULES = {
     "agent/claude.py",  # paid Anthropic API client: NOT wired (PAID_FALLBACK off)
-    "models/factory.py",  # httpx transport typing for the Gemini provider
+    "models/factory.py",  # httpx transport typing for the configured providers
     "models/providers/gemini.py",  # generativelanguage.googleapis.com
+    "models/providers/openrouter.py",  # openrouter.ai, explicit owner configuration
     "tts/fish_audio.py",  # api.fish.audio
     "tts/gemini_tts.py",  # generativelanguage.googleapis.com
+    "tts/openrouter.py",  # openrouter.ai, explicit owner configuration
     # huggingface.co (+ *.hf.co CDN), pinned files only, owner-started only
     "voice_local/install.py",
 }

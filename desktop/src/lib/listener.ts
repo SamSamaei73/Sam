@@ -1,6 +1,7 @@
-import { RecorderError, browserAudioEnvironment, type AudioEnvironment } from "./recorder";
-import { SLEEP_TIMING, VoiceSegmenter, type VadTiming } from "./vad";
+import { RecorderError, browserAudioEnvironment, voiceCaptureConstraints, type AudioEnvironment } from "./recorder";
+import { SLEEP_TIMING, VoiceSegmenter, type SegmentEnd, type VadTiming } from "./vad";
 import { TARGET_SAMPLE_RATE, bytesToBase64, encodeWav, resample } from "./wav";
+import type { SpeechInput } from "./neuralVoice";
 
 /**
  * Hands-free microphone for voice activation. It runs only while the owner
@@ -17,56 +18,77 @@ import { TARGET_SAMPLE_RATE, bytesToBase64, encodeWav, resample } from "./wav";
 export class Listener {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
-  private processor: ScriptProcessorNode | null = null;
+  private input: SpeechInput | null = null;
   private segmenter: VoiceSegmenter | null = null;
   private paused = false;
+  private generation = 0;
   private timing: VadTiming = SLEEP_TIMING;
 
   constructor(
     private readonly env: AudioEnvironment | null = browserAudioEnvironment(),
-    private readonly onSegment: (wavBase64: string, seconds: number) => void,
+    private readonly onSegment: (wavBase64: string, seconds: number, endedBy: SegmentEnd, voicedSeconds: number) => void,
     private readonly onLevel: (level: number) => void = () => undefined,
     private readonly onSpeech: (active: boolean) => void = () => undefined,
+    private readonly onFailure: () => void = () => undefined,
   ) {}
 
   get isActive(): boolean {
-    return this.processor !== null;
+    return this.input !== null;
+  }
+
+  get isSpeaking(): boolean {
+    return this.segmenter?.hasSpeechActivity ?? false;
   }
 
   async start(timing: VadTiming = SLEEP_TIMING): Promise<void> {
     if (this.isActive) return;
-    if (!this.env) throw new RecorderError("unsupported");
+    if (!this.env?.createSpeechInput) throw new RecorderError("unsupported");
+    const generation = ++this.generation;
     this.timing = timing;
     let stream: MediaStream;
     try {
-      stream = await this.env.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-        video: false,
-      });
+      stream = await this.env.getUserMedia(voiceCaptureConstraints());
     } catch (error) {
       const name = (error as { name?: string } | null)?.name ?? "";
       throw new RecorderError(name === "NotAllowedError" || name === "SecurityError" ? "denied" : "failed");
     }
+    if (generation !== this.generation) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
     try {
-      const context = this.env.createContext();
+      // Own the granted stream before audio graph creation can fail, so the
+      // common failure path always closes the microphone.
+      this.stream = stream;
+      // Browser-native sample-rate conversion provides anti-aliased 16 kHz
+      // input for the streaming model, independently of hardware sample rate.
+      const context = this.env.createContext(TARGET_SAMPLE_RATE);
+      this.context = context;
       const rate = context.sampleRate;
-      const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(2048, 1, 1);
       this.segmenter = new VoiceSegmenter(
         rate,
-        (samples) => this.emit(samples, rate),
+        (samples, endedBy, voicedSeconds) => this.emit(samples, rate, endedBy, voicedSeconds),
         this.timing,
         (active) => this.onSpeech(active),
       );
-      this.stream = stream;
-      this.context = context;
-      this.source = source;
-      this.processor = processor;
-      processor.onaudioprocess = (event) => this.frame(event.inputBuffer.getChannelData(0));
-      source.connect(processor);
-      processor.connect(context.destination); // silent output; keeps the node running
+      const input = await this.env.createSpeechInput(context, stream,
+        (frame, probability) => { if (generation === this.generation) this.frame(frame, probability); },
+        () => {
+          if (generation !== this.generation) return;
+          this.stop();
+          this.onFailure();
+        },
+      );
+      if (generation !== this.generation) {
+        input.stop();
+        stream.getTracks().forEach((track) => track.stop());
+        void context.close().catch(() => undefined);
+        return;
+      }
+      this.input = input;
+      if (this.paused) input.pause();
     } catch {
+      if (generation !== this.generation) return;
       this.stop();
       throw new RecorderError("failed");
     }
@@ -81,46 +103,44 @@ export class Listener {
   /** Stop hearing (Sam is thinking or speaking): frames are discarded unseen. */
   pause(): void {
     this.paused = true;
+    this.input?.pause();
     this.segmenter?.reset();
     this.onLevel(0);
   }
 
-  resume(): void {
-    this.segmenter?.reset();
+  resume({ preserveBufferedAudio = false }: { preserveBufferedAudio?: boolean } = {}): void {
+    if (!preserveBufferedAudio) this.segmenter?.reset();
     this.paused = false;
+    this.input?.resume();
   }
 
   stop(): void {
-    if (this.processor) {
-      this.processor.onaudioprocess = null;
-      this.processor.disconnect();
-    }
-    this.source?.disconnect();
+    this.generation++;
+    this.input?.stop();
     this.stream?.getTracks().forEach((track) => track.stop());
     void this.context?.close().catch(() => undefined);
     this.segmenter?.reset();
     this.segmenter = null;
-    this.processor = null;
-    this.source = null;
+    this.input = null;
     this.stream = null;
     this.context = null;
     this.paused = false;
     this.onLevel(0);
   }
 
-  private frame(frame: Float32Array): void {
+  private frame(frame: Float32Array, probability: number): void {
     if (this.paused || !this.segmenter) return;
-    const level = this.segmenter.push(frame);
+    const level = this.segmenter.push(frame, probability);
     this.onLevel(Math.min(1, level * 4));
   }
 
-  private emit(samples: Float32Array, rate: number): void {
+  private emit(samples: Float32Array, rate: number, endedBy: SegmentEnd, voicedSeconds: number): void {
     const pcm = resample(samples, rate, TARGET_SAMPLE_RATE);
     const wav = encodeWav(pcm, TARGET_SAMPLE_RATE);
     const seconds = pcm.length / TARGET_SAMPLE_RATE;
     pcm.fill(0);
     const base64 = bytesToBase64(wav);
     wav.fill(0);
-    this.onSegment(base64, seconds);
+    this.onSegment(base64, seconds, endedBy, voicedSeconds);
   }
 }

@@ -109,7 +109,11 @@ def deadline_entry() -> ConditionEntry:
 # ------------------------------------------------------ provider status
 
 _WATCHABLE_PROVIDERS = frozenset(
-    {ProviderId.CLAUDE_SUBSCRIPTION.value, ProviderId.GEMINI_FREE.value}
+    {
+        ProviderId.CLAUDE_SUBSCRIPTION.value,
+        ProviderId.GEMINI_FREE.value,
+        ProviderId.OPENROUTER.value,
+    }
 )
 
 

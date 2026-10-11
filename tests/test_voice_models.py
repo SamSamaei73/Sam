@@ -74,9 +74,10 @@ class TestLimits:
             < m.DEFAULT_VOICE_PROVIDER_TIMEOUT_SECONDS
             <= m.MAX_VOICE_PROVIDER_TIMEOUT_SECONDS
         )
-        # the worst legal stream fits in the byte cap
-        worst = m.MAX_SAMPLE_RATE * m.MAX_CHANNELS * 2 * m.MAX_AUDIO_DURATION_SECONDS
-        assert worst <= m.MAX_AUDIO_BYTES
+        # The desktop's 16 kHz mono PCM16 WAV fits the full duration. Generic
+        # higher-rate/stereo inputs must satisfy both independent limits.
+        desktop_wav = 44 + 16_000 * 2 * m.MAX_AUDIO_DURATION_SECONDS
+        assert desktop_wav <= m.MAX_AUDIO_BYTES
 
     def test_audio_metadata_bounds(self) -> None:
         for over in (

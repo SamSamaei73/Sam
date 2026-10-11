@@ -276,21 +276,26 @@ def test_a_deadline_watch_with_bad_parameters_is_refused(
     assert not result.ok and result.reason == "condition_params_invalid"
 
 
-def test_a_provider_status_watch_reports_changes_without_calling_a_model() -> None:
-    states = {ProviderId.CLAUDE_SUBSCRIPTION: Availability.AVAILABLE}
+@pytest.mark.parametrize(
+    "provider_id", [ProviderId.CLAUDE_SUBSCRIPTION, ProviderId.OPENROUTER]
+)
+def test_a_provider_status_watch_reports_changes_without_calling_a_model(
+    provider_id: ProviderId,
+) -> None:
+    states = {provider_id: Availability.AVAILABLE}
     entry = provider_status_entry(lambda provider: states[provider])
     rig = make_rig(extra_entries=(entry,))
     rig.create(
         watch(
             "model_provider_status",
-            params={"provider": "claude_subscription"},
+            params={"provider": provider_id.value},
             semantics=TriggerSemantics.ON_CHANGE,
             cooldown_hours=1,
         )
     )
     rig.advance_and_tick(hours=1)  # baseline
     assert rig.notifications() == ()
-    states[ProviderId.CLAUDE_SUBSCRIPTION] = Availability.USAGE_LIMIT
+    states[provider_id] = Availability.USAGE_LIMIT
     rig.advance_and_tick(hours=1)
     (note,) = rig.notifications()
     assert note.reason_code is NotificationReason.CONDITION_CHANGED

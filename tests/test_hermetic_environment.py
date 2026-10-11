@@ -16,7 +16,7 @@ import pytest
 
 from sam.core.config import Settings
 from tests import conftest
-from tests.conftest import PROVIDER_CREDENTIAL_ENV
+from tests.conftest import PROVIDER_CONFIGURATION_ENV, PROVIDER_CREDENTIAL_ENV
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,17 +43,23 @@ def test_every_provider_credential_variable_is_covered() -> None:
         "ANTHROPIC_AUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "FISH_AUDIO_API_KEY",
+        "OPENROUTER_API_KEY",
     ):
         assert name in PROVIDER_CREDENTIAL_ENV
 
 
 def test_a_test_starts_with_no_provider_credential_in_its_environment() -> None:
-    leaked = sorted(name for name in PROVIDER_CREDENTIAL_ENV if name in os.environ)
+    leaked = sorted(
+        name
+        for name in PROVIDER_CREDENTIAL_ENV | PROVIDER_CONFIGURATION_ENV
+        if name in os.environ
+    )
     assert leaked == []
     settings = Settings()
     assert settings.gemini_api_key is None
     assert settings.anthropic_api_key is None
     assert settings.fish_audio_api_key is None
+    assert settings.openrouter_api_key is None
 
 
 def test_the_developers_real_dotenv_is_not_inherited(
@@ -100,6 +106,12 @@ def test_an_exported_key_cannot_alter_unconfigured_environment_tests() -> None:
     env = {
         **os.environ,
         **{name: f"fake-exported-{name.lower()}" for name in PROVIDER_CREDENTIAL_ENV},
+        # These deliberately invalid values must be gone before sam.main's
+        # import-time default app is built during collection.
+        **{
+            name: "invalid-collection-configuration"
+            for name in PROVIDER_CONFIGURATION_ENV
+        },
     }
     # Fake values that would fail Settings' length validators (DESKTOP_*) are
     # exported too: the isolation must clear them before Settings validates.

@@ -7,6 +7,7 @@ import pytest
 from sam.agent.core import AgentCore
 from sam.agent.errors import InvalidRequestError
 from sam.agent.models import AgentRequest, Message, MessageRole, ProviderResponse
+from sam.language.catalog import SUPPORTED_LANGUAGE_CODES
 from sam.language.policy import (
     INSTRUCTIONS,
     LanguagePolicy,
@@ -79,7 +80,7 @@ def test_persian_input_is_never_forced_to_english_in_auto() -> None:
 
 
 def test_instructions_are_reviewed_static_text_and_preserve_technical_terms() -> None:
-    assert set(INSTRUCTIONS) == {"fa", "en"}
+    assert set(INSTRUCTIONS) == SUPPORTED_LANGUAGE_CODES
     fa = INSTRUCTIONS["fa"]
     for term in ("API", "Docker", "FastAPI", "GitHub", "Claude", "MCP", "Python"):
         assert term in fa

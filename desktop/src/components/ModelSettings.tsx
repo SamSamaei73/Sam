@@ -106,7 +106,14 @@ export function ModelSettings() {
               <span>{provider.display_name}</span>
               <StatusPill tone={STATE_TONE[provider.state]} label={t(`models.state.${provider.state}`)} />
             </div>
-            <div className="faint">{t(`models.cost.${provider.cost_class}`)}</div>
+            <div className="faint">
+              {t(provider.cost_class === "paid_api" && provider.enabled
+                ? "models.cost.paid_api_enabled"
+                : `models.cost.${provider.cost_class}`)}
+            </div>
+            {provider.enabled && provider.models.length > 0 ? (
+              <div className="faint">{t("models.model")}: <span dir="ltr">{provider.models.join(", ")}</span></div>
+            ) : null}
             {provider.external && provider.enabled ? <div className="faint">{t("models.external")}</div> : null}
             <div className="faint" dir="auto">
               {provider.note}

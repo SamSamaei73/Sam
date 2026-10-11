@@ -103,6 +103,19 @@ class TestAccepted:
 
 
 class TestLimits:
+    def test_supported_high_rate_stereo_can_reach_size_limit_before_duration(
+        self,
+    ) -> None:
+        frames = int(MAX_AUDIO_DURATION_SECONDS * MAX_SAMPLE_RATE)
+        audio = wav(
+            rate=MAX_SAMPLE_RATE,
+            channels=MAX_CHANNELS,
+            pcm=bytes(frames * MAX_CHANNELS * 2),
+        )
+        assert len(audio.content) > MAX_AUDIO_BYTES
+        with pytest.raises(AudioTooLargeError):
+            validate_audio(audio)
+
     def test_oversized_audio_rejected_before_parsing(self) -> None:
         audio = AudioInput(
             content=b"\x00" * (MAX_AUDIO_BYTES + 1),

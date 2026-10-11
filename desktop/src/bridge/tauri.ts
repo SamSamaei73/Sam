@@ -1,5 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { toBridgeError, type SamBridge } from "./bridge";
+import type { ResponseLanguage } from "./types";
+
+/** Fixed local speech commands preserve their small native outcome vocabulary;
+ * provider speech continues through the separate permission-aware bridge. */
+export const isNativeSpeechRuntime = (): boolean => isTauri();
+export const speakNative = (speechId: string, text: string, language: ResponseLanguage): Promise<void> =>
+  invoke("sam_local_speak", { speechId, text, language });
+export const stopNativeSpeech = (speechId: string): Promise<void> =>
+  invoke("sam_local_stop", { speechId });
 
 /**
  * Production bridge. Each call is one *named* Tauri command implemented in
@@ -39,13 +48,16 @@ export const tauriBridge: SamBridge = {
   activity: () => call("sam_activity"),
   decideConfirmation: (confirmationId, approved, stepUp) =>
     call("sam_decide_confirmation", { confirmationId, approved, stepUp: stepUp ?? null }),
-  voiceUtterance: (audioBase64, confirmationId, language, handsFree) =>
+  voiceUtterance: (audioBase64, confirmationId, language, handsFree, conversationId) =>
     call("sam_voice_utterance", {
       audioBase64,
       confirmationId: confirmationId ?? null,
       language: language ?? "auto",
       handsFree: handsFree ?? false,
+      conversationId: conversationId ?? null,
     }),
+  endVoiceConversation: (conversationId) =>
+    call("sam_voice_conversation_end", { conversationId: conversationId ?? null }),
   voiceWake: (audioBase64) => call("sam_voice_wake", { audioBase64 }),
   setVoiceActivation: (enabled) => call("sam_voice_activation", { enabled }),
   speak: ({ text, voiceProfile, language, confirmationId }) =>

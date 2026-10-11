@@ -12,6 +12,7 @@
 mod backend;
 #[cfg(test)]
 mod config_tests;
+mod local_speech;
 mod sidecar;
 mod validate;
 
@@ -39,6 +40,33 @@ fn run(state: &State<'_, AppState>, route: Route, body: Option<Value>) -> Comman
 
 fn invalid<T>(result: Result<T, BridgeError>) -> Result<T, String> {
     result.map_err(|error| error.as_code().to_string())
+}
+
+/// A local audio-output operation, with no backend or provider connection.
+#[tauri::command]
+async fn sam_local_speak(
+    state: State<'_, local_speech::LocalSpeech>,
+    speech_id: String,
+    text: String,
+    language: String,
+) -> Result<(), String> {
+    invalid(validate::id(&speech_id))?;
+    invalid(validate::text(&text, local_speech::MAX_TEXT_CHARS))?;
+    invalid(validate::speech_language(Some(&language)))?;
+    let speech = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || speech.speak(&speech_id, &text, &language))
+        .await
+        .map_err(|_| "speech_failed".to_string())?
+}
+
+#[tauri::command]
+fn sam_local_stop(
+    state: State<'_, local_speech::LocalSpeech>,
+    speech_id: String,
+) -> Result<(), String> {
+    invalid(validate::id(&speech_id))?;
+    state.stop(&speech_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -193,12 +221,14 @@ fn sam_voice_utterance(
     confirmation_id: Option<String>,
     language: Option<String>,
     hands_free: Option<bool>,
+    conversation_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::base64_payload(
         &audio_base64,
         validate::MAX_AUDIO_BASE64,
     ))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
+    invalid(validate::optional_id(conversation_id.as_deref()))?;
     let language = language.unwrap_or_else(|| "auto".to_string());
     invalid(validate::language(&language))?;
     run(
@@ -209,7 +239,22 @@ fn sam_voice_utterance(
             "confirmation_id": confirmation_id,
             "language": language,
             "hands_free": hands_free.unwrap_or(false),
+            "conversation_id": conversation_id,
         })),
+    )
+}
+
+/// Erase ephemeral voice text; this cannot authenticate or authorize a turn.
+#[tauri::command]
+fn sam_voice_conversation_end(
+    state: State<'_, AppState>,
+    conversation_id: Option<String>,
+) -> CommandResult {
+    invalid(validate::optional_id(conversation_id.as_deref()))?;
+    run(
+        &state,
+        Route::VoiceConversationEnd,
+        Some(json!({ "conversation_id": conversation_id })),
     )
 }
 
@@ -1116,8 +1161,10 @@ pub fn self_test(data_dir: &str) -> i32 {
 pub fn run_app() {
     let slot = Arc::new(BackendSlot::new(Slot::Starting));
     let owned = Arc::new(Mutex::new(Owned::default()));
+    let local_speech = local_speech::LocalSpeech::default();
     start_backend(slot.clone(), owned.clone());
     tauri::Builder::default()
+        .manage(local_speech.clone())
         .manage(AppState {
             backend: slot,
             owned: owned.clone(),
@@ -1136,7 +1183,10 @@ pub fn run_app() {
             sam_activity,
             sam_decide_confirmation,
             sam_voice_utterance,
+            sam_voice_conversation_end,
             sam_speak,
+            sam_local_speak,
+            sam_local_stop,
             sam_identity_status,
             sam_identity_enroll_begin,
             sam_identity_enroll_sample,
@@ -1179,6 +1229,7 @@ pub fn run_app() {
         .expect("error while building Sam desktop")
         .run(move |_app, event| {
             if let tauri::RunEvent::Exit = event {
+                local_speech.stop_all();
                 if let Ok(mut guard) = owned.lock() {
                     guard.exiting = true;
                     if let Some(mut backend) = guard.sidecar.take() {

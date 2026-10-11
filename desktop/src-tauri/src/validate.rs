@@ -69,10 +69,23 @@ pub fn language(value: &str) -> Result<(), BridgeError> {
     }
 }
 
-/// The language of text to be spoken: only the two supported languages.
+/// Canonical language codes shared with sam.language.catalog. Regional tags
+/// are resolved to these codes before IPC; arbitrary strings never select voices.
+pub const SPEECH_LANGUAGE_CODES: [&str; 100] = [
+    "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy", "da",
+    "de", "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "ha", "haw", "he",
+    "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la",
+    "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl",
+    "nn", "no", "oc", "pa", "pl", "ps", "pt", "ro", "ru", "sa", "sd", "si", "sk", "sl", "sn", "so",
+    "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz",
+    "vi", "yi", "yo", "zh", "yue",
+];
+
+/// A trusted response language; actual voice availability is checked separately.
 pub fn speech_language(value: Option<&str>) -> Result<(), BridgeError> {
     match value {
-        None | Some("fa") | Some("en") => Ok(()),
+        None => Ok(()),
+        Some(code) if SPEECH_LANGUAGE_CODES.contains(&code) => Ok(()),
         _ => Err(BridgeError::Invalid),
     }
 }
@@ -98,7 +111,7 @@ pub fn required_step_up(value: &str) -> Result<(), BridgeError> {
 /// A trusted provider id (never a provider name, model, or endpoint).
 pub fn provider_id(value: &str) -> Result<(), BridgeError> {
     match value {
-        "claude_subscription" | "gemini_free" | "openai_api" | "grok_api" => Ok(()),
+        "claude_subscription" | "gemini_free" | "openai_api" | "grok_api" | "openrouter" => Ok(()),
         _ => Err(BridgeError::Invalid),
     }
 }
@@ -545,12 +558,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn provider_ids_are_the_four_trusted_ones_only() {
+    fn provider_ids_are_the_trusted_ones_only() {
         for ok in [
             "claude_subscription",
             "gemini_free",
             "openai_api",
             "grok_api",
+            "openrouter",
         ] {
             assert!(provider_id(ok).is_ok());
         }
@@ -658,10 +672,14 @@ mod tests {
     }
 
     #[test]
-    fn speech_language_is_fa_or_en_only() {
+    fn speech_language_is_the_canonical_supported_catalog() {
         assert!(speech_language(None).is_ok());
-        assert!(speech_language(Some("fa")).is_ok() && speech_language(Some("en")).is_ok());
-        for bad in ["auto", "", "FA", "fa-IR", "klingon"] {
+        for code in SPEECH_LANGUAGE_CODES {
+            assert!(speech_language(Some(code)).is_ok(), "{code}");
+        }
+        for bad in [
+            "auto", "", "FA", "fa-IR", "klingon", "jv", "fil", "iw", "-v fr",
+        ] {
             assert!(speech_language(Some(bad)).is_err(), "{bad}");
         }
     }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -123,7 +124,8 @@ def test_cost_policy_cannot_be_switched_on_and_only_allows_free_or_subscription(
         "allow_credit_purchase",
     ):
         with pytest.raises(ValueError):
-            CostPolicy(**{flag: True})
+            settings: dict[str, Any] = {flag: True}
+            CostPolicy(**settings)
     assert policy.allows(BillingMode.SUBSCRIPTION_INCLUDED) and policy.allows(
         BillingMode.FREE_TIER
     )
@@ -164,6 +166,7 @@ def test_selection_is_deterministic_and_explainable() -> None:
     assert dict(first.excluded) == {
         ProviderId.OPENAI_API: ReasonCode.PROVIDER_DISABLED,
         ProviderId.GROK_API: ReasonCode.PROVIDER_DISABLED,
+        ProviderId.OPENROUTER: ReasonCode.PROVIDER_DISABLED,
     }
     result = rig.router.execute(request())
     assert (

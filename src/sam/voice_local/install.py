@@ -50,10 +50,10 @@ import httpx
 from sam.core.config import Settings
 from sam.voice_local.registry import (
     HF_ENDPOINT,
-    SPEAKER_MODEL,
     ModelFile,
     TrustedModel,
     model_dir,
+    speaker_model,
     stt_model,
     verify_model,
 )
@@ -94,7 +94,10 @@ def required_models(settings: Settings) -> tuple[TrustedModel, ...]:
     """Exactly the models voice needs: owner identity + local speech (the same
     recognizer serves the wake word). Chosen by Sam configuration only."""
 
-    return (SPEAKER_MODEL, stt_model(settings.local_stt_model))
+    return (
+        speaker_model(settings.local_speaker_model),
+        stt_model(settings.local_stt_model),
+    )
 
 
 def models_installed(root: Path, models: tuple[TrustedModel, ...]) -> bool:

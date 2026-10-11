@@ -72,6 +72,27 @@ afterEach(() => {
 });
 
 describe("hands-free voice activation", () => {
+  it.each([
+    ["en", "Re-enroll your voice to continue", "Talk to Sam", "Type to Sam", "Re-enroll"],
+    ["fa", "برای ادامه، صدای خود را دوباره ثبت کنید", "با سام صحبت کنید", "برای سام بنویسید", "ثبت مجدد"],
+  ] as const)("requires re-enrollment before any owner microphone opens (%s)", async (language, action, talk, type, reEnroll) => {
+    window.localStorage.setItem("sam.ui.prefs.v1", JSON.stringify({ uiLanguage: language }));
+    const { fake, bridge } = setup({}, { ...enrolled, profile_compatible: false, setup_state: "not_enrolled" });
+    const user = userEvent.setup();
+    const setupVoice = await screen.findByRole("button", { name: action });
+    expect(state()).toBe("idle");
+    expect(screen.getByRole("button", { name: talk })).toBeDisabled();
+    expect(screen.getByRole("button", { name: type })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: talk }));
+    expect(fake.getUserMedia).not.toHaveBeenCalled();
+    expect(bridge.voiceWake).not.toHaveBeenCalled();
+    expect(bridge.voiceUtterance).not.toHaveBeenCalled();
+    await user.click(setupVoice);
+    expect(await screen.findByRole("button", { name: reEnroll })).toBeEnabled();
+    expect(bridge.identityEnrollBegin).not.toHaveBeenCalled();
+    expect(bridge.identityDelete).not.toHaveBeenCalled();
+  });
+
   it("waits for its name without any button and without calling anything", async () => {
     const { fake, bridge, silence } = setup();
     await waitFor(() => expect(state()).toBe("sleeping"));

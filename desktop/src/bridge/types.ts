@@ -197,6 +197,8 @@ export interface ActivityResponse {
 }
 
 export interface VoiceResponse extends OperationResult {
+  /** Ephemeral context lookup, never owner authentication. */
+  conversation_id?: string | null;
   transcript: string | null;
   forwarded_to_agent: boolean;
   reply: string | null;
@@ -218,8 +220,10 @@ export interface DecisionResponse {
   confirmation_id: string;
 }
 
-export type LanguageChoice = "auto" | "fa" | "en";
-export type ResponseLanguage = "fa" | "en";
+/** Canonical language tag validated by the backend; independent of UI locale. */
+export type ResponseLanguage = string;
+/** Request preferences remain the three choices accepted by Python and IPC. */
+export type LanguageChoice = "auto" | "en" | "fa";
 export type Direction = "rtl" | "ltr";
 
 export type ResourceKind = "pdf" | "txt" | "markdown" | "json" | "csv";
@@ -259,9 +263,11 @@ export interface IdentityStatus {
   models: VoiceModelsInfo;
   /** null: the secure store could not be read. */
   enrolled: boolean | null;
+  /** False: a saved template needs re-enrollment for the current voice processing. */
+  profile_compatible?: boolean | null;
   mode: "owner_only" | "guest_mode";
   guest: GuestInfo;
-  last_verification: "verified" | "not_verified" | "unknown" | null;
+  last_verification: "verified" | "not_verified" | "insufficient_audio" | "unknown" | null;
   speaker_model: Capability;
   local_stt: Capability;
   persian_tts: Capability;
@@ -290,7 +296,7 @@ export interface ChallengeResponse extends OperationResult {
 // ---- AI providers, routing and privacy (Phase 13). Display/preferences only:
 // no key, token, prefix, header or provider response body ever appears here.
 
-export type ProviderId = "claude_subscription" | "gemini_free" | "openai_api" | "grok_api";
+export type ProviderId = "claude_subscription" | "gemini_free" | "openai_api" | "grok_api" | "openrouter";
 export type ProviderState =
   | "available"
   | "rate_limited"

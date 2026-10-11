@@ -89,6 +89,7 @@ export function SamProvider({
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const alive = useRef(true);
+  const identityGeneration = useRef<symbol | null>(null);
 
   const startedAt = useRef(Date.now());
   const startupRetry = useRef<number | undefined>(undefined);
@@ -117,11 +118,14 @@ export function SamProvider({
   });
 
   const refreshIdentity = useCallback(async () => {
+    // A slow poll must not replace the refresh after a newer voice decision.
+    const generation = Symbol();
+    identityGeneration.current = generation;
     try {
       const next = await bridge.identityStatus();
-      if (alive.current) setIdentity(next);
+      if (alive.current && generation === identityGeneration.current) setIdentity(next);
     } catch {
-      if (alive.current) setIdentity(null);
+      if (alive.current && generation === identityGeneration.current) setIdentity(null);
     }
   }, [bridge]);
 
@@ -135,6 +139,7 @@ export function SamProvider({
     }, STATUS_POLL_MS);
     return () => {
       alive.current = false;
+      identityGeneration.current = null;
       window.clearInterval(timer);
       window.clearTimeout(startupRetry.current);
     };

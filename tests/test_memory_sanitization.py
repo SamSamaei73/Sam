@@ -19,6 +19,7 @@ from sam.memory.sanitization import looks_like_secret, redact
         "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAK...",
         "AKIAABCDEFGHIJKLMNOP is my access key id",
         "token: ghp_abcdefghijklmnopqrstuvwxyz012345",
+        "sk-or-v1-" + "a" * 64,
         # Synthetic value, split so secret scanners do not flag it.
         "slack token " + "xox" + "b-EXAMPLE-NOT-A-REAL-TOKEN",
         "my password is hunter2plus",
@@ -38,6 +39,7 @@ def test_secret_like_content_is_detected(text: str) -> None:
         "The meeting is scheduled for 3pm tomorrow.",
         "Phase 3 Permission Engine was approved.",
         "This project targets Python 3.12.",
+        "OpenRouter credentials start with sk-or-v1-.",
     ],
 )
 def test_ordinary_content_is_not_flagged(text: str) -> None:
@@ -61,3 +63,11 @@ def test_redact_preserves_surrounding_safe_text() -> None:
 def test_redact_is_idempotent_on_clean_text() -> None:
     text = "Sam uses FastAPI."
     assert redact(text) == text
+
+
+@pytest.mark.parametrize("suffix", ["a" * 64, "b" * 63 + "_", "c" * 63 + "-"])
+def test_openrouter_redaction_removes_the_entire_opaque_token(suffix: str) -> None:
+    token = "sk-or-v1-" + suffix
+    text = f"Before ({token}). After"
+    assert looks_like_secret(text)
+    assert redact(text) == "Before ([REDACTED]). After"

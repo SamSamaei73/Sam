@@ -19,13 +19,13 @@ export interface Playback {
 export function playSynthesizedAudio(
   audioBase64: string,
   format: string | null,
-  onEnd: () => void,
+  onEnd: (failed?: boolean) => void,
 ): Playback {
   const type = ALLOWED_TYPES[(format ?? "").toLowerCase()] ?? "audio/mpeg";
   const url = URL.createObjectURL(new Blob([base64ToBytes(audioBase64) as Uint8Array<ArrayBuffer>], { type }));
   const audio = new Audio(url);
   let done = false;
-  const finish = () => {
+  const finish = (failed = false) => {
     if (done) return;
     done = true;
     audio.onended = null;
@@ -33,10 +33,10 @@ export function playSynthesizedAudio(
     audio.pause();
     audio.removeAttribute("src");
     URL.revokeObjectURL(url);
-    onEnd();
+    onEnd(failed);
   };
-  audio.onended = finish;
-  audio.onerror = finish;
-  void audio.play().catch(finish);
-  return { stop: finish };
+  audio.onended = () => finish();
+  audio.onerror = () => finish(true);
+  void audio.play().catch(() => finish(true));
+  return { stop: () => finish() };
 }

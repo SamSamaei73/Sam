@@ -10,10 +10,16 @@ export function identityLabel(
   t: ReturnType<typeof useSam>["t"],
 ): { label: string; tone: "ok" | "warn" | "guest" | "muted" } {
   if (identity?.guest.active) return { label: t("home.identity.guest"), tone: "guest" };
+  if (identity?.profile_compatible === false) {
+    return { label: t("settings.voiceUpdateRequired"), tone: "warn" };
+  }
   if (!identity || !identity.available || identity.enrolled !== true) {
     return { label: t("home.identity.none"), tone: "muted" };
   }
   if (identity.last_verification === "verified") return { label: t("home.identity.owner"), tone: "ok" };
+  if (identity.last_verification === "insufficient_audio") {
+    return { label: t("settings.verification.insufficient_audio"), tone: "warn" };
+  }
   if (identity.last_verification === "not_verified") return { label: t("home.identity.verify"), tone: "warn" };
   return { label: t("home.identity.unknown"), tone: "muted" };
 }

@@ -5,6 +5,7 @@ import {
   encodeWav,
   resample,
 } from "./wav";
+import { createNeuralSpeechInput, type SpeechInputFactory } from "./neuralVoice";
 
 /**
  * Explicit, bounded, in-memory microphone capture.
@@ -17,7 +18,7 @@ import {
  *   localStorage, IndexedDB or a URL.
  */
 
-export type RecorderErrorCode = "unsupported" | "denied" | "failed" | "empty";
+export type RecorderErrorCode = "unsupported" | "denied" | "failed" | "empty" | "limit";
 
 export class RecorderError extends Error {
   readonly code: RecorderErrorCode;
@@ -30,7 +31,16 @@ export class RecorderError extends Error {
 
 export interface AudioEnvironment {
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
-  createContext: () => AudioContext;
+  createContext: (sampleRate?: number) => AudioContext;
+  createSpeechInput?: SpeechInputFactory;
+}
+
+/** Enrollment, push-to-talk and hands-free use the same microphone processing. */
+export function voiceCaptureConstraints(): MediaStreamConstraints {
+  return {
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    video: false,
+  };
 }
 
 export function browserAudioEnvironment(): AudioEnvironment | null {
@@ -43,7 +53,8 @@ export function browserAudioEnvironment(): AudioEnvironment | null {
   if (!media || typeof media.getUserMedia !== "function" || !Ctor) return null;
   return {
     getUserMedia: (c) => media.getUserMedia(c),
-    createContext: () => new Ctor(),
+    createContext: (sampleRate) => new Ctor(sampleRate ? { sampleRate } : undefined),
+    createSpeechInput: createNeuralSpeechInput,
   };
 }
 
@@ -60,6 +71,8 @@ export class Recorder {
   private chunks: Float32Array[] = [];
   private total = 0;
   private active = false;
+  private limitReached = false;
+  private generation = 0;
 
   constructor(
     private readonly env: AudioEnvironment | null = browserAudioEnvironment(),
@@ -75,31 +88,43 @@ export class Recorder {
   async start(): Promise<void> {
     if (this.active) return;
     if (!this.env) throw new RecorderError("unsupported");
+    const generation = ++this.generation;
     let stream: MediaStream;
     try {
-      stream = await this.env.getUserMedia({ audio: true, video: false });
+      stream = await this.env.getUserMedia(voiceCaptureConstraints());
     } catch (error) {
+      if (generation !== this.generation) return;
       const name = (error as { name?: string } | null)?.name ?? "";
       throw new RecorderError(
         name === "NotAllowedError" || name === "SecurityError" ? "denied" : "failed",
       );
     }
+    if (generation !== this.generation) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
     try {
-      const context = this.env.createContext();
-      const source = context.createMediaStreamSource(stream);
-      const processor = context.createScriptProcessor(4096, 1, 1);
       this.stream = stream;
+      const context = this.env.createContext();
       this.context = context;
+      const source = context.createMediaStreamSource(stream);
       this.source = source;
+      const processor = context.createScriptProcessor(4096, 1, 1);
       this.processor = processor;
       this.chunks = [];
       this.total = 0;
-      this.active = true;
-      processor.onaudioprocess = (event) => this.capture(event.inputBuffer.getChannelData(0));
+      this.limitReached = false;
+      processor.onaudioprocess = (event) => {
+        if (generation === this.generation) this.capture(event.inputBuffer.getChannelData(0));
+      };
       source.connect(processor);
       // Connected only so the node runs; its output buffer is silent.
       processor.connect(context.destination);
+      if (context.state === "suspended") await context.resume();
+      if (generation !== this.generation) return;
+      this.active = true;
     } catch {
+      if (generation !== this.generation) return;
       this.release();
       throw new RecorderError("failed");
     }
@@ -118,6 +143,7 @@ export class Recorder {
     this.chunks.push(take);
     this.total += take.length;
     if (this.total >= limit) {
+      this.limitReached = true;
       this.onLimit();
     }
   }
@@ -125,21 +151,37 @@ export class Recorder {
   /** Stop, encode, release everything. Resolves with the WAV (base64). */
   async stop(): Promise<RecordingResult> {
     if (!this.active) throw new RecorderError("failed");
+    if (this.limitReached) {
+      this.release();
+      throw new RecorderError("limit");
+    }
     const rate = this.context?.sampleRate ?? TARGET_SAMPLE_RATE;
     const chunks = this.chunks;
     const total = this.total;
+    // Transfer ownership before releasing the capture graph. release() wipes
+    // buffers it owns; these samples still belong to the recording being sent.
+    this.chunks = [];
     this.release();
     if (total === 0) throw new RecorderError("empty");
     const joined = new Float32Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      joined.set(chunk, offset);
-      offset += chunk.length;
+    let pcm: Float32Array | undefined;
+    let wav: Uint8Array | undefined;
+    try {
+      let offset = 0;
+      for (const chunk of chunks) {
+        joined.set(chunk, offset);
+        offset += chunk.length;
+      }
+      pcm = resample(joined, rate, TARGET_SAMPLE_RATE);
+      wav = encodeWav(pcm, TARGET_SAMPLE_RATE);
+      return { base64: bytesToBase64(wav), durationSeconds: total / rate };
+    } finally {
+      for (const chunk of chunks) chunk.fill(0);
+      chunks.length = 0;
+      joined.fill(0);
+      pcm?.fill(0);
+      wav?.fill(0);
     }
-    chunks.length = 0;
-    const wav = encodeWav(resample(joined, rate, TARGET_SAMPLE_RATE), TARGET_SAMPLE_RATE);
-    joined.fill(0);
-    return { base64: bytesToBase64(wav), durationSeconds: total / rate };
   }
 
   /** Abandon the recording: stop tracks and discard audio. */
@@ -148,6 +190,7 @@ export class Recorder {
   }
 
   private release(): void {
+    this.generation++;
     this.active = false;
     if (this.processor) {
       this.processor.onaudioprocess = null;

@@ -46,6 +46,7 @@ pub enum Route {
     Activity,
     DecideConfirmation,
     VoiceUtterance,
+    VoiceConversationEnd,
     Speak,
     IdentityStatus,
     IdentityEnrollBegin,
@@ -87,7 +88,7 @@ pub enum Route {
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 50] = [
+    pub const ALL: [Route; 51] = [
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -101,6 +102,7 @@ impl Route {
         Route::Activity,
         Route::DecideConfirmation,
         Route::VoiceUtterance,
+        Route::VoiceConversationEnd,
         Route::Speak,
         Route::IdentityStatus,
         Route::IdentityEnrollBegin,
@@ -155,6 +157,7 @@ impl Route {
             Route::Activity => "/desktop/v1/activity",
             Route::DecideConfirmation => "/desktop/v1/confirmations/decide",
             Route::VoiceUtterance => "/desktop/v1/voice/utterance",
+            Route::VoiceConversationEnd => "/desktop/v1/voice/conversation/end",
             Route::Speak => "/desktop/v1/tts/speak",
             Route::IdentityStatus => "/desktop/v1/voice/identity",
             Route::IdentityEnrollBegin => "/desktop/v1/voice/identity/enroll/begin",
@@ -495,7 +498,7 @@ mod tests {
         let mut paths: Vec<&str> = Route::ALL.iter().map(|r| r.path()).collect();
         paths.sort_unstable();
         paths.dedup();
-        assert_eq!(paths.len(), 50);
+        assert_eq!(paths.len(), Route::ALL.len());
         for path in paths {
             assert!(path.starts_with("/desktop/v1/"));
             assert!(!path.contains('?') && !path.contains(".."));

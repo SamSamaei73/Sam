@@ -21,10 +21,17 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
 
-Direction = Literal["rtl", "ltr"]
-ResponseLanguage = Literal["fa", "en"]
+from sam.language.catalog import (
+    LANGUAGE_NAMES,
+    Direction,
+    LanguageCode,
+    language_direction,
+    normalize_language_tag,
+    validate_language_code,
+)
+
+ResponseLanguage = LanguageCode
 
 
 class LanguagePreference(StrEnum):
@@ -35,17 +42,26 @@ class LanguagePreference(StrEnum):
 
 # Reviewed static instructions (trusted; never built from user/model text).
 INSTRUCTIONS: dict[str, str] = {
-    "fa": (
-        "Respond in Persian (Farsi) using Persian script. Keep technical terms, "
-        "code, URLs and product names (for example API, Docker, FastAPI, GitHub, "
-        "Claude, MCP, Python) in their original Latin form inside Persian "
-        "sentences. Do not transliterate Persian into Latin letters."
-    ),
-    "en": (
-        "Respond in English. If the user includes Persian words, keep answering "
-        "in English unless they ask for Persian."
-    ),
+    code: (
+        f"Respond in {name} using its usual written script. "
+        "Keep code, URLs and product names in their original form."
+    )
+    for code, name in LANGUAGE_NAMES.items()
 }
+INSTRUCTIONS.update(
+    {
+        "fa": (
+            "Respond in Persian (Farsi) using Persian script. Keep technical terms, "
+            "code, URLs and product names (for example API, Docker, FastAPI, GitHub, "
+            "Claude, MCP, Python) in their original Latin form inside Persian "
+            "sentences. Do not transliterate Persian into Latin letters."
+        ),
+        "en": (
+            "Respond in English. If the user includes Persian words, keep answering "
+            "in English unless they ask for Persian."
+        ),
+    }
+)
 
 
 def _is_persian_letter(ch: str) -> bool:
@@ -111,7 +127,7 @@ class LanguageDecision:
 
 class LanguagePolicy:
     def __init__(self, default: ResponseLanguage = "en") -> None:
-        self._default = default
+        self._default = validate_language_code(default)
 
     def resolve(
         self,
@@ -133,21 +149,14 @@ class LanguagePolicy:
         return LanguageDecision(
             user_language=heard,
             response_language=response,
-            direction="rtl" if response == "fa" else "ltr",
+            direction=language_direction(response),
             tts_language=response,
             mixed=mixed,
         )
 
     @staticmethod
     def _from_tag(tag: str | None) -> ResponseLanguage | None:
-        if not tag:
-            return None
-        primary = tag.lower().replace("_", "-").split("-")[0]
-        if primary in {"fa", "fas", "per", "persian", "farsi"}:
-            return "fa"
-        if primary in {"en", "eng", "english"}:
-            return "en"
-        return None
+        return normalize_language_tag(tag)
 
 
 __all__ = [

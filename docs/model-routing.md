@@ -17,17 +17,78 @@ never execute, approve, grant, enable another provider, or change policy.
 ## Provider registry (`sam/models/registry.py`)
 
 Trusted and immutable. A provider cannot mark itself free: the cost class lives
-in Sam's code. A paid provider **cannot be built as enabled**.
+in Sam's code. OpenRouter is the only paid provider with a trusted configuration
+opt-in; it cannot become a paid fallback.
 
 | id | enabled | cost class | auth |
 |---|---|---|---|
 | `claude_subscription` | yes | `SUBSCRIPTION_INCLUDED` | your Claude Code login |
 | `gemini_free` | when `GEMINI_API_KEY` is set | `FREE_TIER` | API key (local) |
+| `openrouter` | when `OPENROUTER_API_KEY` is set | `PAID_API` | one OpenRouter key |
 | `openai_api` | **never** | `PAID_API` | none read |
 | `grok_api` | **never** | `PAID_API` | none read |
 
 OpenAI and Grok are present but operationally absent: their adapters contain no
 network, subprocess, credential or SDK code, and no setting can enable them.
+
+## OpenRouter: one account for hosted models
+
+Configure the repository's ignored `.env`:
+
+```dotenv
+OPENROUTER_API_KEY=your-key-here
+OPENROUTER_MODEL=openai/gpt-4.1-mini
+OPENROUTER_TTS_MODEL=openai/gpt-4o-mini-tts-2025-12-15
+OPENROUTER_TTS_VOICE=alloy
+```
+
+The key selects OpenRouter as the default primary LLM provider at startup.
+Chat, verified voice transcripts, professional assistance and proactive model
+requests use the same router and account. A supplied preferences store keeps
+its existing choice. Settings can select an already configured provider, but
+cannot enter keys, change endpoints or enable a paid service. Selecting Auto
+does not make OpenRouter an implicit paid alternative.
+
+The same key configures optional cloud speech output through the existing
+synthesis permission boundary; see [speech configuration](tts.md#openrouter-speech).
+Wake detection, speaker embeddings and local transcription still run on this
+Mac without any provider key. Image generation and other new modalities need
+their own application adapters; a chat-model setting cannot perform every task.
+Choose a model with the required language/modality support. Sam accepts explicit
+`vendor/model` identifiers, including documented variants, and rejects URLs and
+OpenRouter's automatic model routers.
+
+The chat adapter pins `https://openrouter.ai/api/v1/chat/completions`, sends one
+configured model with `provider.allow_fallbacks=false` and
+`provider.data_collection="deny"`, and makes one bounded non-streaming request.
+There are no redirects, ambient proxies or retries. Refusals, malformed output,
+authentication, rate limits and embedded HTTP-200 errors become safe typed
+results. The configured model ID in Sam's audit identifies the requested route;
+it is not an attestation of an upstream model version. OpenRouter may return a
+canonical/dated name for the configured alias.
+
+Requests can consume OpenRouter credits. Sam does not buy credits, activate
+vendor billing, or fall back to a paid model. `:free` models retain the existing
+restrictions on personal/private content sent to free providers. Data-collection
+routing preferences do not promise zero retention; review account and provider
+policies. Current API contracts: [chat completion API](https://openrouter.ai/docs/api-reference/chat-completion)
+and [provider routing](https://openrouter.ai/docs/features/provider-routing).
+
+Development reads `.env` from the working directory. For a packaged app, supply
+an explicit absolute file path when launching the executable:
+
+```bash
+SAM_OPENROUTER_ENV_FILE=/absolute/path/to/.env /Applications/Sam.app/Contents/MacOS/sam-desktop
+```
+
+The sidecar forwards only the four OpenRouter variables above and this file
+selector. Bootstrap reads only those four fields from the selected file
+(64 KiB maximum, UTF-8, interpolation disabled); existing environment values
+win. It never imports unrelated application flags from that file. Finder
+launches do not inherit a terminal's environment. Alternatively store the key
+with `python -m sam.system.cli secret-set openrouter_api_key`; production can
+resolve it from Keychain. An explicitly configured OpenRouter key takes
+precedence over Keychain. Keep `.env` owner-readable and out of Git.
 
 ## Routing algorithm (`sam/models/router.py`)
 
@@ -37,7 +98,7 @@ network, subprocess, credential or SDK code, and no setting can enable them.
 3. owner topic blocklist (empty by default)
 4. required capabilities (`PERSIAN` when the text is Persian)
 5. registry, drop disabled providers
-6. `CostPolicy` (only subscription/free/local may ever be selected)
+6. `CostPolicy` (subscription/free/local, plus explicitly configured OpenRouter as primary)
 7. `PrivacyPolicy` (see docs/privacy.md)
 8. owner preferred provider (an ordering only, never eligibility)
 9. availability (bounded cooldowns; never a permanent disable)
@@ -260,9 +321,11 @@ enable billing), and `API_KEY_INVALID` a key/project configuration issue.
 `CostPolicy` fields (`allow_paid_api`, `allow_paid_fallback`,
 `allow_auto_upgrade`, `allow_credit_purchase`) are all fixed `False` and the
 constructor refuses `True`. No prompt, model output, provider failure or quota
-error can change this. Only `SUBSCRIPTION_INCLUDED`, `FREE_TIER` and `LOCAL` can
-be selected. Sam shows safe indicators (Free Tier / Subscription / Paid API
-disabled), never a computed price.
+error can change this. The separate trusted `allowed_paid_providers` set may
+contain only configured OpenRouter, which also requires an explicit preferred
+provider choice (the default when its key is configured). It cannot be selected
+as fallback, even when a preferred free provider is unavailable before planning.
+Sam shows billing classes and the configured model, never an invented price.
 
 **Official facts recorded:** the OpenAI API is billed separately from ChatGPT
 subscriptions (a ChatGPT plan includes no API access); the xAI API is a separate
@@ -279,8 +342,9 @@ pins its host over HTTPS; no request, model or document can set an endpoint.
 
 The router honors `fa`/`en`/`auto`: Persian text requires the `PERSIAN`
 capability, so a provider without it is never used just because it is first.
-Both current providers are treated as Persian-capable per provider
-documentation; Sam has not measured their Persian quality.
+Claude, Gemini and the default OpenRouter model are treated as Persian-capable
+per provider documentation; Sam has not measured their Persian quality. An
+owner-selected OpenRouter model must support the languages used by the app.
 
 ## Limitations
 

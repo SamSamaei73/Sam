@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-local-stop"
+description = "Enables the sam_local_stop command without any pre-configured scope."
+commands.allow = ["sam_local_stop"]
+
+[[permission]]
+identifier = "deny-sam-local-stop"
+description = "Denies the sam_local_stop command without any pre-configured scope."
+commands.deny = ["sam_local_stop"]

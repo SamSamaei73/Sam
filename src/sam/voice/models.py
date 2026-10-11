@@ -43,8 +43,10 @@ MIN_SAMPLE_RATE = 8_000
 MAX_SAMPLE_RATE = 48_000
 MAX_CHANNELS = 2
 SUPPORTED_SAMPLE_WIDTH_BYTES = 2  # 16-bit PCM only
+# All limits apply together. Desktop 16 kHz mono capture fits the full 60 s;
+# higher-rate stereo input can reach the byte cap before the duration cap.
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
-MAX_AUDIO_DURATION_SECONDS = 30.0
+MAX_AUDIO_DURATION_SECONDS = 60.0
 MAX_AUDIO_METADATA_LENGTH = 200
 MAX_TRANSCRIPT_LENGTH = 10_000
 MAX_VOICE_SESSION_UTTERANCES = 50

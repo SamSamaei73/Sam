@@ -1,6 +1,6 @@
 """Credential boundary for the speech-synthesis provider.
 
-The Fish API key must exist only at the provider execution boundary: it is
+The provider API key must exist only at the provider execution boundary: it is
 resolved from a trusted ``TTSCredentialReference`` *inside* the provider's
 ``synthesize`` call, after the gateway has already validated the text and the
 PermissionEngine has said ALLOW. It never appears in a request model, the
@@ -151,7 +151,20 @@ def gemini_credentials_from_settings(
     return provider
 
 
+def openrouter_credentials_from_settings(
+    settings: Settings, reference: TTSCredentialReference
+) -> FakeTTSCredentialProvider:
+    """Share the owner's configured OpenRouter key through the TTS boundary."""
+
+    if reference.provider_id != "openrouter-tts" or settings.openrouter_api_key is None:
+        raise TTSCredentialError("no speech-synthesis credential is configured")
+    provider = FakeTTSCredentialProvider()
+    provider.add(reference, settings.openrouter_api_key.get_secret_value())
+    return provider
+
+
 __all__ = [
+    "openrouter_credentials_from_settings",
     "gemini_credentials_from_settings",
     "FakeTTSCredentialProvider",
     "TTSCredential",

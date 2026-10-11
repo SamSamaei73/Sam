@@ -114,9 +114,11 @@ export function SettingsView() {
             <div className="card-row" style={{ marginBottom: 10 }}>
               <span className="muted">{t("settings.ownerVoice")}</span>
               <StatusPill
-                tone={identity.enrolled === true ? "ok" : identity.enrolled === false ? "muted" : "warn"}
+                tone={identity.profile_compatible === false ? "warn" : identity.enrolled === true ? "ok" : identity.enrolled === false ? "muted" : "warn"}
                 label={
-                  identity.enrolled === true
+                  identity.profile_compatible === false
+                    ? t("settings.voiceUpdateRequired")
+                    : identity.enrolled === true
                     ? t("settings.enrolled")
                     : identity.enrolled === false
                       ? t("settings.notEnrolled")
@@ -124,6 +126,9 @@ export function SettingsView() {
                 }
               />
             </div>
+            {identity.profile_compatible === false ? (
+              <Notice tone="warn">{t("settings.voiceUpdateHint")}</Notice>
+            ) : null}
             <div className="card-row" style={{ marginBottom: 14 }}>
               <span className="muted">{t("settings.lastVerification")}</span>
               <span>
@@ -174,7 +179,7 @@ export function SettingsView() {
           </NeonButton>
         ) : (
           <>
-            <NeonButton disabled={identity?.enrolled !== true} onClick={() => setDialog("guest")}>
+            <NeonButton disabled={identity?.enrolled !== true || identity.profile_compatible === false} onClick={() => setDialog("guest")}>
               {t("guest.start")}
             </NeonButton>
             {identity?.available && identity.enrolled !== true ? (

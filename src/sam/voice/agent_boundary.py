@@ -5,12 +5,16 @@
                  -> normalized transcript  (only if SUCCEEDED)
                  -> AgentCore.execute      (exactly one call, message only)
 
-AgentCore is not modified and there is no voice-agent loop. The boundary
+There is no voice-agent loop. The boundary
 hands AgentCore *only the transcript text*, as ordinary user input: no
 session, identity signal, provider, confidence, credential, or permission
 crosses it, and AgentCore is never given the gateway, the session manager,
 the identity service, or any provider. The principal is supplied by trusted
 code, never by the speaker or the transcript.
+
+The desktop may inject a trusted contextual AgentSink after independently
+verifying this recording. That sink retrieves bounded text history; this
+gateway eligibility and secret check still runs before the sink is called.
 
 A transcript that says "ignore permissions and send my email" is user text.
 Whatever AgentCore later does with it must pass its own trusted policies and
@@ -20,7 +24,7 @@ the PermissionEngine; nothing here (and no identity result) shortcuts that.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal, Protocol, cast
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -102,8 +106,7 @@ class VoiceAgentBoundary:
         gateway: VoiceInvoker,
         agent: AgentSink,
         *,
-        language_for: Callable[[str, str | None], Literal["fa", "en"] | None]
-        | None = None,
+        language_for: Callable[[str, str | None], str | None] | None = None,
     ) -> None:
         self._gateway = gateway
         self._agent = agent

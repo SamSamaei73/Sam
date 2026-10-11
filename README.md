@@ -40,6 +40,19 @@ uv sync
 cp .env.example .env
 ```
 
+For one account across hosted AI, set `OPENROUTER_API_KEY` in `.env`.
+Sam then uses `OPENROUTER_MODEL` (default `openai/gpt-4.1-mini`) for its
+language-model features and the same key for optional cloud speech output.
+The default speech model is `openai/gpt-4o-mini-tts-2025-12-15`; configure its
+stock voice with `OPENROUTER_TTS_VOICE`. No separate vendor keys are needed
+for these paths. Requests use your OpenRouter balance, and paid fallback stays
+off. Wake detection, owner verification and transcription remain local.
+See [OpenRouter setup and packaged-app configuration](docs/model-routing.md#openrouter-one-account-for-hosted-models).
+
+Local voice capture, spoken replies and verified follow-up context are described
+in [voice activation](docs/voice-activation.md). Short-phrase owner verification
+is still unreliable; these changes do not resolve that matching limitation.
+
 ## Run
 
 ```bash
@@ -52,12 +65,12 @@ values in `.env` control the development binding. The defaults bind only to
 
 The service exposes `GET /health`.
 
-The agent exposes `POST /agent` with a JSON body containing a `message`. Claude
-configuration is loaded from `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`,
-`CLAUDE_BASE_URL`, `CLAUDE_TIMEOUT`, and `CLAUDE_MAX_RETRIES`. The endpoint
-must use HTTPS, timeouts are finite and bounded, and provider retries are
-explicitly limited. No live provider call is made unless the agent endpoint is
-invoked with a configured API key.
+The agent exposes `POST /agent` with a JSON body containing a `message`.
+It uses the shared model router, including the configured OpenRouter model.
+Provider endpoints are pinned to HTTPS, requests are bounded, and credentials
+are never passed to the desktop webview. Settings shows provider readiness,
+the configured model and billing class. Model availability does not grant tools
+permission to perform actions.
 
 ## Checks
 

@@ -7,12 +7,13 @@ smuggled in through an event.
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from sam.models.models import (
     BillingMode,
@@ -22,6 +23,7 @@ from sam.models.models import (
     ReasonCode,
     TaskProfile,
 )
+from sam.models.openrouter_config import validate_openrouter_model_id
 
 MAX_EVENTS = 500
 
@@ -34,7 +36,7 @@ class RoutingAuditEvent(BaseModel):
     task_profile: TaskProfile
     privacy_class: PrivacyClass
     provider_id: ProviderId | None
-    model_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
+    model_id: str | None = None
     cost_class: BillingMode | None
     reason_codes: tuple[ReasonCode, ...]
     fallback_used: bool
@@ -42,6 +44,17 @@ class RoutingAuditEvent(BaseModel):
     latency_ms: int = Field(ge=0)
     input_size: int = Field(ge=0)
     output_size: int = Field(ge=0)
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        if info.data.get("provider_id") is ProviderId.OPENROUTER:
+            return validate_openrouter_model_id(value)
+        if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", value) is None:
+            raise ValueError("model id is malformed")
+        return value
 
 
 class RoutingAuditSink(Protocol):

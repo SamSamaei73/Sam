@@ -14,6 +14,10 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sam.core.deployment import DeploymentMode
+from sam.models.openrouter_config import (
+    DEFAULT_OPENROUTER_MODEL,
+    validate_openrouter_model_id,
+)
 
 
 class Settings(BaseSettings):
@@ -46,6 +50,17 @@ class Settings(BaseSettings):
     # pinned in sam.tts.gemini_tts. Free-tier only; Sam never enables billing
     # and never falls back to another (paid) provider.
     gemini_api_key: SecretStr | None = None
+    # Explicit opt-in to OpenRouter's API billing. This credential may be set
+    # in the owner's .env even in production; the endpoint stays pinned in
+    # the adapter and no paid fallback is enabled by configuring it.
+    openrouter_api_key: SecretStr | None = None
+    openrouter_model: str = DEFAULT_OPENROUTER_MODEL
+    # Speech synthesis uses the same OpenRouter key. STT and speaker
+    # verification remain local and do not require hosted credentials.
+    openrouter_tts_model: str = "openai/gpt-4o-mini-tts-2025-12-15"
+    openrouter_tts_voice: str = Field(
+        default="alloy", pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    )
     # Phase 14: the owner's professional identity (sam.professional.identity).
     # Trusted LOCAL configuration only, never taken from a document, a model or
     # a request: the canonical name as it appears in author lists, plus any
@@ -57,7 +72,7 @@ class Settings(BaseSettings):
     gemini_tts_voice: str = Field(default="Kore", min_length=1, max_length=24)
     # Multi-model router (Phase 13). The Claude provider uses the owner's own
     # Claude Code SUBSCRIPTION login, never an API key; there is deliberately no
-    # OpenAI/xAI setting and no paid-fallback switch. ``claude_code_executable``
+    # direct OpenAI/xAI setting or paid-fallback switch. ``claude_code_executable``
     # is a trusted absolute path to a binary named ``claude`` (validated).
     claude_subscription_enabled: bool = True
     # Trusted deployment constraint (never prompt-controlled). The Claude
@@ -80,6 +95,9 @@ class Settings(BaseSettings):
     # models are set up explicitly and never downloaded during a request.
     voice_identity_enabled: bool = False
     speaker_verification_threshold: float = Field(default=0.5, ge=0.3, le=0.9)
+    # Trusted local selector only. A different model requires explicit owner
+    # re-enrollment; existing secure profiles are preserved, never migrated.
+    local_speaker_model: Literal["ecapa", "wespeaker"] = "ecapa"
     local_stt_model: Literal["small", "medium", "large-v3"] = "small"
     # Phase 17: durable local state. "auto" means SQLite in production
     # (APP_ENV=production) and in-memory otherwise (development, tests). The data
@@ -87,8 +105,9 @@ class Settings(BaseSettings):
     # overridden by trusted local configuration only (absolute path).
     sam_storage: Literal["auto", "memory", "sqlite"] = "auto"
     sam_data_dir: str | None = Field(default=None, max_length=1_000)
-    # Credentials from the macOS Keychain: "auto" means on in production. An
-    # environment value always wins; a Keychain failure never falls back.
+    # Credentials from the macOS Keychain: "auto" means on in production.
+    # Explicit OpenRouter configuration takes precedence; other production
+    # credentials remain Keychain-only. Failed lookups have no fallback.
     sam_keychain: Literal["auto", "on", "off"] = "auto"
     claude_model: str = Field(default="claude-sonnet-4-5", min_length=1)
     claude_base_url: AnyHttpUrl = Field(default=AnyHttpUrl("https://api.anthropic.com"))
@@ -121,6 +140,18 @@ class Settings(BaseSettings):
         if value is not None and not value.get_secret_value().strip():
             raise ValueError("GEMINI_API_KEY must not be blank")
         return value
+
+    @field_validator("openrouter_api_key")
+    @classmethod
+    def validate_openrouter_api_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("OPENROUTER_API_KEY must not be blank")
+        return value
+
+    @field_validator("openrouter_model", "openrouter_tts_model")
+    @classmethod
+    def validate_openrouter_model(cls, value: str) -> str:
+        return validate_openrouter_model_id(value)
 
     @field_validator("desktop_bridge_token")
     @classmethod

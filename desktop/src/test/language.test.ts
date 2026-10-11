@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { STRINGS, translate, type StringKey } from "../i18n/strings";
-import { detectLanguage, directionFor, splitSegments } from "../lib/language";
+import { canonicalLanguageTag, detectLanguage, directionFor, languageBase, splitSegments, uiLanguageFor } from "../lib/language";
 
 const FA_HELLO = "سلام سام، امروز چه خبر؟";
 const FA_MIXED = "این API با FastAPI کار می‌کند؟";
@@ -24,6 +24,28 @@ describe("language detection", () => {
     expect(directionFor("fa")).toBe("rtl");
     expect(directionFor("en")).toBe("ltr");
     expect(directionFor(null)).toBe("ltr");
+  });
+
+  it.each(["ar", "he-IL", "ur-PK", "ps", "sd", "yi", "ckb", "az-Arab"])("renders %s from language metadata right to left", (language) => {
+    expect(directionFor(language)).toBe("rtl");
+  });
+
+  it.each(["es", "fr-CA", "ja", "zh-Hant", "hi", "az-Latn", "fa-Latn"])("renders %s left to right", (language) => {
+    expect(directionFor(language)).toBe("ltr");
+  });
+
+  it("keeps response language tags separate from the two translated UI catalogs", () => {
+    expect(canonicalLanguageTag("es_mx")).toBe("es-MX");
+    expect(languageBase("zh-Hant-TW")).toBe("zh");
+    expect(canonicalLanguageTag("bad tag<script>")).toBe(null);
+    expect(canonicalLanguageTag("auto")).toBe(null);
+    expect(uiLanguageFor("fa-IR", "en")).toBe("fa");
+    expect(uiLanguageFor("en-GB", "fa")).toBe("en");
+    expect(uiLanguageFor("ar", "en")).toBe("en");
+    expect(uiLanguageFor("ja", "fa")).toBe("fa");
+    expect(detectLanguage("مرحبا كيف حالك اليوم")).toBe("ar");
+    expect(detectLanguage("שלום היום")).toBe("he");
+    expect(detectLanguage("آپ کیسے ہیں")).toBe("ur");
   });
 });
 
@@ -121,15 +143,17 @@ describe("static UI strings", () => {
   it("technical terms stay intact, in Latin, inside Persian text", () => {
     expect(STRINGS.fa["settings.privacy"]).toContain("Keychain");
     expect(STRINGS.fa["enroll.removeBody"]).toContain("Keychain");
-    expect(STRINGS.fa["settings.persianTtsNote"]).toContain("Google Gemini");
+    expect(STRINGS.fa["settings.persianTtsNote"]).toContain("OpenRouter");
   });
 
-  it("discloses that Gemini Persian TTS is external, free-tier, with paid fallback OFF", () => {
-    expect(STRINGS.en["settings.persianTtsNote"]).toMatch(/external service/);
-    expect(STRINGS.en["settings.persianTtsNote"]).toMatch(/sent to Google/);
-    expect(STRINGS.en["settings.persianTtsNote"]).toMatch(/Paid fallback is OFF/);
-    expect(STRINGS.fa["settings.persianTtsNote"]).toContain("جایگزین پولی خاموش");
-    expect(STRINGS.fa["settings.persianTtsNote"]).toContain("برای Google ارسال می‌شود");
+  it("discloses approved external speech and the shared OpenRouter key without claiming it is free", () => {
+    const note = STRINGS.en["settings.persianTtsNote"];
+    expect(note).toMatch(/asks before sending the reply text/);
+    expect(note).toMatch(/configured external speech provider/);
+    expect(note).toMatch(/existing OpenRouter key/);
+    expect(note).not.toMatch(/free tier|sent to Google/i);
+    expect(STRINGS.fa["settings.persianTtsNote"]).toContain("اجازه می‌گیرد");
+    expect(STRINGS.fa["settings.persianTtsNote"]).toContain("همان کلید OpenRouter");
   });
 
   it("the AI provider and privacy strings are exact canonical Persian", () => {

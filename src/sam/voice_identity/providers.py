@@ -14,7 +14,7 @@ import math
 import struct
 from collections.abc import Callable, Sequence
 from threading import RLock
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from sam.voice.models import ValidatedAudio
 from sam.voice.transcription import simulate_provider_delay
@@ -36,6 +36,35 @@ class SpeakerVerificationProvider(Protocol):
     """Scores an embedding against an enrolled template."""
 
     def score(self, template: Sequence[float], embedding: Sequence[float]) -> float: ...
+
+
+@runtime_checkable
+class SpeechAwareEmbeddingProvider(Protocol):
+    """Optional local speech preparation with a caller-owned duration floor."""
+
+    def embed_speech(
+        self,
+        audio: ValidatedAudio,
+        *,
+        minimum_speech_seconds: float,
+        timeout_seconds: float,
+    ) -> Sequence[float]: ...
+
+
+def embed_speaker(
+    provider: SpeakerEmbeddingProvider,
+    audio: ValidatedAudio,
+    *,
+    minimum_speech_seconds: float,
+    timeout_seconds: float,
+) -> Sequence[float]:
+    if isinstance(provider, SpeechAwareEmbeddingProvider):
+        return provider.embed_speech(
+            audio,
+            minimum_speech_seconds=minimum_speech_seconds,
+            timeout_seconds=timeout_seconds,
+        )
+    return provider.embed(audio, timeout_seconds=timeout_seconds)
 
 
 def normalize(vector: Sequence[float]) -> tuple[float, ...]:
@@ -121,7 +150,9 @@ __all__ = [
     "CosineSpeakerVerification",
     "FakeSpeakerEmbeddingProvider",
     "SpeakerEmbeddingProvider",
+    "SpeechAwareEmbeddingProvider",
     "SpeakerVerificationProvider",
     "cosine_similarity",
+    "embed_speaker",
     "normalize",
 ]

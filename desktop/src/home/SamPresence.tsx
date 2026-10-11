@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { memo, type CSSProperties } from "react";
 import type { VoiceState } from "../session";
 
 /**
@@ -7,7 +7,7 @@ import type { VoiceState } from "../session";
  * real interaction state (see ``session.tsx``); the listening rings follow
  * the real microphone level. Reduced motion freezes every animation.
  *
- *   idle        slow breathing glow
+ *   idle        still glow, with no continuous rendering
  *   listening   outward rings that swell with the owner's voice
  *   thinking    counter-rotating inner arcs
  *   speaking    a steady pulse with a waveform ring
@@ -15,7 +15,7 @@ import type { VoiceState } from "../session";
  *   error       a brief, muted warm tint
  *   offline     dim and still
  */
-export function SamPresence({
+export const SamPresence = memo(function SamPresence({
   state,
   level = 0,
   attention = false,
@@ -89,7 +89,7 @@ export function SamPresence({
         </g>
         <path
           className="wave"
-          d={wavePath(200, 200, 112, 7, 36)}
+          d={WAVE_PATH}
         />
         <circle className="core-glow" cx="200" cy="200" r="78" filter="url(#sam-blur)" />
         <circle className="core" cx="200" cy="200" r="70" fill="url(#sam-core)" />
@@ -97,7 +97,7 @@ export function SamPresence({
       </svg>
     </div>
   );
-}
+});
 
 const STATE_WORDS: Record<VoiceState, string> = {
   idle: "ready",
@@ -123,3 +123,5 @@ function wavePath(cx: number, cy: number, r: number, amplitude: number, lobes: n
   }
   return `M${points.join(" L")} Z`;
 }
+
+const WAVE_PATH = wavePath(200, 200, 112, 7, 36);

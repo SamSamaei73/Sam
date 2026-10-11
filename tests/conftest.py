@@ -44,6 +44,7 @@ PROVIDER_CREDENTIAL_ENV = frozenset(
         "GOOGLE_API_KEY",
         "GOOGLE_GENAI_API_KEY",
         "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
         "XAI_API_KEY",
         "DESKTOP_BRIDGE_TOKEN",
         "DESKTOP_STEP_UP_SECRET",
@@ -54,6 +55,19 @@ PROVIDER_CREDENTIAL_ENV = frozenset(
         "GOOGLE_APPLICATION_CREDENTIALS",
     }
     | claude_subscription.STRIPPED_ENV
+)
+
+# Configuration has its own shape/validation; it is isolated just like keys,
+# but is not a credential and must not receive synthetic key strings in the
+# subprocess isolation regression test.
+PROVIDER_CONFIGURATION_ENV = frozenset(
+    {
+        "OPENROUTER_MODEL",
+        "OPENROUTER_TTS_MODEL",
+        "OPENROUTER_TTS_VOICE",
+        "SAM_OPENROUTER_ENV_FILE",
+        "LOCAL_SPEAKER_MODEL",
+    }
 )
 
 
@@ -94,12 +108,41 @@ def _sources_without_the_developers_dotenv(
     return sources
 
 
+_collection_environment = pytest.MonkeyPatch()
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Isolate import-time application construction before test collection.
+
+    ``sam.main`` creates its default app when imported. Function fixtures run
+    later, so they alone cannot prevent collection from using real credentials,
+    an invalid model override, production storage, or the owner's Keychain.
+    """
+
+    for name in (
+        PROVIDER_CREDENTIAL_ENV
+        | PROVIDER_CONFIGURATION_ENV
+        | {"APP_ENV", "SAM_STORAGE", "SAM_KEYCHAIN"}
+    ):
+        _collection_environment.delenv(name, raising=False)
+    _collection_environment.setenv("SAM_KEYCHAIN", "off")
+    _collection_environment.setattr(
+        Settings,
+        "settings_customise_sources",
+        classmethod(_sources_without_the_developers_dotenv),
+    )
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    _collection_environment.undo()
+
+
 @pytest.fixture(autouse=True)
 def _hermetic_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove every provider credential from the process environment, and stop
     ``Settings`` from reading the developer's real ``.env``, before each test."""
 
-    for name in PROVIDER_CREDENTIAL_ENV:
+    for name in PROVIDER_CREDENTIAL_ENV | PROVIDER_CONFIGURATION_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(
         Settings,

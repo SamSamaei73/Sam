@@ -12,8 +12,8 @@
 //! * a cleared environment with exactly: production mode, a per-launch
 //!   random bridge token (never shown to the webview), a free loopback port,
 //!   `HOME`/`TMPDIR` (for the owner's data directory and the Keychain) and a
-//!   minimal `PATH`. No provider credential is ever passed: in production the
-//!   backend reads them from the Keychain only;
+//!   minimal `PATH`. Explicit OpenRouter settings and the fixed local speaker
+//!   model selector are allowlisted; other credentials use the Keychain;
 //! * the backend binds 127.0.0.1 only; readiness is a finite wait on its
 //!   public `/health`; if it does not become ready the shell stays up with no
 //!   backend (every bridge call is `not_configured`: the UI shows Sam as
@@ -23,6 +23,7 @@
 //! * duplicate instances: the backend's own instance lock refuses a second
 //!   Sam for the same data directory (it then serves only a BLOCKED status).
 
+use std::ffi::OsString;
 use std::io::Read;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -36,10 +37,41 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(45);
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const MINIMAL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
+/// Explicit owner configuration only. Never inherit the surrounding environment:
+/// the backend validates these values and selectively reads the supplied file.
+fn openrouter_environment(get: impl Fn(&str) -> Option<OsString>) -> Vec<(&'static str, OsString)> {
+    [
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_MODEL",
+        "OPENROUTER_TTS_MODEL",
+        "OPENROUTER_TTS_VOICE",
+        "SAM_OPENROUTER_ENV_FILE",
+    ]
+    .into_iter()
+    .filter_map(|name| get(name).map(|value| (name, value)))
+    .collect()
+}
+
+/// Match Python's trusted selector exactly. Reject invalid configuration rather
+/// than silently starting a different model with an older compatible profile.
+fn local_speaker_environment(
+    get: impl FnOnce(&str) -> Option<OsString>,
+) -> Result<Option<(&'static str, OsString)>, SidecarError> {
+    const NAME: &str = "LOCAL_SPEAKER_MODEL";
+    let Some(value) = get(NAME) else {
+        return Ok(None);
+    };
+    if !matches!(value.to_str(), Some("ecapa" | "wespeaker")) {
+        return Err(SidecarError::InvalidConfiguration);
+    }
+    Ok(Some((NAME, value)))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidecarError {
     NotBundled,
     Unsafe,
+    InvalidConfiguration,
     Spawn,
     NotReady,
 }
@@ -49,6 +81,7 @@ impl SidecarError {
         match self {
             SidecarError::NotBundled => "backend_not_bundled",
             SidecarError::Unsafe => "backend_path_unsafe",
+            SidecarError::InvalidConfiguration => "backend_configuration_invalid",
             SidecarError::Spawn => "backend_spawn_failed",
             SidecarError::NotReady => "backend_not_ready",
         }
@@ -123,6 +156,7 @@ impl Sidecar {
     /// `data_dir` is only for the headless self-test (a temporary directory);
     /// a normal launch uses the owner's application-data directory.
     pub fn start(python: &Path, data_dir: Option<&Path>) -> Result<Sidecar, SidecarError> {
+        let speaker_environment = local_speaker_environment(|name| std::env::var_os(name))?;
         let token = random_token()?;
         let port = free_loopback_port()?;
         let backend_dir = python
@@ -134,6 +168,8 @@ impl Sidecar {
         command
             .args(["-I", "-B", "-m", BACKEND_MODULE])
             .env_clear()
+            .envs(openrouter_environment(|name| std::env::var_os(name)))
+            .envs(speaker_environment)
             .env("APP_ENV", "production")
             .env("LOG_LEVEL", "INFO")
             .env("API_PORT", port.to_string())
@@ -315,6 +351,69 @@ pub fn self_test(data_dir: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_explicit_openrouter_settings_are_forwarded() {
+        let values = openrouter_environment(|name| match name {
+            "OPENROUTER_API_KEY" => Some("test-credential".into()),
+            "OPENROUTER_MODEL" => Some("openai/gpt-4.1-mini".into()),
+            "OPENROUTER_TTS_MODEL" => Some("openai/gpt-4o-mini-tts-2025-12-15".into()),
+            "OPENROUTER_TTS_VOICE" => Some("alloy".into()),
+            "SAM_OPENROUTER_ENV_FILE" => Some("/owner/config/.env".into()),
+            _ => panic!("unrelated environment requested"),
+        });
+        assert_eq!(values.len(), 5);
+        assert_eq!(values[0].0, "OPENROUTER_API_KEY");
+        assert_eq!(values[4].1, OsString::from("/owner/config/.env"));
+        assert!(openrouter_environment(|_| None).is_empty());
+    }
+
+    #[test]
+    fn only_the_selected_local_speaker_model_is_forwarded() {
+        for model in ["ecapa", "wespeaker"] {
+            let selected = local_speaker_environment(|name| match name {
+                "LOCAL_SPEAKER_MODEL" => Some(model.into()),
+                _ => panic!("unrelated environment requested"),
+            })
+            .unwrap();
+            let mut command = Command::new("unused-test-executable");
+            command.env_clear().envs(selected);
+            let forwarded = command.get_envs().collect::<Vec<_>>();
+            assert_eq!(forwarded.len(), 1);
+            assert_eq!(forwarded[0].0, "LOCAL_SPEAKER_MODEL");
+            assert_eq!(forwarded[0].1, Some(std::ffi::OsStr::new(model)));
+        }
+        assert_eq!(local_speaker_environment(|_| None), Ok(None));
+    }
+
+    #[test]
+    fn invalid_speaker_selectors_are_refused_without_falling_back() {
+        for value in [
+            "",
+            "ECAPA",
+            "WeSpeaker",
+            " ecapa",
+            "wespeaker ",
+            "ecapa\n",
+            "ecapa\0",
+            "other/model",
+            "../ecapa",
+            "$(wespeaker)",
+            "ecapa;wespeaker",
+            "ｅcapa",
+        ] {
+            assert_eq!(
+                local_speaker_environment(|_| Some(value.into())),
+                Err(SidecarError::InvalidConfiguration),
+                "{value:?}",
+            );
+        }
+        use std::os::unix::ffi::OsStringExt;
+        assert_eq!(
+            local_speaker_environment(|_| Some(OsString::from_vec(vec![0xff]))),
+            Err(SidecarError::InvalidConfiguration),
+        );
+    }
+
     #[test]
     fn only_a_plain_account_name_is_passed_on() {
         let saved = std::env::var("USER").ok();

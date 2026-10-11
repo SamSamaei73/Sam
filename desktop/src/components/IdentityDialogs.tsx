@@ -211,9 +211,11 @@ export function EnrollmentDialog({
         </>
       ) : (
         <>
+          <p className="muted">{t("enroll.intro")}</p>
           <ul className="step-list">
-            <li lang="fa" dir="rtl">{t("enroll.promptFa")}</li>
             <li lang="en" dir="ltr">{t("enroll.promptEn")}</li>
+            <li lang="en" dir="ltr">{t("enroll.promptEn2")}</li>
+            <li lang="en" dir="ltr">{t("enroll.promptEn3")}</li>
           </ul>
           <div className="card-row" style={{ marginBottom: 12 }}>
             <span>

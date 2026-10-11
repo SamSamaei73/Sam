@@ -11,12 +11,14 @@ import {
 import { BridgeError, toBridgeError } from "./bridge/bridge";
 import type { OperationResult, ResponseLanguage, VoiceSetupState } from "./bridge/types";
 import type { ChatMessage } from "./components/MessageBubble";
+import { translate } from "./i18n/strings";
 import { playSynthesizedAudio, type Playback } from "./lib/audioPlayback";
-import { detectLanguage } from "./lib/language";
+import { detectLanguage, directionFor, languageBase, uiLanguageFor } from "./lib/language";
 import { Listener } from "./lib/listener";
-import { browserLocalSpeech, type LocalSpeechOutput, type SpeechHandle } from "./lib/localSpeech";
+import { localSpeechOutput, type LocalSpeechOutput, type SpeechHandle, type SpeechOutcome } from "./lib/localSpeech";
 import { Recorder, RecorderError } from "./lib/recorder";
-import { SLEEP_TIMING, TURN_TIMING } from "./lib/vad";
+import { SLEEP_TIMING, TURN_TIMING, type SegmentEnd } from "./lib/vad";
+import { MAX_RECORDING_SAMPLES, TARGET_SAMPLE_RATE, joinWavSegments } from "./lib/wav";
 import { useSam } from "./state";
 
 /**
@@ -69,6 +71,8 @@ export interface HandsFreeInfo {
   setupState: VoiceSetupState | null;
   /** macOS microphone access was refused (not a Sam permission). */
   micDenied: boolean;
+  /** The local listening pipeline stopped and may be retried. */
+  micFailed: boolean;
 }
 
 export interface Conversation {
@@ -99,6 +103,30 @@ const IDENTITY_STOPS = new Set([
   "voice_identity_unavailable",
   "identity_not_configured",
 ]);
+
+interface BufferedVoiceSegment {
+  audio: string;
+  samples: number;
+  voicedSeconds: number;
+}
+
+interface PendingWakeCheck {
+  generation: number;
+  segments: BufferedVoiceSegment[];
+  samples: number;
+}
+
+const bufferedSamples = (segments: readonly BufferedVoiceSegment[]) =>
+  segments.reduce((total, segment) => total + segment.samples, 0);
+
+/** The wake candidate and its command share the same bounded capture budget. */
+function captureRemaining(listener: Listener, usedSamples: number): void {
+  if (usedSamples >= MAX_RECORDING_SAMPLES) listener.pause();
+  else listener.setTiming({
+    endSilenceMs: TURN_TIMING.endSilenceMs,
+    maxSegmentMs: ((MAX_RECORDING_SAMPLES - usedSamples) / TARGET_SAMPLE_RATE) * 1000,
+  });
+}
 
 let conversationCounter = 0;
 let messageCounter = 0;
@@ -175,10 +203,10 @@ export function useSession(): SessionValue {
 
 export function SessionProvider({
   children,
-  speech = browserLocalSpeech(),
+  speech = localSpeechOutput(),
 }: {
   children: ReactNode;
-  /** Local (on-device) voice for hands-free replies; null: Sam doesn't speak. */
+  /** Local voice for voice replies; unavailable voices use confirmed speech. */
   speech?: LocalSpeechOutput | null;
 }) {
   const {
@@ -204,14 +232,43 @@ export function SessionProvider({
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [level, setLevel] = useState(0);
+  const levelMeter = useRef({ value: 0, time: -Infinity });
+  const publishLevel = useCallback((value: number) => {
+    // The meter needs a smooth visual cadence, not an update for every audio
+    // buffer. Quantization also keeps steady room noise from rerendering Home.
+    const next = Math.round(value * 50) / 50;
+    const now = performance.now();
+    if (next === levelMeter.current.value) return;
+    if (next > 0 && now - levelMeter.current.time < 80) return;
+    levelMeter.current = { value: next, time: next === 0 ? -Infinity : now };
+    setLevel(next);
+  }, []);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [error, setErrorState] = useState<string | null>(null);
   const recorder = useRef<Recorder | null>(null);
   const phaseRef = useRef<HandsFreePhase>("off");
+  const lastVoiceLanguage = useRef<ResponseLanguage | null>(null);
   const speechHandle = useRef<SpeechHandle | null>(null);
+  const speechGeneration = useRef(0);
+  const automaticSpeech = useRef<(message: ChatMessage, isCurrent: () => boolean) => Promise<void>>(async () => undefined);
   const playback = useRef<Playback | null>(null);
   const finishRef = useRef<() => void>(() => undefined);
   const errorTimer = useRef<number | undefined>(undefined);
+  // Text context only: every request still supplies fresh audio for owner verification.
+  const voiceContextId = useRef<string | undefined>(undefined);
+  const contextGeneration = useRef(0);
+  const contextEnd = useRef<Promise<void> | null>(null);
+  const clearVoiceContext = useCallback(() => {
+    const id = voiceContextId.current;
+    voiceContextId.current = undefined;
+    contextGeneration.current++;
+    // Serialize erasure before the next turn, including a first turn still in flight.
+    const ending = (contextEnd.current ?? Promise.resolve())
+      .then(() => bridge.endVoiceConversation(id))
+      .then(() => undefined, () => undefined);
+    contextEnd.current = ending;
+    void ending.then(() => { if (contextEnd.current === ending) contextEnd.current = null; });
+  }, [bridge]);
 
   const setError = useCallback((message: string | null) => {
     window.clearTimeout(errorTimer.current);
@@ -223,9 +280,12 @@ export function SessionProvider({
     () => () => {
       recorder.current?.cancel();
       playback.current?.stop();
+      speechGeneration.current++;
+      speechHandle.current?.stop();
+      clearVoiceContext();
       window.clearTimeout(errorTimer.current);
     },
-    [],
+    [clearVoiceContext],
   );
 
   useEffect(() => {
@@ -255,17 +315,25 @@ export function SessionProvider({
 
   const micError = useCallback(
     (code: string) =>
-      t(`mic.${code === "denied" || code === "unsupported" || code === "empty" ? code : "failed"}` as "mic.failed"),
+      t(`mic.${code === "denied" || code === "unsupported" || code === "empty" || code === "limit" ? code : "failed"}` as "mic.failed"),
     [t],
   );
 
   const sendVoice = useCallback(
     async (audioBase64: string) => {
+      const generation = speechGeneration.current;
+      const context = contextGeneration.current;
+      const isCurrent = () => context === contextGeneration.current && generation === speechGeneration.current;
       setBusy(true);
       try {
+        if (contextEnd.current) await contextEnd.current;
+        if (!isCurrent()) return;
         const result = await confirmable((confirmationId) =>
-          bridge.voiceUtterance(audioBase64, confirmationId, prefs.responseLanguage),
+          bridge.voiceUtterance(audioBase64, confirmationId, prefs.responseLanguage, false, voiceContextId.current),
         );
+        if (!isCurrent()) return;
+        voiceContextId.current = result.status === "ok" ? result.conversation_id ?? undefined : undefined;
+        if (result.status !== "ok") clearVoiceContext();
         void refreshIdentity();
         if (result.reason_code === "owner_verification_required") {
           // A non-owner speaker is stopped before any transcription: a fixed
@@ -273,11 +341,12 @@ export function SessionProvider({
           const notice = append({ role: "notice", text: t("voice.ownerRequired"), status: "failed" });
           setExchange({ heard: null, reply: notice });
         } else if (result.status === "ok" && result.transcript) {
+          lastVoiceLanguage.current = result.language ?? detectLanguage(result.transcript) ?? "en";
           const heard = append({
             role: result.speaker === "guest" ? "guest" : "user",
             text: result.transcript,
             source: "voice",
-            language: detectLanguage(result.transcript),
+            language: result.language ?? detectLanguage(result.transcript),
           });
           const reply = result.reply
             ? append({
@@ -289,6 +358,9 @@ export function SessionProvider({
               })
             : null;
           setExchange({ heard, reply });
+          if (reply && generation === speechGeneration.current) {
+            await automaticSpeech.current(reply, () => generation === speechGeneration.current);
+          }
         } else {
           // Secret-looking or otherwise ineligible transcripts are never shown.
           const notice = append({
@@ -305,7 +377,7 @@ export function SessionProvider({
         setBusy(false);
       }
     },
-    [append, bridge, confirmable, prefs.responseLanguage, refreshIdentity, setError, t],
+    [append, bridge, clearVoiceContext, confirmable, prefs.responseLanguage, refreshIdentity, setError, t],
   );
 
   const stopListening = useCallback(async () => {
@@ -314,14 +386,14 @@ export function SessionProvider({
     recorder.current = null;
     setRecording(false);
     setRecordingSeconds(0);
-    setLevel(0);
+    publishLevel(0);
     try {
       const recorded = await current.stop();
       await sendVoice(recorded.base64);
     } catch (failure) {
       setError(micError(failure instanceof RecorderError ? failure.code : "failed"));
     }
-  }, [micError, sendVoice, setError]);
+  }, [micError, publishLevel, sendVoice, setError]);
 
   useEffect(() => {
     finishRef.current = () => void stopListening();
@@ -334,26 +406,28 @@ export function SessionProvider({
     const next = new Recorder(
       audioEnvironment,
       () => finishRef.current(),
-      (value) => setLevel(value),
+      publishLevel,
     );
     recorder.current = next;
     try {
       await next.start();
+      if (recorder.current !== next || !next.isRecording) return;
       setRecording(true);
       setExchange(null);
     } catch (failure) {
+      if (recorder.current !== next) return;
       recorder.current = null;
       setError(micError(failure instanceof RecorderError ? failure.code : "failed"));
     }
-  }, [audioEnvironment, busy, micError, setError]);
+  }, [audioEnvironment, busy, micError, publishLevel, setError]);
 
   const cancelListening = useCallback(() => {
     recorder.current?.cancel();
     recorder.current = null;
     setRecording(false);
     setRecordingSeconds(0);
-    setLevel(0);
-  }, []);
+    publishLevel(0);
+  }, [publishLevel]);
 
   const sendText = useCallback(
     async (text: string, privateMessage: boolean) => {
@@ -398,7 +472,11 @@ export function SessionProvider({
   const profileFor = useCallback(
     (language: ResponseLanguage): string | null => {
       if (status?.speech_output !== "configured") return null;
-      const capable = (profiles ?? []).filter((p) => p.languages.includes(language));
+      const base = languageBase(language);
+      if (!base) return null;
+      const capable = (profiles ?? []).filter((p) => p.languages.some((candidate) =>
+        candidate === language || languageBase(candidate) === base,
+      ));
       const preferred = capable.find((p) => p.profile_id === prefs.readAloudVoice);
       return (preferred ?? capable[0])?.profile_id ?? null;
     },
@@ -406,40 +484,67 @@ export function SessionProvider({
   );
 
   const stopSpeaking = useCallback(() => {
+    speechGeneration.current++;
     playback.current?.stop();
     playback.current = null;
     setSpeakingId(null);
     speechHandle.current?.stop(); // a hands-free reply: back to listening
   }, []);
 
-  const speak = useCallback(
-    async (message: ChatMessage) => {
+  const speakThroughProvider = useCallback(
+    (message: ChatMessage, isCurrent: () => boolean): Promise<void> => {
       const language = message.language ?? detectLanguage(message.text) ?? "en";
       const profile = profileFor(language);
-      if (!profile) return;
-      stopSpeaking();
-      setBusy(true);
-      try {
-        // Speech sends text to a provider: every synthesis asks the owner.
-        const result = await confirmable((confirmationId) =>
-          bridge.speak({ text: message.text, voiceProfile: profile, language, confirmationId }),
-        );
-        if (result.status !== "ok" || !result.audio_base64) {
-          setError(result.message ?? "Sam couldn't read that aloud.");
-          return;
-        }
-        setSpeakingId(message.id);
-        playback.current = playSynthesizedAudio(result.audio_base64, result.audio_format, () => {
-          playback.current = null;
-          setSpeakingId(null);
-        });
-      } catch {
-        setError("Sam couldn't read that aloud.");
-      } finally {
-        setBusy(false);
+      if (!profile) {
+        setError("Sam couldn't speak this reply. No voice is available for this language.");
+        return Promise.resolve();
       }
+      return new Promise<void>((resolve) => {
+        let done = false;
+        let output: Playback | null = null;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          output?.stop();
+          if (playback.current === output) playback.current = null;
+          if (speechHandle.current === handle) {
+            speechHandle.current = null;
+            setSpeakingId(null);
+            setBusy(false);
+          }
+          resolve();
+        };
+        const handle: SpeechHandle = { stop: finish };
+        speechHandle.current = handle;
+        setBusy(true);
+        void (async () => {
+          try {
+            // Recheck cancellation before the confirmed retry sends any text.
+            const result = await confirmable((confirmationId) => {
+              if (done || !isCurrent()) throw new Error("speech_cancelled");
+              return bridge.speak({ text: message.text, voiceProfile: profile, language, confirmationId });
+            });
+            if (done || !isCurrent()) { finish(); return; }
+            if (result.status !== "ok" || !result.audio_base64) {
+              setError(result.message ?? "Sam couldn't read that aloud.");
+              finish();
+              return;
+            }
+            setSpeakingId(message.id);
+            output = playSynthesizedAudio(result.audio_base64, result.audio_format, (failed) => {
+              if (failed && isCurrent()) setError("Sam couldn't play this reply. Check your sound output.");
+              finish();
+            });
+            if (!done) playback.current = output;
+            else output.stop();
+          } catch {
+            if (!done && isCurrent()) setError("Sam couldn't read that aloud.");
+            finish();
+          }
+        })();
+      });
     },
-    [bridge, confirmable, profileFor, setError, stopSpeaking],
+    [bridge, confirmable, profileFor, setError],
   );
 
   // ------------------------------------------------------------ hands-free
@@ -460,18 +565,30 @@ export function SessionProvider({
   const [heardSpeech, setHeardSpeech] = useState(false);
   const [justWoke, setJustWoke] = useState(false);
   const [micDenied, setMicDenied] = useState(false);
+  const [micFailed, setMicFailed] = useState(false);
   const listenerRef = useRef<Listener | null>(null);
   const idleTimer = useRef<number | undefined>(undefined);
   const wakeTimer = useRef<number | undefined>(undefined);
   const cooldownUntil = useRef(0);
-  const wakeBusy = useRef(false);
+  const wakeBusy = useRef<PendingWakeCheck | null>(null);
+  const voiceGeneration = useRef(0);
+  const bufferedTurn = useRef<BufferedVoiceSegment[]>([]);
+  const runTurnRef = useRef<(audio: string) => Promise<void>>(async () => undefined);
+  const invalidateVoiceRequests = useCallback(() => {
+    voiceGeneration.current++;
+    wakeBusy.current?.segments.splice(0);
+    wakeBusy.current = null;
+    bufferedTurn.current = [];
+    clearVoiceContext();
+  }, [clearVoiceContext]);
   const setPhase = useCallback((next: HandsFreePhase) => {
     phaseRef.current = next;
     setPhaseState(next);
-  }, []);
+    if (next !== "attending") publishLevel(0);
+  }, [publishLevel]);
 
   const activation = status?.voice_activation ?? "unavailable";
-  const enrolled = identity?.available === true && identity.enrolled === true;
+  const enrolled = identity?.available === true && identity.enrolled === true && identity.profile_compatible !== false;
   // Owner voice setup still to do: its own state, never a generic block. Not
   // offered in Guest Mode (a guest can't set up or change the owner's voice).
   const setupState: VoiceSetupState | null =
@@ -488,14 +605,12 @@ export function SessionProvider({
     (connection === "connected" || connection === "degraded") &&
     homeActive &&
     visible &&
-    !micDenied;
+    !micDenied && !micFailed;
 
   const clearIdle = useCallback(() => window.clearTimeout(idleTimer.current), []);
-  /** Read through a function so TypeScript doesn't narrow a mutable ref. */
-  const handsFreeStopped = () => phaseRef.current === "off";
-
   const sleep = useCallback(() => {
     clearIdle();
+    invalidateVoiceRequests();
     const listener = listenerRef.current;
     if (!listener) return;
     setPhase("sleeping");
@@ -503,17 +618,72 @@ export function SessionProvider({
     listener.setTiming(SLEEP_TIMING);
     listener.resume();
     cooldownUntil.current = Date.now() + WAKE_COOLDOWN_MS;
-  }, [clearIdle, setPhase]);
+  }, [clearIdle, invalidateVoiceRequests, setPhase]);
 
-  const attend = useCallback(() => {
+  const rejectLongTurn = useCallback(() => {
+    sleep();
+    const notice = append({ role: "notice", text: t("mic.limit"), status: "failed" });
+    setExchange({ heard: null, reply: notice });
+  }, [append, sleep, t]);
+
+  const armIdle = useCallback(() => {
+    clearIdle();
+    if (phaseRef.current !== "attending" || listenerRef.current?.isSpeaking) return;
+    idleTimer.current = window.setTimeout(() => {
+      if (phaseRef.current === "attending" && !listenerRef.current?.isSpeaking) sleep();
+    }, CONVERSATION_IDLE_MS);
+  }, [clearIdle, sleep]);
+
+  const flushBufferedTurn = useCallback(() => {
+    const segments = bufferedTurn.current;
+    if (segments.length === 0) return;
+    bufferedTurn.current = [];
+    if (bufferedSamples(segments) >= MAX_RECORDING_SAMPLES) {
+      rejectLongTurn();
+      return;
+    }
+    // A size boundary can leave only trailing silence after a bare wake word.
+    // It ends capture, but it must not become a speaker-verification request.
+    if (!segments.some((segment) => segment.voicedSeconds > 0)) {
+      armIdle();
+      return;
+    }
+    try {
+      void runTurnRef.current(joinWavSegments(segments.map((segment) => segment.audio)));
+    } catch {
+      sleep();
+      setError("Sam couldn't finish that recording. Please try again.");
+    }
+  }, [armIdle, rejectLongTurn, setError, sleep]);
+
+  const attend = useCallback((preserveBufferedAudio = false) => {
     const listener = listenerRef.current;
     if (!listener) return;
     setPhase("attending");
-    listener.setTiming(TURN_TIMING);
-    listener.resume();
+    captureRemaining(listener, bufferedSamples(bufferedTurn.current));
+    listener.resume({ preserveBufferedAudio });
     clearIdle();
-    idleTimer.current = window.setTimeout(() => sleep(), CONVERSATION_IDLE_MS);
-  }, [clearIdle, setPhase, sleep]);
+    if (!listener.isSpeaking && bufferedTurn.current.length > 0) flushBufferedTurn();
+    else armIdle();
+  }, [armIdle, clearIdle, flushBufferedTurn, setPhase]);
+
+  const onSpeech = useCallback((active: boolean) => {
+    setHeardSpeech(active);
+    if (phaseRef.current !== "attending") return;
+    if (active) clearIdle();
+    else {
+      armIdle();
+      // A wake result can arrive during the first few speech frames. If that
+      // candidate was just a click, release an earlier completed turn once
+      // the segmenter's synchronous end callbacks have finished. A genuine
+      // completed segment flushes itself before this check runs.
+      queueMicrotask(() => {
+        if (phaseRef.current === "attending" && listenerRef.current?.isSpeaking === false && bufferedTurn.current.length > 0) {
+          flushBufferedTurn();
+        }
+      });
+    }
+  }, [armIdle, clearIdle, flushBufferedTurn]);
 
   const flashAwake = useCallback(() => {
     setJustWoke(true);
@@ -521,40 +691,85 @@ export function SessionProvider({
     wakeTimer.current = window.setTimeout(() => setJustWoke(false), WAKE_FLASH_MS);
   }, []);
 
-  /** Speak a hands-free reply with a LOCAL voice; resolves when it ends. */
-  const speakLocally = useCallback((text: string, language: "fa" | "en") => {
-    return new Promise<void>((resolve) => {
-      const handle = speechRef.current?.speak(text, language, () => {
-        speechHandle.current = null;
-        resolve();
+  /** The listener stays paused until actual speech ends or is stopped. */
+  const speakLocally = useCallback((text: string, language: ResponseLanguage) => {
+    return new Promise<SpeechOutcome>((resolve) => {
+      let ended = false;
+      let handle: SpeechHandle | null | undefined = null;
+      handle = speechRef.current?.speak(text, language, (outcome = "ended") => {
+        ended = true;
+        if (speechHandle.current === handle) {
+          speechHandle.current = null;
+          setSpeakingId(null);
+        }
+        resolve(outcome);
       });
-      if (!handle) resolve();
-      else speechHandle.current = handle;
+      if (!handle) resolve("unavailable");
+      else if (!ended) speechHandle.current = handle;
     });
   }, []);
 
+  const speakAutomatically = useCallback(async (message: ChatMessage, isCurrent: () => boolean) => {
+    setSpeakingId(message.id);
+    const outcome = await speakLocally(message.text, message.language ?? detectLanguage(message.text) ?? "en");
+    if (isCurrent() && (outcome === "unavailable" || outcome === "failed")) {
+      await speakThroughProvider(message, isCurrent);
+    }
+    if (isCurrent()) setSpeakingId(null);
+  }, [speakLocally, speakThroughProvider]);
+
+  useEffect(() => { automaticSpeech.current = speakAutomatically; }, [speakAutomatically]);
+
+  const speak = useCallback(async (message: ChatMessage) => {
+    const previous = phaseRef.current;
+    if (previous === "thinking") clearVoiceContext();
+    // Cancel the prior reply's continuation before stopping its playback.
+    voiceGeneration.current++;
+    wakeBusy.current = null;
+    bufferedTurn.current = [];
+    const voice = voiceGeneration.current;
+    stopSpeaking();
+    clearIdle();
+    listenerRef.current?.pause();
+    if (previous !== "off") setPhase("speaking");
+    const generation = speechGeneration.current;
+    const isCurrent = () => generation === speechGeneration.current && voice === voiceGeneration.current;
+    await speakThroughProvider(message, isCurrent);
+    if (voice === voiceGeneration.current && phaseRef.current !== "off") {
+      if (previous === "sleeping") sleep();
+      else attend();
+    }
+  }, [attend, clearIdle, clearVoiceContext, setPhase, sleep, speakThroughProvider, stopSpeaking]);
+
   const runTurn = useCallback(
     async (audioBase64: string) => {
+      const generation = voiceGeneration.current;
+      const isCurrent = () => generation === voiceGeneration.current && phaseRef.current !== "off";
+      setPhase("thinking");
       clearIdle();
       listenerRef.current?.pause(); // Sam doesn't hear while it thinks or speaks
-      setPhase("thinking");
       setError(null);
       try {
+        if (contextEnd.current) await contextEnd.current;
+        if (!isCurrent()) return;
         const result = await confirmable((confirmationId) =>
-          bridge.voiceUtterance(audioBase64, confirmationId, prefs.responseLanguage, true),
+          bridge.voiceUtterance(audioBase64, confirmationId, prefs.responseLanguage, true, voiceContextId.current),
         );
-        if (handsFreeStopped()) return;
+        if (!isCurrent()) return;
+        voiceContextId.current = result.status === "ok" ? result.conversation_id ?? undefined : undefined;
+        if (result.status !== "ok") clearVoiceContext();
         void refreshIdentity();
         if (result.reason_code === "conversation_ended") {
           sleep();
           return;
         }
         if (result.status === "ok" && result.transcript) {
+          lastVoiceLanguage.current = result.language ?? detectLanguage(result.transcript) ?? "en";
           const heard = append({
             role: result.speaker === "guest" ? "guest" : "user",
             text: result.transcript,
             source: "voice",
-            language: detectLanguage(result.transcript),
+            language: result.language ?? detectLanguage(result.transcript),
           });
           const reply = result.reply
             ? append({
@@ -568,13 +783,33 @@ export function SessionProvider({
           setExchange({ heard, reply });
           if (reply) {
             setPhase("speaking");
-            await speakLocally(reply.text, reply.language ?? detectLanguage(reply.text) ?? "en");
+            await speakAutomatically(reply, isCurrent);
           }
-          if (!handsFreeStopped()) attend();
+          if (isCurrent()) attend();
           return;
         }
         if (result.reason_code === "voice_not_heard") {
-          attend(); // nothing usable was said: keep listening
+          const spokenLanguage = prefs.responseLanguage === "auto"
+            ? lastVoiceLanguage.current ?? prefs.uiLanguage
+            : prefs.responseLanguage;
+          const language = uiLanguageFor(spokenLanguage, prefs.uiLanguage);
+          const notice = append({
+            role: "notice",
+            text: translate(language, "voice.moreSpeech"),
+            status: "failed",
+            language,
+            direction: directionFor(language),
+          });
+          setExchange({ heard: null, reply: notice });
+          // Keep capture paused while the retry cue plays. The notice remains
+          // visible afterward; an unavailable local voice cannot block retry.
+          setPhase("speaking");
+          try {
+            await speakLocally(translate(language, "voice.repeatQuestion"), language);
+          } catch {
+            // The visible notice is sufficient if local speech cannot start.
+          }
+          if (isCurrent()) attend();
           return;
         }
         const notice = append({
@@ -588,41 +823,75 @@ export function SessionProvider({
         if (IDENTITY_STOPS.has(result.reason_code ?? "")) sleep();
         else attend();
       } catch (failure) {
+        if (!isCurrent()) return;
         setError(failureText(failure));
-        if (!handsFreeStopped()) sleep();
+        sleep();
       }
     },
-    [append, attend, bridge, clearIdle, confirmable, prefs.responseLanguage, refreshIdentity, setError, setPhase, sleep, speakLocally],
+    [append, attend, bridge, clearIdle, clearVoiceContext, confirmable, prefs.responseLanguage, prefs.uiLanguage, refreshIdentity, setError, setPhase, sleep, speakAutomatically, speakLocally],
   );
 
+  useEffect(() => {
+    runTurnRef.current = runTurn;
+  }, [runTurn]);
+
   const onSegment = useCallback(
-    async (audioBase64: string, seconds: number) => {
+    async (audioBase64: string, seconds: number, endedBy: SegmentEnd, voicedSeconds: number) => {
       const current = phaseRef.current;
+      const listener = listenerRef.current;
+      if (!listener) return;
+      const segment = { audio: audioBase64, samples: Math.round(seconds * TARGET_SAMPLE_RATE), voicedSeconds };
       if (current === "attending") {
-        void runTurn(audioBase64);
+        bufferedTurn.current.push(segment);
+        const samples = bufferedSamples(bufferedTurn.current);
+        if (endedBy === "limit" || samples >= MAX_RECORDING_SAMPLES) rejectLongTurn();
+        else if (endedBy === "silence") flushBufferedTurn();
+        else captureRemaining(listener, samples);
         return;
       }
       if (current !== "sleeping") return;
-      if (wakeBusy.current || Date.now() < cooldownUntil.current || seconds > WAKE_MAX_SECONDS) return;
-      wakeBusy.current = true;
+      const pending = wakeBusy.current;
+      if (pending) {
+        pending.segments.push(segment);
+        pending.samples += segment.samples;
+        captureRemaining(listener, pending.samples);
+        return;
+      }
+      if (Date.now() < cooldownUntil.current || seconds > WAKE_MAX_SECONDS) return;
+      const check: PendingWakeCheck = {
+        generation: voiceGeneration.current,
+        segments: [],
+        samples: segment.samples,
+      };
+      wakeBusy.current = check;
+      captureRemaining(listener, check.samples);
+      const isCurrent = () =>
+        check.generation === voiceGeneration.current && wakeBusy.current === check && phaseRef.current === "sleeping";
       try {
         const result = await bridge.voiceWake(audioBase64);
-        if (phaseRef.current !== "sleeping") return;
+        if (!isCurrent()) return;
+        wakeBusy.current = null;
         if (result.status === "ok" && result.wake) {
+          if (check.samples >= MAX_RECORDING_SAMPLES) { rejectLongTurn(); return; }
+          bufferedTurn.current = result.followed ? [segment, ...check.segments] : check.segments;
           flashAwake();
-          if (result.followed) void runTurn(audioBase64); // "Sam, what's...?"
-          else attend();
+          attend(true);
         } else {
+          listener.setTiming(SLEEP_TIMING);
+          listener.resume();
           cooldownUntil.current =
             Date.now() + (result.reason_code === "rate_limited" ? WAKE_BACKOFF_MS : WAKE_COOLDOWN_MS);
         }
       } catch {
+        if (!isCurrent()) return;
+        listener.setTiming(SLEEP_TIMING);
+        listener.resume();
         cooldownUntil.current = Date.now() + WAKE_BACKOFF_MS;
       } finally {
-        wakeBusy.current = false;
+        if (wakeBusy.current === check) wakeBusy.current = null;
       }
     },
-    [attend, bridge, flashAwake, runTurn],
+    [attend, bridge, flashAwake, flushBufferedTurn, rejectLongTurn],
   );
   const onSegmentRef = useRef(onSegment);
   useEffect(() => {
@@ -632,11 +901,24 @@ export function SessionProvider({
   useEffect(() => {
     if (!handsFreeOn) return;
     let cancelled = false;
+    invalidateVoiceRequests();
+    cooldownUntil.current = 0;
     const listener = new Listener(
       audioEnvironment,
-      (audio, seconds) => void onSegmentRef.current(audio, seconds),
-      (value) => setLevel(value),
-      (active) => setHeardSpeech(active),
+      (audio, seconds, endedBy, voicedSeconds) => {
+        if (listenerRef.current === listener) void onSegmentRef.current(audio, seconds, endedBy, voicedSeconds);
+      },
+      (value) => {
+        if (listenerRef.current === listener && phaseRef.current === "attending") publishLevel(value);
+      },
+      onSpeech,
+      () => {
+        if (cancelled || listenerRef.current !== listener) return;
+        invalidateVoiceRequests();
+        setPhase("off");
+        setMicFailed(true);
+        setError(t("home.micFailed"));
+      },
     );
     listenerRef.current = listener;
     listener
@@ -653,10 +935,12 @@ export function SessionProvider({
         listenerRef.current = null;
         const code = failure instanceof RecorderError ? failure.code : "failed";
         if (code === "denied") setMicDenied(true);
-        else setError(micError(code));
+        else { setMicFailed(true); setError(micError(code)); }
       });
     return () => {
       cancelled = true;
+      invalidateVoiceRequests();
+      phaseRef.current = "off";
       listener.stop();
       listenerRef.current = null;
       window.clearTimeout(idleTimer.current);
@@ -667,25 +951,40 @@ export function SessionProvider({
       setPhaseState("off");
       setHeardSpeech(false);
       setJustWoke(false);
-      setLevel(0);
+      publishLevel(0);
     };
-  }, [handsFreeOn, audioEnvironment, micError, setError]);
+  }, [handsFreeOn, audioEnvironment, invalidateVoiceRequests, micError, onSpeech, publishLevel, setError, setPhase, t]);
+
+  useEffect(() => {
+    if (!homeActive || !visible) {
+      clearVoiceContext();
+      cancelListening();
+      stopSpeaking();
+    }
+  }, [homeActive, visible, clearVoiceContext, cancelListening, stopSpeaking]);
 
   const wakeNow = useCallback(() => {
-    if (micDenied) {
+    if (micDenied || micFailed) {
       setMicDenied(false); // try the microphone again
+      setMicFailed(false);
       return;
     }
     if (phaseRef.current === "sleeping") {
+      const pending = wakeBusy.current?.segments.slice() ?? [];
+      invalidateVoiceRequests();
+      bufferedTurn.current = pending;
       flashAwake();
-      attend();
+      attend(true);
     }
-  }, [attend, flashAwake, micDenied]);
+  }, [attend, flashAwake, invalidateVoiceRequests, micDenied, micFailed]);
 
   const sleepNow = useCallback(() => {
+    cancelListening();
+    stopSpeaking();
     speechHandle.current?.stop();
     if (phaseRef.current !== "off") sleep();
-  }, [sleep]);
+    else invalidateVoiceRequests();
+  }, [cancelListening, invalidateVoiceRequests, sleep, stopSpeaking]);
 
   const voice: VoiceState = confirmationPending
     ? "permission"
@@ -713,15 +1012,17 @@ export function SessionProvider({
     () => ({
       conversations,
       active,
-      selectConversation: (id: string) => setActiveId(id),
+      selectConversation: (id: string) => { sleepNow(); setActiveId(id); setExchange(null); },
       newConversation: () => {
         if (active.messages.length === 0) return;
+        sleepNow();
         const created = newConversation();
         setConversations((current) => [created, ...current]);
         setActiveId(created.id);
         setExchange(null);
       },
       clearActive: () => {
+        sleepNow();
         setConversations((current) =>
           current.map((c) => (c.id === activeId ? { ...c, messages: [], title: "New conversation" } : c)),
         );
@@ -746,7 +1047,7 @@ export function SessionProvider({
       speak,
       stopSpeaking,
       profileFor,
-      handsFree: { active: phase !== "off", phase, activation, needsSetup, setupState, micDenied },
+      handsFree: { active: phase !== "off", phase, activation, needsSetup, setupState, micDenied, micFailed },
       setHomeActive,
       wakeNow,
       sleepNow,
@@ -759,6 +1060,7 @@ export function SessionProvider({
       needsSetup,
       setupState,
       micDenied,
+      micFailed,
       wakeNow,
       sleepNow,
       conversations,

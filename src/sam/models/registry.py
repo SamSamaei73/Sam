@@ -21,6 +21,10 @@ from sam.models.models import (
     DeploymentMode,
     ProviderId,
 )
+from sam.models.openrouter_config import (
+    DEFAULT_OPENROUTER_MODEL,
+    validate_openrouter_model_id,
+)
 
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -37,9 +41,15 @@ _CANONICAL_ORDER = tuple(ProviderId)
 class ModelSpec:
     model_id: str
     tier: Literal["general", "efficient"] = "general"
+    provider_id: ProviderId | None = None
 
     def __post_init__(self) -> None:
-        if not _MODEL_RE.match(self.model_id):
+        if self.provider_id is ProviderId.OPENROUTER:
+            try:
+                validate_openrouter_model_id(self.model_id)
+            except ValueError:
+                raise RegistryError("model id is malformed") from None
+        elif not _MODEL_RE.fullmatch(self.model_id):
             raise RegistryError("model id is malformed")
 
 
@@ -69,6 +79,11 @@ class ProviderDescriptor:
             raise RegistryError("timeout is out of bounds")
         if len({m.model_id for m in self.models}) != len(self.models):
             raise RegistryError("duplicate model id")
+        if any(
+            m.provider_id is not None and m.provider_id is not self.provider_id
+            for m in self.models
+        ):
+            raise RegistryError("model is bound to another provider")
 
     @property
     def cost_class(self) -> BillingMode:
@@ -93,7 +108,14 @@ class ProviderRegistry:
 
     _providers: Mapping[ProviderId, ProviderDescriptor]
 
-    def __init__(self, descriptors: list[ProviderDescriptor]) -> None:
+    def __init__(
+        self,
+        descriptors: list[ProviderDescriptor],
+        *,
+        allowed_paid_providers: frozenset[ProviderId] = frozenset(),
+    ) -> None:
+        if not allowed_paid_providers <= {ProviderId.OPENROUTER}:
+            raise RegistryError("only OpenRouter supports explicit paid opt-in")
         built: dict[ProviderId, ProviderDescriptor] = {}
         for descriptor in descriptors:
             if not isinstance(descriptor.provider_id, ProviderId):
@@ -101,9 +123,11 @@ class ProviderRegistry:
             if descriptor.provider_id in built:
                 raise RegistryError("duplicate provider id")
             if descriptor.enabled and descriptor.billing_mode is BillingMode.PAID_API:
-                # Paid providers stay architecturally present but can never be
-                # operational while PAID_FALLBACK = OFF.
-                raise RegistryError("a paid API provider cannot be enabled")
+                if (
+                    descriptor.provider_id not in allowed_paid_providers
+                    or descriptor.fallback_eligible
+                ):
+                    raise RegistryError("paid API usage requires explicit opt-in")
             built[descriptor.provider_id] = descriptor
         object.__setattr__(self, "_providers", MappingProxyType(built))
 
@@ -148,9 +172,13 @@ def build_registry(
     gemini_configured: bool,
     claude_enabled: bool = True,
     deployment_mode: DeploymentMode = DeploymentMode.OWNER_LOCAL,
+    openrouter_configured: bool = False,
+    openrouter_model: str = DEFAULT_OPENROUTER_MODEL,
 ) -> ProviderRegistry:
-    """Sam's trusted defaults. OpenAI and Grok are present but permanently
-    disabled: enabling one needs a future, reviewed code change."""
+    """Sam's trusted defaults. Configured OpenRouter is an explicit paid
+    primary with one allowed model. Direct OpenAI and Grok stay disabled:
+    enabling one needs a future, reviewed code change.
+    """
 
     return ProviderRegistry(
         [
@@ -231,7 +259,31 @@ def build_registry(
                     "subscription does not include API access."
                 ),
             ),
-        ]
+            ProviderDescriptor(
+                provider_id=ProviderId.OPENROUTER,
+                display_name="OpenRouter (API)",
+                enabled=openrouter_configured,
+                billing_mode=BillingMode.PAID_API,
+                auth_mode=AuthMode.API_KEY,
+                capabilities=_TEXT_CAPS,
+                models=(
+                    ModelSpec(openrouter_model, provider_id=ProviderId.OPENROUTER),
+                ),
+                external_processing=True,
+                free_tier_data_use=openrouter_model.endswith(":free"),
+                fallback_eligible=False,
+                data_use_note=(
+                    "External cloud API: content leaves this device for OpenRouter "
+                    "and the chosen model provider. Configuring your key opts in "
+                    "to that model's API pricing. Data collection is denied in "
+                    "the request; paid fallback and automatic model routing are "
+                    "disabled. Free variants retain Sam's free-tier privacy limits."
+                ),
+            ),
+        ],
+        allowed_paid_providers=(
+            frozenset({ProviderId.OPENROUTER}) if openrouter_configured else frozenset()
+        ),
     )
 
 

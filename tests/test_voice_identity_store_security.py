@@ -152,7 +152,7 @@ def test_no_plaintext_or_filesystem_persistence_in_the_package() -> None:
             assert banned not in code, f"{name} contains {banned}"
 
 
-def test_package_has_no_network_logging_or_printing() -> None:
+def test_package_has_no_network_printing_or_unrestricted_logging() -> None:
     for name, text in SOURCES.items():
         tree = ast.parse(text)
         imported = {
@@ -168,12 +168,50 @@ def test_package_has_no_network_logging_or_printing() -> None:
             "urllib",
             "socket",
             "http",
-            "logging",
             "subprocess",
             "torch",
             "speechbrain",
         }, name
-        assert "print(" not in text and "logger" not in text, name
+        assert "print(" not in text, name
+        if name != "verification.py":
+            assert "logging" not in imported and "logger" not in text, name
+            continue
+        # The one allowed diagnostic is local operational metadata. Separate
+        # runtime containment tests reject any score, vector, digest or content.
+        logging_uses = [
+            n.attr
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "logging"
+        ]
+        assert logging_uses == ["getLogger"]
+        log_calls = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and isinstance(n.func.value, ast.Name)
+            and n.func.value.id == "logger"
+        ]
+        assert len(log_calls) == 1
+        call = log_calls[0]
+        assert isinstance(call.func, ast.Attribute) and call.func.attr == "info"
+        assert not call.keywords and len(call.args) == 5
+        assert isinstance(call.args[0], ast.Constant)
+        assert call.args[0].value == (
+            "Speaker verification result=%s reason=%s duration_ms=%d elapsed_ms=%d"
+        )
+        allowed_arguments = (
+            "result",
+            "reason",
+            "round(audio.metadata.duration_seconds * 1000)",
+            "max(0, round((time.monotonic() - started) * 1000))",
+        )
+        assert [ast.dump(arg) for arg in call.args[1:]] == [
+            ast.dump(ast.parse(expression, mode="eval").body)
+            for expression in allowed_arguments
+        ]
 
 
 def test_no_unsafe_model_loading_or_hidden_downloads_in_the_package() -> None:

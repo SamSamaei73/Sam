@@ -15,6 +15,26 @@ async function openSettings(bridge: ReturnType<typeof mockBridge>) {
 }
 
 describe("AI Providers settings", () => {
+  it("shows a configured OpenRouter model as billed and saves it as the preferred provider", async () => {
+    const status: ProvidersStatus = {
+      ...baseProviders,
+      providers: baseProviders.providers.map((provider) => provider.provider_id === "openrouter"
+        ? { ...provider, enabled: true, state: "available", models: ["openai/gpt-4.1-mini"] }
+        : provider),
+    };
+    const bridge = mockBridge({ providersStatus: async () => status });
+    const user = await openSettings(bridge);
+    const row = within(screen.getByTestId("provider-openrouter"));
+    expect(row.getByText("Paid API — billed to your account")).toBeInTheDocument();
+    expect(row.getByText("openai/gpt-4.1-mini")).toBeInTheDocument();
+    expect(row.queryByText("Paid API — disabled")).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Preferred provider"), "openrouter");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bridge.setProviderPreferences).toHaveBeenCalledWith(
+      expect.objectContaining({ preferred_provider: "openrouter" }),
+    ));
+  });
+
   it("shows trusted provider state, cost class, disclosures and paid fallback OFF", async () => {
     await openSettings(mockBridge());
     const claude = screen.getByTestId("provider-claude_subscription");

@@ -3,12 +3,11 @@
 Provider credentials are resolved in ONE place, at startup, by trusted code.
 
 PRODUCTION (``APP_ENV=production``): the macOS login Keychain item
-``app.sam.desktop.credentials`` / ``<name>`` is the ONLY source. An ambient
-environment value (shell, launch environment, ``.env``) is IGNORED: it never
-overrides or supplements the Keychain, and nothing a prompt, model, task,
-web page or the frontend says can select a credential source. There is no
-production override switch; an owner who wants a key in production stores it
-in the Keychain with ``python -m sam.system.cli secret-set <name>``.
+``app.sam.desktop.credentials`` / ``<name>`` is the source for existing
+integrations. Their ambient environment values remain ignored. OpenRouter is
+an explicit exception requested by the owner: ``OPENROUTER_API_KEY`` in trusted
+local configuration (including ``.env``) takes precedence, with Keychain used
+only when unset. Neither prompts nor frontend requests choose a source.
 
 DEVELOPMENT / TEST: an explicitly configured environment value wins (the
 existing development mechanism); otherwise the Keychain if enabled; otherwise
@@ -17,9 +16,9 @@ the credential is not configured and the integration is off.
 The Claude subscription provider has no credential here: it keeps its own
 sanitized-authentication boundary (Phase 13), unchanged.
 
-If the Keychain cannot be read, the credential is UNAVAILABLE: there is no
-plaintext file, database or ``.env`` fallback and no model is ever asked to
-help. Credentials are never stored in SQLite or Obsidian, never sent to the
+If a Keychain lookup fails, that credential is UNAVAILABLE: there is no
+plaintext fallback after that failure and no model is ever asked to help.
+Credentials are never stored in SQLite or Obsidian, never sent to the
 frontend and never logged (not even a prefix). Existing environment secrets
 are never copied into the Keychain automatically; the owner stores one
 explicitly with ``python -m sam.system.cli secret-set <name>``.
@@ -42,12 +41,13 @@ KEYCHAIN_SERVICE = "app.sam.desktop.credentials"
 # The ONLY credential names Sam resolves (setting field names).
 # ``desktop_step_up_secret`` is the owner's step-up secret: required to set up
 # (or replace) the owner voice profile and to approve CRITICAL actions. In
-# production it can only come from the Keychain, like every credential.
+# production it can only come from the Keychain.
 KNOWN_SECRETS = (
     "anthropic_api_key",
     "desktop_step_up_secret",
     "fish_audio_api_key",
     "gemini_api_key",
+    "openrouter_api_key",
 )
 
 
@@ -188,11 +188,11 @@ def resolve_credentials(
     updates: dict[str, SecretStr | None] = {}
     for name in KNOWN_SECRETS:
         current = getattr(settings, name)
-        if current is not None and not production:
+        if current is not None and (not production or name == "openrouter_api_key"):
             sources[name] = CredentialSource.ENVIRONMENT
             continue
         if production:
-            updates[name] = None  # an ambient environment value is never used
+            updates[name] = None  # existing integrations remain Keychain-only
         if store is None:
             sources[name] = CredentialSource.NOT_CONFIGURED
             continue

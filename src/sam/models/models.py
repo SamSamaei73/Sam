@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sam.agent.models import Message
 from sam.core.deployment import DeploymentMode
+from sam.language.catalog import LanguageCode
 
 MAX_REQUEST_CHARS = 200_000
 MAX_RESULT_CHARS = 100_000
@@ -23,6 +24,7 @@ class ProviderId(StrEnum):
     GEMINI_FREE = "gemini_free"
     OPENAI_API = "openai_api"
     GROK_API = "grok_api"
+    OPENROUTER = "openrouter"
 
 
 class BillingMode(StrEnum):
@@ -159,7 +161,7 @@ class ModelRequest(BaseModel):
 
     request_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     messages: tuple[Message, ...] = Field(min_length=1, max_length=64, repr=False)
-    language: Literal["fa", "en", "auto"] = "auto"
+    language: Literal["auto"] | LanguageCode = "auto"
     capabilities: frozenset[Capability] = frozenset({Capability.TEXT})
     privacy_class: PrivacyClass = PrivacyClass.NORMAL
     task_profile: TaskProfile = TaskProfile.GENERAL

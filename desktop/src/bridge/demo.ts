@@ -91,6 +91,17 @@ export function demoBridge(): SamBridge {
   };
   const providerRows = (): ProviderStatus[] => [
     {
+      provider_id: "openrouter",
+      display_name: "OpenRouter",
+      state: "not_configured",
+      enabled: false,
+      cost_class: "paid_api",
+      external: true,
+      free_tier_data_use: false,
+      note: "Connect your OpenRouter account in the local configuration to use hosted models.",
+      models: [],
+    },
+    {
       provider_id: "claude_subscription",
       display_name: "Claude (subscription)",
       state: "available",
@@ -370,6 +381,9 @@ export function demoBridge(): SamBridge {
       log("permission", "Confirmation answered", isApproved ? "approved" : "denied");
       return { status: isApproved ? "approved" : "denied", confirmation_id: confirmationId };
     },
+    async endVoiceConversation() {
+      return { ...empty, status: "ok" };
+    },
     async voiceWake() {
       await wait(250);
       return { ...empty, status: "ok", wake: activation === "on", followed: false };
@@ -524,7 +538,7 @@ export function demoBridge(): SamBridge {
       if (loosens && input.stepUp !== "demo-step-up") {
         throw new BridgeError("step_up_failed", "That step-up secret wasn't accepted.");
       }
-      if (input.preferred_provider === "openai_api" || input.preferred_provider === "grok_api") {
+      if (input.preferred_provider && !providerRows().some((p) => p.provider_id === input.preferred_provider && p.enabled)) {
         throw new BridgeError("invalid", "That request was not valid.");
       }
       models.prefs = {

@@ -19,6 +19,7 @@ Nothing here writes to Memory or Knowledge on its own.
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import threading
 from collections import deque
@@ -26,7 +27,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Literal
 
 from sam.agent.core import AgentCore
 from sam.career.attempts import AttemptStore, ExternalAction
@@ -36,6 +36,7 @@ from sam.career.repository import CareerRepository, InMemoryCareerRepository
 from sam.career.service import CareerService
 from sam.core.config import Settings
 from sam.desktop.career_ports import KnowledgePapers, ProfessionalEvidence
+from sam.desktop.conversation import VoiceConversationStore
 from sam.desktop.identity import DesktopVoiceIdentity
 from sam.knowledge.audit import InMemoryKnowledgeAuditSink
 from sam.knowledge.engine import KnowledgeEngine
@@ -108,17 +109,23 @@ from sam.tts.credentials import (
     TTSCredentialReference,
     credentials_from_settings,
     gemini_credentials_from_settings,
+    openrouter_credentials_from_settings,
 )
 from sam.tts.fish_audio import FISH_ALLOWED_MODELS, FISH_PROVIDER_ID, FishAudioProvider
 from sam.tts.gateway import TTSGateway
 from sam.tts.gemini_tts import GEMINI_PROVIDER_ID, GEMINI_TTS_MODEL, GeminiTTSProvider
 from sam.tts.models import TrustedVoiceProfile, TTSAudioFormat
+from sam.tts.openrouter import (
+    OPENROUTER_TTS_PROVIDER_ID,
+    OpenRouterTTSProvider,
+    openrouter_speech_languages,
+)
 from sam.tts.profiles import TrustedVoiceProfiles
 from sam.tts.provider import SpeechSynthesisProvider
-from sam.voice.agent_boundary import VoiceAgentBoundary
+from sam.voice.agent_boundary import AgentSink, VoiceAgentBoundary
 from sam.voice.audit import InMemoryVoiceAuditSink
 from sam.voice.gateway import VoiceGateway
-from sam.voice.models import StartSessionRequest
+from sam.voice.models import MAX_VOICE_PROVIDER_TIMEOUT_SECONDS, StartSessionRequest
 from sam.voice.transcription import TranscriptionProvider
 from sam.voice.wake import WakeRateLimiter
 from sam.voice_identity.providers import SpeakerEmbeddingProvider
@@ -303,13 +310,16 @@ class DesktopRuntime:
         self.wake_transcriber: TranscriptionProvider | None = None
         self.wake_limiter = WakeRateLimiter()
         self._voice_session: str | None = None
+        self.voice_conversations = VoiceConversationStore(clock=clock)
         self._voice_lock = RLock()
+        self._voice_warmup_thread: threading.Thread | None = None
         if transcription_provider is not None:
             self.voice_gateway = VoiceGateway(
                 permission_engine=self.permissions,
                 transcription_provider=transcription_provider,
                 audit_sink=InMemoryVoiceAuditSink(),
                 clock=clock,
+                provider_timeout_seconds=MAX_VOICE_PROVIDER_TIMEOUT_SECONDS,
             )
             self.voice_boundary = VoiceAgentBoundary(self.voice_gateway, agent)
 
@@ -347,13 +357,15 @@ class DesktopRuntime:
             self.speech_boundary = TTSAgentBoundary(gateway)
             self.speech_provider_id = speech_provider.provider_id
             for profile in speech_profiles.list_profiles():
-                # Gemini is the Persian voice; Fish stays English-only. A
-                # request in a language the profile lacks is text-only.
-                self.speech_profile_languages[profile.profile_id] = (
-                    frozenset({"fa"})
-                    if profile.provider_id == GEMINI_PROVIDER_ID
-                    else frozenset({"en"})
-                )
+                # Language support belongs to the configured provider model,
+                # independently of owner enrollment and profile display name.
+                if profile.provider_id == OPENROUTER_TTS_PROVIDER_ID:
+                    languages = openrouter_speech_languages(profile.provider_model)
+                elif profile.provider_id == GEMINI_PROVIDER_ID:
+                    languages = frozenset({"fa"})
+                else:
+                    languages = frozenset({"en"})
+                self.speech_profile_languages[profile.profile_id] = languages
 
         if durable is not None and not self.startup.blocked:
             # Crash recovery for Career items (their attempts were recovered at
@@ -473,28 +485,49 @@ class DesktopRuntime:
             return "ok"
 
     def warm_wake_recognizer(self) -> None:
-        """Load the local wake recognizer in the background (no download)."""
+        """Warm local recognition and speaker weights; never audio or profiles."""
 
-        preload = getattr(self.wake_transcriber, "preload", None)
-        if callable(preload):
-            threading.Thread(
-                target=preload, name="sam-wake-warmup", daemon=True
-            ).start()
+        providers = (
+            self.wake_transcriber,
+            self.identity.embedder if self.identity is not None else None,
+        )
+
+        def warm() -> None:
+            # Sequential loading limits startup contention on a small desktop.
+            # A failure remains a normal fail-closed request-time error.
+            for provider in providers:
+                with contextlib.suppress(Exception):
+                    preload = getattr(provider, "preload", None)
+                    if callable(preload):
+                        preload()
+
+        with self._voice_lock:
+            if (
+                self._voice_warmup_thread is not None
+                and self._voice_warmup_thread.is_alive()
+            ):
+                return
+            self._voice_warmup_thread = threading.Thread(
+                target=warm, name="sam-voice-warmup", daemon=True
+            )
+            self._voice_warmup_thread.start()
 
     def voice_boundary_for(
-        self, preference: LanguagePreference
+        self, preference: LanguagePreference, *, agent: AgentSink | None = None
     ) -> VoiceAgentBoundary | None:
         """A per-request owner voice boundary that applies the language policy."""
 
         if self.voice_gateway is None:
             return None
 
-        def language_for(text: str, tag: str | None) -> Literal["fa", "en"]:
+        def language_for(text: str, tag: str | None) -> str:
             decision = self.language.resolve(preference, text, stt_language=tag)
             return decision.response_language
 
         return VoiceAgentBoundary(
-            self.voice_gateway, self.agent, language_for=language_for
+            self.voice_gateway,
+            self.agent if agent is None else agent,
+            language_for=language_for,
         )
 
     # -------------------------------------------------------------- voice
@@ -815,6 +848,38 @@ def fish_speech_from_settings(
 PERSIAN_SPEECH_PROFILE = "sam_persian"
 
 
+def openrouter_speech_from_settings(
+    settings: Settings,
+) -> tuple[SpeechSynthesisProvider, TrustedVoiceProfiles] | None:
+    """Use the same OpenRouter account for hosted speech and language models.
+
+    Profiles select stock voices only; no recording or biometric data is sent.
+    The existing synthesis permission/confirmation boundary still applies.
+    """
+
+    if settings.openrouter_api_key is None:
+        return None
+    profiles = TrustedVoiceProfiles(
+        [
+            TrustedVoiceProfile(
+                profile_id=profile_id,
+                provider_id=OPENROUTER_TTS_PROVIDER_ID,
+                provider_voice_reference=settings.openrouter_tts_voice,
+                provider_model=settings.openrouter_tts_model,
+            )
+            for profile_id in (DEFAULT_SPEECH_PROFILE, PERSIAN_SPEECH_PROFILE)
+        ]
+    )
+    ref = TTSCredentialReference(
+        provider_id=OPENROUTER_TTS_PROVIDER_ID, credential_id="openrouter-main"
+    )
+    provider = OpenRouterTTSProvider(
+        credentials=openrouter_credentials_from_settings(settings, ref),
+        credential_reference=ref,
+    )
+    return provider, profiles
+
+
 def gemini_speech_from_settings(
     settings: Settings,
 ) -> tuple[SpeechSynthesisProvider, TrustedVoiceProfile] | None:
@@ -877,10 +942,16 @@ def build_desktop_runtime(
     extra_speech_providers: list[SpeechSynthesisProvider] = []
     local_wake = wake_transcriber
     if speech_provider is None and speech_profiles is None:
-        configured = fish_speech_from_settings(settings)
+        configured = openrouter_speech_from_settings(settings)
+        if configured is None:
+            configured = fish_speech_from_settings(settings)
         if configured is not None:
             speech_provider, speech_profiles = configured
-        persian = gemini_speech_from_settings(settings)
+        persian = (
+            gemini_speech_from_settings(settings)
+            if settings.openrouter_api_key is None
+            else None
+        )
         if persian is not None:
             gemini_provider, gemini_profile = persian
             fish_profiles = (
@@ -974,4 +1045,5 @@ __all__ = [
     "PERSIAN_SPEECH_PROFILE",
     "fish_speech_from_settings",
     "gemini_speech_from_settings",
+    "openrouter_speech_from_settings",
 ]

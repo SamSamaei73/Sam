@@ -1,4 +1,65 @@
-# Sam Voice Synthesis (Phase 10) — Text-to-Speech with Fish Audio
+# Sam Voice Synthesis — Text-to-Speech
+
+## OpenRouter speech
+
+Setting `OPENROUTER_API_KEY` now configures both the LLM router and cloud speech
+output. No Fish Audio or Gemini key is needed on this path. Trusted profiles
+`sam_default` and `sam_persian` both use
+`OPENROUTER_TTS_MODEL=openai/gpt-4o-mini-tts-2025-12-15` and
+`OPENROUTER_TTS_VOICE=alloy` by default. Both profiles advertise the model's
+57 documented languages, independently of enrollment language or profile name.
+Voices are optimized for English, so listening tests remain necessary for
+pronunciation and accent quality in other languages.
+
+The documented cloud speech language codes are:
+
+```text
+af ar hy az be bs bg ca zh hr cs da nl en et fi fr gl de el he hi hu
+is id it ja kn kk ko lv lt mk ms mr mi ne no fa pl pt ro ru sr sk sl
+es sw sv tl ta th tr uk ur vi cy
+```
+
+This includes Persian, French, Spanish, Arabic, Hindi and Chinese. Recognition
+and speech synthesis have separate capability catalogs: a language recognized
+by Whisper does not automatically have a configured cloud voice. Custom speech
+models with unreviewed language support advertise no languages until their
+capabilities are added to Sam's trusted metadata.
+
+`sam.tts.openrouter` calls the pinned `POST https://openrouter.ai/api/v1/audio/speech`
+endpoint with text, a configured stock voice, model, MP3 output and a deny-data-
+collection preference. It does not upload recordings, speaker templates or
+voice-cloning references. The response is bounded and independently validated
+by the existing gateway. Credentials, timeouts, redirect/proxy refusal, safe
+errors, one-call/no-retry behavior, secret filtering and synthesis permission
+confirmation retain the same boundaries as other TTS adapters. No automatic
+fallback to another speech provider occurs. This is usage billed to the
+OpenRouter account, separate from any consumer subscription.
+
+The model and voice must be a compatible speech pair. The app does not convert
+a chat model into a speech model. See the current [OpenRouter speech API](https://openrouter.ai/docs/guides/overview/multimodal/tts)
+and [upstream supported languages](https://developers.openai.com/api/docs/guides/text-to-speech#supported-languages).
+The historical Fish implementation below remains available when OpenRouter is
+not configured.
+
+## Desktop spoken replies
+
+Accepted voice turns retain the written answer and request spoken playback.
+On macOS, English uses the local Samantha voice. Other languages select a
+matching installed system voice from a cached, bounded catalog; Sam does not
+download voices or read a reply using a voice for a different language. Native
+speech uses fixed `/usr/bin/say` operations with reply text only on stdin.
+Completion and cancellation control when microphone listening resumes.
+
+If no local voice is available, the desktop can request a compatible configured
+cloud profile through the existing speech permission/confirmation flow. The
+OpenRouter key stays in the backend. A missing voice, denied request, provider
+failure or playback failure leaves the written answer visible and shows a
+speech failure; it never silently claims that audio played. Enrollment and
+fresh owner verification on every turn remain independent of response language.
+
+The remaining sections document the original Fish transport and gateway. Their
+Phase 10 playback and automatic-synthesis exclusions apply to that transport
+layer, rather than the current desktop voice interaction described above.
 
 > **Fish Audio is a synthesis provider, not an authorization or security boundary.**
 >

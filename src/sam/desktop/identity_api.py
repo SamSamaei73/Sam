@@ -140,7 +140,10 @@ def _models_info(runtime: DesktopRuntime) -> VoiceModelsInfo:
 
 
 def _setup_state(
-    runtime: DesktopRuntime, models: VoiceModelsInfo, enrolled: bool | None
+    runtime: DesktopRuntime,
+    models: VoiceModelsInfo,
+    enrolled: bool | None,
+    profile_compatible: bool | None = None,
 ) -> VoiceSetupState:
     """The ONE place the owner's voice setup stage is decided. Each stage has
     its own message and action; none collapses into a generic block."""
@@ -154,7 +157,7 @@ def _setup_state(
     if enrolled is None:
         return "voice_unavailable"  # the secure store could not be read
     if enrolled:
-        return "enrolled"
+        return "not_enrolled" if profile_compatible is False else "enrolled"
     return "not_enrolled" if runtime.step_up_configured() else "setup_required"
 
 
@@ -169,22 +172,30 @@ def identity_status(runtime: DesktopRuntime = _runtime) -> IdentityStatusRespons
             step_up_configured=runtime.step_up_configured(),
             models=models,
         )
-    enrolled = identity.enrollment.status().enrolled
+    enrollment = identity.enrollment.status()
+    enrolled = enrollment.enrolled
     last = identity.last_speaker_result
-    last_state: Literal["verified", "not_verified", "unknown"] | None = None
+    last_state: (
+        Literal["verified", "not_verified", "insufficient_audio", "unknown"] | None
+    ) = None
     if last == SpeakerResult.OWNER_VERIFIED.value:
         last_state = "verified"
     elif last == SpeakerResult.OWNER_NOT_VERIFIED.value:
         last_state = "not_verified"
+    elif last == SpeakerResult.INSUFFICIENT_AUDIO.value:
+        last_state = "insufficient_audio"
     elif last is not None:
         last_state = "unknown"
     guest = _guest_info(identity)
     return IdentityStatusResponse(
         available=True,
-        setup_state=_setup_state(runtime, models, enrolled),
+        setup_state=_setup_state(
+            runtime, models, enrolled, enrollment.profile_compatible
+        ),
         step_up_configured=runtime.step_up_configured(),
         models=models,
         enrolled=enrolled,
+        profile_compatible=enrollment.profile_compatible,
         mode="guest_mode" if guest.active else "owner_only",
         guest=guest,
         last_verification=last_state,
@@ -207,6 +218,7 @@ def enroll_begin(
         return EnrollBeginResponse(**_unavailable().model_dump())
     purpose = "re_enroll" if payload.re_enroll else "enroll"
     _step_up_or_raise(runtime, f"voice:{purpose}", payload.step_up.get_secret_value())
+    runtime.voice_conversations.end(runtime.principal)
     grant = identity.step_up.mint(purpose)
     try:
         session_id = identity.enrollment.begin(grant, re_enroll=payload.re_enroll)
@@ -263,6 +275,7 @@ def owner_setup(
             status="rejected", reason_code=code, message=_msg(code)
         )
     runtime.activity.add("permission", "Owner security setup", "configured")
+    runtime.voice_conversations.end(runtime.principal)
     grant = identity.step_up.mint("enroll")
     try:
         session_id = identity.enrollment.begin(grant, re_enroll=False)
@@ -331,6 +344,7 @@ def enroll_complete(
             message=_msg("session_invalid"),
         )
     if outcome.completed:
+        runtime.voice_conversations.end(runtime.principal)
         runtime.activity.add("voice", "Owner voice enrolled", "completed")
         return OperationResult(status="ok")
     return OperationResult(
@@ -361,6 +375,7 @@ def delete_profile(
     _step_up_or_raise(
         runtime, "voice:delete_profile", payload.step_up.get_secret_value()
     )
+    runtime.voice_conversations.end(runtime.principal)
     grant = identity.step_up.mint("delete_profile")
     try:
         identity.enrollment.delete_profile(grant)
@@ -437,6 +452,7 @@ def guest_start(
         return OperationResult(
             status="rejected", reason_code="guest_active", message=_msg("guest_active")
         )
+    runtime.voice_conversations.end(runtime.principal)
     runtime.activity.add("voice", "Guest Mode started", "active")
     return OperationResult(status="ok")
 
@@ -448,6 +464,7 @@ def guest_end(runtime: DesktopRuntime = _runtime) -> OperationResult:
     identity = _identity(runtime)
     if identity is None:
         return _unavailable()
+    runtime.voice_conversations.end(runtime.principal)
     if identity.guests.revoke():
         runtime.activity.add("voice", "Guest Mode ended", "revoked")
     return OperationResult(status="ok")

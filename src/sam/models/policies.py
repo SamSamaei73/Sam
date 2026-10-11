@@ -48,14 +48,16 @@ _ALLOWED_BILLING = frozenset(
 
 @dataclass(frozen=True)
 class CostPolicy:
-    """Every switch is fixed False. There is no code path that turns one on:
-    a prompt, model output, provider failure or quota error cannot, and the
-    constructor refuses a True value."""
+    """No general paid switch or paid fallback exists. Trusted startup may
+    explicitly authorize OpenRouter; other paid integrations stay disabled.
+    A prompt, provider failure or owner routing preference cannot authorize it.
+    """
 
     allow_paid_api: bool = False
     allow_paid_fallback: bool = False
     allow_auto_upgrade: bool = False
     allow_credit_purchase: bool = False
+    allowed_paid_providers: frozenset[ProviderId] = frozenset()
 
     def __post_init__(self) -> None:
         if (
@@ -65,9 +67,18 @@ class CostPolicy:
             or self.allow_credit_purchase
         ):
             raise ValueError("paid usage cannot be enabled")
+        allowed = frozenset(self.allowed_paid_providers)
+        if not allowed <= {ProviderId.OPENROUTER}:
+            raise ValueError("only OpenRouter supports explicit paid opt-in")
+        object.__setattr__(self, "allowed_paid_providers", allowed)
 
-    def allows(self, billing_mode: BillingMode) -> bool:
-        return billing_mode in _ALLOWED_BILLING
+    def allows(
+        self, billing_mode: BillingMode, provider_id: ProviderId | None = None
+    ) -> bool:
+        return billing_mode in _ALLOWED_BILLING or (
+            billing_mode is BillingMode.PAID_API
+            and provider_id in self.allowed_paid_providers
+        )
 
 
 @dataclass(frozen=True)

@@ -10,6 +10,9 @@ Provenance (checked 2026-09):
   VoxCeleb 1+2. Only ``embedding_model.ckpt`` is used; the repo's
   ``hyperparams.yaml`` (HyperPyYAML ``!new:`` tags = object construction) and
   any ``custom.py`` are NEVER loaded. The network is rebuilt in Sam code.
+- Wespeaker/wespeaker-voxceleb-resnet34-LM -- CC-BY-4.0; official ResNet34
+  ONNX export, 256 dimensions, pinned to its repository commit and file hash.
+  Sam supplies the author's Hamming filterbanks and temporal mean subtraction.
 - Systran/faster-whisper-{small,medium,large-v3} -- MIT; CTranslate2
   conversions of OpenAI's multilingual Whisper (Persian ``fa`` supported). No
   English-only ``.en`` model is allowed.
@@ -60,6 +63,26 @@ SPEAKER_MODEL = TrustedModel(
         ),
     ),
 )
+
+WESPEAKER_MODEL = TrustedModel(
+    key="speaker-wespeaker-resnet34-lm",
+    repo_id="Wespeaker/wespeaker-voxceleb-resnet34-LM",
+    revision="f0c48c298fd835726c27956a5d617bad7115627e",
+    license="CC-BY-4.0",
+    files=(
+        ModelFile(
+            "voxceleb_resnet34_LM.onnx",
+            "7bb2f06e9df17cdf1ef14ee8a15ab08ed28e8d0ef5054ee135741560df2ec068",
+            26_530_309,
+        ),
+    ),
+)
+
+# ECAPA remains the default and the legacy SPEAKER_MODEL identity is stable.
+SPEAKER_MODELS: dict[str, TrustedModel] = {
+    "ecapa": SPEAKER_MODEL,
+    "wespeaker": WESPEAKER_MODEL,
+}
 
 _WHISPER_TOK = ModelFile(
     "tokenizer.json",
@@ -195,9 +218,18 @@ def stt_model(name: str) -> TrustedModel:
         raise ModelSetupError("unsupported speech model") from None
 
 
+def speaker_model(name: str) -> TrustedModel:
+    try:
+        return SPEAKER_MODELS[name]
+    except KeyError:
+        raise ModelSetupError("unsupported speaker model") from None
+
+
 __all__ = [
     "HF_ENDPOINT",
     "SPEAKER_MODEL",
+    "SPEAKER_MODELS",
+    "WESPEAKER_MODEL",
     "STT_MODELS",
     "ModelFile",
     "TrustedModel",
@@ -205,6 +237,7 @@ __all__ = [
     "model_dir",
     "require_verified",
     "sha256_file",
+    "speaker_model",
     "stt_model",
     "verify_model",
 ]

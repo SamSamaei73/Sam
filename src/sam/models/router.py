@@ -131,10 +131,15 @@ class ModelRouter:
             )
         prefs = self._preferences()
         preferred = prefs.preferred_provider
-        order = list(self._priorities.for_profile(profile))
-        if preferred is not None:
+        registered = tuple(descriptor.provider_id for descriptor in self._registry)
+        order = [
+            provider_id
+            for provider_id in self._priorities.for_profile(profile)
+            if provider_id in registered
+        ]
+        if preferred is not None and preferred in registered:
             order = [preferred, *[p for p in order if p is not preferred]]
-        for provider_id in ProviderId:  # anything not listed still gets evaluated
+        for provider_id in registered:  # any registered provider is evaluated
             if provider_id not in order:
                 order.append(provider_id)
         candidates: list[RouteCandidate] = []
@@ -175,7 +180,15 @@ class ModelRouter:
         descriptor = self._registry.get(provider_id)
         if not descriptor.enabled:
             return ReasonCode.PROVIDER_DISABLED
-        if not self._cost.allows(descriptor.billing_mode):
+        if not self._cost.allows(descriptor.billing_mode, provider_id):
+            return ReasonCode.COST_BLOCKED
+        if (
+            descriptor.billing_mode is BillingMode.PAID_API
+            and prefs.preferred_provider is not provider_id
+        ):
+            # A configured paid provider must be the owner's chosen primary.
+            # Skipping an unavailable free provider during planning must not
+            # silently turn a paid provider into the first eligible candidate.
             return ReasonCode.COST_BLOCKED
         if (
             descriptor.requires_free_attestation
@@ -424,7 +437,11 @@ class ModelRouter:
         return any(
             self.provider_state(d.provider_id) is Availability.AVAILABLE
             for d in self._registry
-            if self._cost.allows(d.billing_mode)
+            if self._cost.allows(d.billing_mode, d.provider_id)
+            and (
+                d.billing_mode is not BillingMode.PAID_API
+                or self._preferences().preferred_provider is d.provider_id
+            )
         )
 
     def capabilities_for(self, language: str) -> frozenset[Capability]:

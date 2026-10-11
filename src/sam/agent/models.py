@@ -4,6 +4,9 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+MAX_HISTORY_MESSAGES = 16
+MAX_HISTORY_CHARS = 24_000
+
 
 class MessageRole(StrEnum):
     """Roles supported by the agent conversation contract."""

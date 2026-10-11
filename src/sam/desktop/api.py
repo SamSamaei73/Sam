@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from sam.agent.errors import AgentError
 from sam.agent.models import AgentRequest
+from sam.desktop.conversation import ContextualVoiceAgent
 from sam.desktop.models import (
     MAX_ACTIVITY_ITEMS,
     MAX_SNIPPET_CHARS,
@@ -61,6 +62,7 @@ from sam.desktop.models import (
     ToolsResponse,
     VoiceActivationRequest,
     VoiceActivationResponse,
+    VoiceConversationEndRequest,
     VoiceResponse,
     VoiceUtteranceRequest,
     VoiceWakeRequest,
@@ -90,6 +92,7 @@ from sam.knowledge.models import (
     RetrievalQuery,
     RetrieveRequest,
 )
+from sam.language.catalog import SUPPORTED_LANGUAGE_CODES
 from sam.language.hint import language_hint_scope
 from sam.language.policy import LanguagePreference
 from sam.memory.models import Memory
@@ -102,6 +105,7 @@ from sam.permissions.policy import classify
 from sam.system.health import Component, Overall, system_health
 from sam.tts.agent_boundary import SpeechProposal
 from sam.tts.models import TTSStatus
+from sam.voice.agent_boundary import VoiceAgentBoundary
 from sam.voice.audio import validate_audio
 from sam.voice.models import (
     AudioFormat,
@@ -188,6 +192,10 @@ _MESSAGES = {
     "voice_not_heard": "Sam didn't catch that.",
     "voice_activation_off": "Voice activation is off.",
     "conversation_ended": "Okay.",
+    "voice_conversation_ended": (
+        "That voice conversation ended. Please start a new request."
+    ),
+    "voice_conversation_busy": "Sam is still finishing the previous voice request.",
     "identity_not_configured": "Voice needs owner voice identity to be set up first.",
     "language_unsupported": "No trusted voice speaks that language: text only.",
 }
@@ -320,11 +328,10 @@ def _decode(data: str) -> bytes | None:
 # ---------------------------------------------------------------- status
 
 
-def _profile_languages(
-    runtime: DesktopRuntime, profile_id: str
-) -> list[Literal["fa", "en"]]:
+def _profile_languages(runtime: DesktopRuntime, profile_id: str) -> list[str]:
     known = runtime.speech_profile_languages.get(profile_id, frozenset({"en"}))
-    return [lang for lang in ("fa", "en") if lang in known]  # type: ignore[misc]
+    languages = ("fa", "en", *sorted(SUPPORTED_LANGUAGE_CODES - {"fa", "en"}))
+    return [lang for lang in languages if lang in known]
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -877,6 +884,15 @@ def decide(
 # ----------------------------------------------------------------- voice
 
 
+@router.post("/voice/conversation/end", response_model=OperationResult)
+def end_voice_conversation(
+    payload: VoiceConversationEndRequest, runtime: DesktopRuntime = _runtime
+) -> OperationResult:
+    """Erase only this installation's temporary text context; grants nothing."""
+    runtime.voice_conversations.end(runtime.principal, payload.conversation_id)
+    return OperationResult(status="ok")
+
+
 @router.post("/voice/utterance", response_model=VoiceResponse)
 def voice_utterance(
     payload: VoiceUtteranceRequest, runtime: DesktopRuntime = _runtime
@@ -892,7 +908,10 @@ def voice_utterance(
     transcripts are withheld by the gateway and never forwarded.
     """
 
+    context_generation = runtime.voice_conversations.generation()
+    contextual_agent: ContextualVoiceAgent | None = None
     if runtime.voice_gateway is None:
+        runtime.voice_conversations.end(runtime.principal)
         return VoiceResponse(
             status="not_configured",
             reason_code="not_configured",
@@ -900,6 +919,7 @@ def voice_utterance(
         )
     identity = runtime.identity
     if identity is None:
+        runtime.voice_conversations.end(runtime.principal)
         # Owner voice identity is unavailable: voice input fails closed. There
         # is deliberately NO fallback to an un-verified owner voice session.
         # Text chat is a separate, authenticated path and is unaffected.
@@ -911,13 +931,14 @@ def voice_utterance(
         )
     audio = _decode(payload.audio_base64)
     if audio is None or not audio:
+        runtime.voice_conversations.end(runtime.principal)
         return VoiceResponse(
             status="rejected",
             reason_code="malformed_audio",
             message=_message("malformed_audio"),
         )
     preference = LanguagePreference(payload.language)
-    boundary = runtime.voice_boundary_for(preference)
+    boundary: VoiceAgentBoundary | None
     principal = runtime.principal
     session_id: str | None
     speaker: Literal["owner", "guest"] | None = None
@@ -929,6 +950,7 @@ def voice_utterance(
     identity.last_speaker_result = decision.result.value
     speaker_result = decision.result.value
     if decision.speaker_class is SpeakerClass.BLOCKED:
+        runtime.voice_conversations.end(runtime.principal)
         runtime.activity.add("voice", "Speaker blocked", decision.result.value)
         # Say WHY (safely): a missing profile is a setup step, not a failed
         # identity check. Never a score, threshold or embedding.
@@ -940,6 +962,7 @@ def voice_utterance(
             speaker_result=speaker_result,
         )
     if decision.speaker_class is SpeakerClass.GUEST:
+        runtime.voice_conversations.end(runtime.principal)
         guest_context = identity.guest_voice()
         if guest_context is None:
             return VoiceResponse(
@@ -953,15 +976,29 @@ def voice_utterance(
         session_id = guest_context.session_id
         speaker = "guest"
     else:
+        # A context handle never substitutes for the speaker decision above.
+        # The gateway must additionally accept this transcript before the
+        # wrapper can read prior text or make a model call.
+        contextual_agent = ContextualVoiceAgent(
+            runtime.agent,
+            runtime.voice_conversations,
+            principal,
+            payload.conversation_id,
+            context_generation,
+        )
+        boundary = runtime.voice_boundary_for(preference, agent=contextual_agent)
         session_id = runtime.voice_session()
         speaker = "owner"
     if boundary is None or session_id is None:
+        runtime.voice_conversations.end(runtime.principal)
         return VoiceResponse(
             status="denied",
             reason_code="permission_denied",
             message=_message("permission_denied"),
         )
-    with language_hint_scope(payload.language if payload.language != "auto" else None):
+    # This preference selects the answer language, not the language spoken.
+    # Even an English-only answer preference must understand Persian input.
+    with language_hint_scope(None):
         outcome = boundary.handle_voice(
             VoiceProcessingRequest(
                 principal=principal,
@@ -975,6 +1012,7 @@ def voice_utterance(
             hold=is_stop_phrase if payload.hands_free else None,
         )
     if outcome.held:
+        runtime.voice_conversations.end(runtime.principal)
         # A hands-free stop phrase: the conversation ends and nothing is sent
         # to the agent (no model call, no transcript returned).
         runtime.activity.add("voice", "Conversation ended", "ok")
@@ -992,6 +1030,14 @@ def voice_utterance(
     runtime.activity.add("voice", "Voice processed", voice.status.value)
     permission = voice.permission_outcome.value if voice.permission_outcome else None
     reason = voice.error_category.value if voice.error_category else None
+    if contextual_agent is not None and contextual_agent.error_code is not None:
+        return VoiceResponse(
+            status="rejected",
+            reason_code=contextual_agent.error_code,
+            message=_message(contextual_agent.error_code),
+            speaker=speaker,
+            speaker_result=speaker_result,
+        )
     if voice.status is VoiceProcessingStatus.SUCCEEDED:
         decision_lang = runtime.language.resolve(
             preference, voice.transcript or "", stt_language=voice.language
@@ -1025,7 +1071,12 @@ def voice_utterance(
             speaker_result=speaker_result,
             language=decision_lang.response_language,
             direction=decision_lang.direction,
+            conversation_id=contextual_agent.conversation_id
+            if contextual_agent
+            else None,
         )
+    if voice.status is not VoiceProcessingStatus.CONFIRMATION_REQUIRED:
+        runtime.voice_conversations.end(runtime.principal)
     base = _result(
         runtime,
         permission=permission,
@@ -1134,6 +1185,8 @@ def voice_activation(
             message=_message("not_configured"),
         )
     runtime.owner_settings.set_voice_activation(payload.enabled)
+    if not payload.enabled:
+        runtime.voice_conversations.end(runtime.principal)
     if payload.enabled:
         runtime.warm_wake_recognizer()
     runtime.activity.add(

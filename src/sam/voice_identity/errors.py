@@ -42,11 +42,21 @@ class ModelSetupError(VoiceIdentityError):
     reason_code = "model_setup_error"
 
 
+class InsufficientSpeechError(VoiceIdentityError):
+    """A recording contains too little detected speech for an embedding."""
+
+    reason_code = "audio_too_short"
+
+    def __init__(self) -> None:
+        super().__init__("record a longer spoken sentence")
+
+
 __all__ = [
     "AuthorizationError",
     "ChallengeError",
     "EnrollmentError",
     "GuestModeError",
+    "InsufficientSpeechError",
     "ModelSetupError",
     "ProfileStoreError",
     "VoiceIdentityError",

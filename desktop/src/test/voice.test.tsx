@@ -117,19 +117,41 @@ describe("voice input", () => {
     await user.click(await screen.findByRole("button", { name: "Knowledge" }));
     expect(fake.track.stop).toHaveBeenCalled();
   });
+
+  it("does not restart capture or show recording when a microphone prompt resolves after leaving Home", async () => {
+    const fake = fakeAudioEnvironment();
+    let grant: ((stream: MediaStream) => void) | undefined;
+    fake.env.getUserMedia = vi.fn(() => new Promise<MediaStream>((resolve) => { grant = resolve; }));
+    const bridge = mockBridge({ status: vi.fn(async () => voiceStatus) });
+    renderApp(bridge, fake.env);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Talk to Sam" }));
+    await user.click(await screen.findByRole("button", { name: "Knowledge" }));
+    await act(async () => grant?.({ getTracks: () => [fake.track] } as unknown as MediaStream));
+    await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "Home" }));
+    expect(screen.queryByText(/Recording/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Talk to Sam" })).toBeEnabled();
+    expect(fake.track.stop).toHaveBeenCalledExactlyOnceWith();
+    expect(fake.context.createMediaStreamSource).not.toHaveBeenCalled();
+    expect(bridge.voiceUtterance).not.toHaveBeenCalled();
+  });
 });
 
 describe("Sam presence follows real state", () => {
   const presence = () => document.querySelector(".presence") as HTMLElement;
 
-  it("is idle, then listening with the real mic level, then thinking, then idle", async () => {
+  it("is idle, listening with the real mic level, thinking, speaking, then idle", async () => {
     const fake = fakeAudioEnvironment();
     let release: (value: unknown) => void = () => undefined;
+    let finishSpeech: () => void = () => undefined;
     const bridge = mockBridge({
       status: vi.fn(async () => voiceStatus),
       voiceUtterance: vi.fn(() => new Promise((resolve) => (release = resolve))) as never,
     });
-    renderApp(bridge, fake.env);
+    renderApp(bridge, fake.env, { speak: (_text, _language, onEnd) => {
+      finishSpeech = onEnd;
+      return { stop: () => onEnd("stopped") };
+    } });
     const user = userEvent.setup();
     await screen.findByRole("img", { name: "Sam is ready" });
     expect(presence().dataset.state).toBe("idle");
@@ -160,6 +182,8 @@ describe("Sam presence follows real state", () => {
         direction: "ltr",
       }),
     );
+    await waitFor(() => expect(presence().dataset.state).toBe("speaking"));
+    act(() => finishSpeech());
     await waitFor(() => expect(presence().dataset.state).toBe("idle"));
   });
 

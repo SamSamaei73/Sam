@@ -23,7 +23,7 @@ from sam.agent.errors import (
     ProviderUnavailableError,
 )
 from sam.agent.models import Message, MessageRole, ProviderResponse
-from sam.language.policy import detect_language
+from sam.language.policy import INSTRUCTIONS, detect_language
 from sam.models.models import (
     Capability,
     FailureCategory,
@@ -97,7 +97,18 @@ class RoutedLLMProvider:
         last_user = next(
             (m.content for m in reversed(messages) if m.role is MessageRole.USER), ""
         )
-        language = detect_language(last_user)
+        # AgentCore's reviewed instruction preserves the recognized language
+        # even when several languages share a script. Never infer a trusted
+        # instruction from arbitrary message text or provider output.
+        instruction_languages = {text: code for code, text in INSTRUCTIONS.items()}
+        language = next(
+            (
+                instruction_languages[m.content]
+                for m in messages
+                if m.role is MessageRole.SYSTEM and m.content in instruction_languages
+            ),
+            None,
+        ) or detect_language(last_user)
         capabilities = {Capability.TEXT}
         profile = TaskProfile.GENERAL
         if language == "fa":

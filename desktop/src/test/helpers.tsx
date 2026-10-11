@@ -63,6 +63,17 @@ export const baseProviders: ProvidersStatus = {
   available: true,
   providers: [
     {
+      provider_id: "openrouter",
+      display_name: "OpenRouter",
+      state: "not_configured",
+      enabled: false,
+      cost_class: "paid_api",
+      external: true,
+      free_tier_data_use: false,
+      note: "Connect your OpenRouter account in the local configuration to use hosted models.",
+      models: [],
+    },
+    {
       provider_id: "claude_subscription",
       display_name: "Claude (subscription)",
       state: "available",
@@ -215,6 +226,7 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
       status: approved ? ("approved" as const) : ("denied" as const),
       confirmation_id: id,
     })),
+    endVoiceConversation: vi.fn(async () => ok),
     voiceUtterance: vi.fn(async () => ({
       ...ok,
       transcript: null,
@@ -301,6 +313,8 @@ export function fakeAudioEnvironment() {
   const track = { stop: vi.fn() };
   const stream = { getTracks: () => [track] } as unknown as MediaStream;
   let handler: ((event: { inputBuffer: { getChannelData: () => Float32Array } }) => void) | null = null;
+  let speechFrame: ((frame: Float32Array, probability: number) => void) | null = null;
+  let speechPaused = false;
   const processor = {
     connect: vi.fn(),
     disconnect: vi.fn(),
@@ -320,15 +334,36 @@ export function fakeAudioEnvironment() {
     close: vi.fn(async () => undefined),
   } as unknown as AudioContext;
   const getUserMedia = vi.fn(async () => stream);
-  const env: AudioEnvironment = { getUserMedia, createContext: () => context };
+  const env: AudioEnvironment = {
+    getUserMedia,
+    createContext: () => context,
+    createSpeechInput: async (_context, _stream, onFrame) => {
+      speechFrame = onFrame;
+      speechPaused = false;
+      return {
+        pause: () => { speechPaused = true; },
+        resume: () => { speechPaused = false; },
+        stop: () => { speechFrame = null; },
+      };
+    },
+  };
   return {
     env,
     track,
     getUserMedia,
     processor,
     context,
-    emit(samples: Float32Array) {
+    emit(samples: Float32Array, probability?: number) {
       handler?.({ inputBuffer: { getChannelData: () => samples } });
+      if (!speechPaused && speechFrame) {
+        // Neural capture uses 512-sample frames; Recorder retains the original
+        // native buffer above, including fixtures for other sample rates.
+        for (let offset = 0; offset < samples.length && !speechPaused && speechFrame; offset += 512) {
+          const frame = samples.subarray(offset, offset + 512);
+          const level = Math.sqrt(frame.reduce((sum, sample) => sum + sample * sample, 0) / frame.length);
+          speechFrame(frame, probability ?? (level > 0.012 ? 0.99 : 0.01));
+        }
+      }
     },
   };
 }

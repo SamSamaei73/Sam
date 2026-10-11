@@ -15,7 +15,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
-from typing import Literal
 
 from sam.language.policy import LanguagePolicy, LanguagePreference
 from sam.permissions.audit import InMemoryAuditSink
@@ -33,7 +32,7 @@ from sam.permissions.store import InMemoryPermissionStore
 from sam.voice.agent_boundary import AgentSink, VoiceAgentBoundary
 from sam.voice.audit import InMemoryVoiceAuditSink
 from sam.voice.gateway import VoiceGateway
-from sam.voice.models import StartSessionRequest
+from sam.voice.models import MAX_VOICE_PROVIDER_TIMEOUT_SECONDS, StartSessionRequest
 from sam.voice.transcription import TranscriptionProvider
 from sam.voice_identity.audit import InMemoryVoiceIdentityAuditSink
 from sam.voice_identity.authority import OwnerProofAuthority, StepUpAuthority
@@ -160,6 +159,7 @@ class DesktopVoiceIdentity:
             transcription_provider=self._transcriber,
             audit_sink=InMemoryVoiceAuditSink(),
             clock=self._clock,
+            provider_timeout_seconds=MAX_VOICE_PROVIDER_TIMEOUT_SECONDS,
         )
         started = gateway.start_session(
             StartSessionRequest(principal=session.principal)
@@ -168,7 +168,7 @@ class DesktopVoiceIdentity:
         agent = self._agent
 
         def factory(preference: LanguagePreference) -> VoiceAgentBoundary:
-            def language_for(text: str, tag: str | None) -> Literal["fa", "en"]:
+            def language_for(text: str, tag: str | None) -> str:
                 decision = self.language.resolve(preference, text, stt_language=tag)
                 return decision.response_language
 

@@ -31,6 +31,9 @@ _REDACTED = "[REDACTED]"
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Anthropic API keys.
     re.compile(r"sk-ant-[A-Za-z0-9_-]{10,}"),
+    # OpenRouter API keys use their own hyphenated prefix. The generic sk-
+    # pattern below cannot recognize these; consume the entire opaque value.
+    re.compile(r"\bsk-or-v1-[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])"),
     # Generic "sk-..." style API keys (OpenAI and similar).
     re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"),
     # AWS access key ids.

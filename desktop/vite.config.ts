@@ -34,6 +34,7 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/**"] },
   },
   build: { target: "es2022", sourcemap: false },
+  worker: { format: "es" },
   test: {
     environment: "jsdom",
     globals: true,

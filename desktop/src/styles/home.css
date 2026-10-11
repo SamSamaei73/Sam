@@ -251,11 +251,6 @@
 .presence .core-glow {
   fill: rgba(80, 150, 255, 0.55);
 }
-.presence .core,
-.presence .core-glow,
-.presence .core-hi {
-  animation: breathe 6s ease-in-out infinite;
-}
 .presence .core-hi {
   fill: rgba(255, 255, 255, 0.35);
 }
@@ -269,12 +264,8 @@
   }
 }
 
-/* sleeping: hands-free, waiting only for its name — a slow, low-energy pulse */
-.presence[data-state="sleeping"] .core,
-.presence[data-state="sleeping"] .core-glow,
-.presence[data-state="sleeping"] .core-hi {
-  animation: breathe 9s ease-in-out infinite;
-}
+/* Idle/sleeping are still: animating a blurred SVG continuously costs CPU/GPU
+   even when no one is interacting. Motion is reserved for active states. */
 .presence[data-state="sleeping"] .core {
   filter: brightness(0.82) saturate(0.9);
 }

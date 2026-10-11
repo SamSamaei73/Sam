@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Sam desktop UI. Not an authorization boundary: PermissionEngine is the sole authority.",
   "scripts": {
+    "predev": "node scripts/prepare-voice.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/prepare-voice.mjs",
     "build": "tsc --noEmit && vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -13,7 +15,9 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@ricky0123/vad-web": "0.0.31",
     "@tauri-apps/api": "2.11.1",
+    "onnxruntime-web": "1.22.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

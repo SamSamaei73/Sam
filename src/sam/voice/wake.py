@@ -31,9 +31,8 @@ _LEAD_INS = frozenset(
 # The wake word must be among the first few words: a name mentioned later in
 # ordinary speech ("I told Sam...") is not a wake.
 _WAKE_POSITION_LIMIT = 2
-# More than this many words after the name means the wake segment already
-# carries a request ("Sam, what's the time?").
-_FOLLOW_MIN_WORDS = 2
+# Even a one-word command ("Sam, help") must reach the normal turn pipeline.
+_FOLLOW_MIN_WORDS = 1
 
 # Whole-utterance stop phrases (after an optional leading "Sam"). Matching is
 # exact on the normalized utterance, never a substring: "stop the timer" is a
@@ -71,7 +70,7 @@ MIN_WAKE_SECONDS = 0.25
 def normalize(text: str) -> list[str]:
     """Lowercase words without punctuation ("That's all." -> thats all)."""
 
-    cleaned = _PUNCTUATION.sub("", text.replace("’", "'").replace("'", "").lower())
+    cleaned = _PUNCTUATION.sub(" ", text.replace("’", "'").replace("'", "").lower())
     return [w for w in _SPACES.split(cleaned.strip()) if w]
 
 

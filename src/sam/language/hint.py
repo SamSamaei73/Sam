@@ -1,10 +1,10 @@
 """Request-scoped speech-recognition language hint.
 
-Phase 9 deliberately pins ``VoiceProcessingRequest`` to fields that cannot carry
-authority, so the user's language preference reaches the recognizer through a
-context-scoped wrapper instead of a new request field. The hint only nudges
-Whisper toward Persian or English (a 1-second clip is otherwise often
-mis-detected); it is never authority and is cleared when the request ends.
+``VoiceProcessingRequest`` contains no authority-bearing language field.
+Trusted callers can supply a recognition hint through a context-scoped
+wrapper; response-language preferences are separate from spoken input.
+Hints are limited to the static Whisper catalog, never grant authority,
+and are cleared when the request ends.
 """
 
 from __future__ import annotations
@@ -13,11 +13,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from sam.language.catalog import SUPPORTED_LANGUAGE_CODES
 from sam.voice.models import TranscriptionRequest
 from sam.voice.transcription import TranscriptionProvider
 
 _HINT: ContextVar[str | None] = ContextVar("sam_stt_language_hint", default=None)
-ALLOWED_HINTS = frozenset({"fa", "en"})
+ALLOWED_HINTS = SUPPORTED_LANGUAGE_CODES
 
 
 @contextmanager

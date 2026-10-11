@@ -12,7 +12,7 @@ import { useSam } from "../state";
  * Nothing here ever turns listening on by itself.
  */
 export function VoiceControl({ onType, onSetup }: { onType: () => void; onSetup: () => void }) {
-  const { t } = useSam();
+  const { identity, t } = useSam();
   const session = useSession();
   const hf = session.handsFree;
   const { cancelListening, setHomeActive } = session;
@@ -30,6 +30,7 @@ export function VoiceControl({ onType, onSetup }: { onType: () => void; onSetup:
 
   const listening = session.voice === "listening";
   const blocked = session.voice === "thinking" || session.voice === "permission";
+  const profileUpdateRequired = identity?.profile_compatible === false && identity.mode !== "guest_mode";
   const label = !session.micAvailable
     ? `${t("home.talk")} (${t("mic.notConfigured")})`
     : listening
@@ -55,7 +56,7 @@ export function VoiceControl({ onType, onSetup }: { onType: () => void; onSetup:
         data-listening={listening ? "true" : "false"}
         aria-label={label}
         title={label}
-        disabled={!session.micAvailable || (blocked && !listening)}
+        disabled={!session.micAvailable || ((blocked || profileUpdateRequired) && !listening)}
         onClick={() => void (listening ? session.stopListening() : session.startListening())}
       >
         <span className="mic-glow" aria-hidden="true" />
@@ -72,20 +73,22 @@ export function VoiceControl({ onType, onSetup }: { onType: () => void; onSetup:
             <span className="rec-dot" aria-hidden="true" />
             {t("mic.recording")} {session.recordingSeconds}s
           </span>
-        ) : hf.micDenied ? (
+        ) : hf.micDenied || hf.micFailed ? (
           <span className="hint-problem">
-            {t("home.micDenied")}{" "}
+            {t(hf.micDenied ? "home.micDenied" : "home.micFailed")}{" "}
             <button type="button" className="link-button" onClick={session.wakeNow}>
               {t("home.tryAgain")}
             </button>
           </span>
-        ) : hf.needsSetup ? (
+        ) : hf.needsSetup || profileUpdateRequired ? (
           <button type="button" className="link-button setup-link" onClick={onSetup}>
             {hf.setupState === "models_missing"
               ? t("home.installVoice")
               : hf.setupState === "restart_required"
                 ? t("home.finishVoice")
-                : t("home.setupVoice")}
+                : profileUpdateRequired
+                  ? t("home.updateVoice")
+                  : t("home.setupVoice")}
           </button>
         ) : session.micAvailable ? (
           hf.activation === "off" ? t("home.pushToTalk") : t("home.talk")

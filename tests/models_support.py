@@ -56,7 +56,7 @@ def request(
     return ModelRequest(
         request_id=request_id,
         messages=(Message(role=MessageRole.USER, content=text),),
-        language=language,  # type: ignore[arg-type]
+        language=language,
         capabilities=capabilities or frozenset({Capability.TEXT}),
         privacy_class=privacy,
         task_profile=profile,

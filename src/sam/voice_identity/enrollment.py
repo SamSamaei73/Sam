@@ -1,7 +1,7 @@
 """Explicit owner voice enrollment.
 
 The owner deliberately starts enrollment (backend-verified step-up first),
-records 3-5 varied samples (ideally Persian and English), and Sam aggregates
+records 3-5 varied samples in their preferred language, and Sam aggregates
 their embeddings into ONE L2-normalized template that is persisted only in the
 secure store. Raw enrollment audio is never stored: it is embedded in memory
 and dropped, and the per-sample embeddings are discarded when enrollment
@@ -20,12 +20,17 @@ from threading import RLock
 from sam.voice.models import DEFAULT_VOICE_PROVIDER_TIMEOUT_SECONDS, ValidatedAudio
 from sam.voice_identity.audit import VoiceIdentityAuditSink
 from sam.voice_identity.authority import StepUpAuthority, StepUpGrant
-from sam.voice_identity.errors import EnrollmentError, ProfileStoreError
+from sam.voice_identity.errors import (
+    EnrollmentError,
+    InsufficientSpeechError,
+    ProfileStoreError,
+)
 from sam.voice_identity.models import OwnerTemplate, utc_now
 from sam.voice_identity.policy import (
     DUPLICATE_SIMILARITY,
     ENROLLMENT_SESSION_TTL,
     MAX_ENROLLMENT_SAMPLES,
+    MIN_ENROLLMENT_MATCH_THRESHOLD,
     MIN_ENROLLMENT_SAMPLES,
     MIN_SAMPLE_SECONDS,
     MIN_SELF_CONSISTENCY,
@@ -34,6 +39,7 @@ from sam.voice_identity.policy import (
 from sam.voice_identity.providers import (
     SpeakerEmbeddingProvider,
     cosine_similarity,
+    embed_speaker,
     normalize,
 )
 from sam.voice_identity.quality import quality_problem
@@ -70,6 +76,7 @@ class EnrollmentStatus:
     enrolled: bool | None  # None: the secure store could not be read
     model_id: str
     sample_count: int | None = None
+    profile_compatible: bool | None = None
 
 
 class EnrollmentService:
@@ -103,7 +110,14 @@ class EnrollmentService:
             return EnrollmentStatus(None, self._embedder.model_id)
         if template is None:
             return EnrollmentStatus(False, self._embedder.model_id)
-        return EnrollmentStatus(True, template.model_id, template.sample_count)
+        return EnrollmentStatus(
+            True,
+            template.model_id,
+            template.sample_count,
+            template.model_id == self._embedder.model_id
+            and template.model_revision == self._embedder.model_revision
+            and template.dimension == self._embedder.dimension,
+        )
 
     # ------------------------------------------------------------- flow
 
@@ -137,7 +151,10 @@ class EnrollmentService:
                 return self._progress(session, False, problem)
             if audio.metadata.digest_sha256 in session.digests:
                 return self._progress(session, False, "duplicate_sample")
-            embedding = self._embed(audio)
+            try:
+                embedding = self._embed(audio)
+            except InsufficientSpeechError:
+                return self._progress(session, False, "audio_too_short")
             if embedding is None:
                 return self._progress(session, False, "provider_error")
             unit = normalize(embedding)
@@ -199,7 +216,14 @@ class EnrollmentService:
     def _embed(self, audio: ValidatedAudio) -> tuple[float, ...] | None:
         deadline = time.monotonic() + self._timeout
         try:
-            raw = self._embedder.embed(audio, timeout_seconds=self._timeout)
+            raw = embed_speaker(
+                self._embedder,
+                audio,
+                minimum_speech_seconds=MIN_SAMPLE_SECONDS,
+                timeout_seconds=self._timeout,
+            )
+        except InsufficientSpeechError:
+            raise
         except Exception:
             return None
         if time.monotonic() > deadline:
@@ -216,11 +240,15 @@ class EnrollmentService:
                 ):
                     return "inconsistent_samples"
         # Held-out check: each sample must verify against the mean of the
-        # others at Sam's own threshold, or the owner would often be rejected.
+        # others at the enrollment floor or the owner's stricter configured
+        # threshold. Supporting short verification must not weaken enrollment.
+        enrollment_policy = ThresholdPolicy(
+            max(self._policy.threshold, MIN_ENROLLMENT_MATCH_THRESHOLD)
+        )
         for i in range(n):
             rest = [e for k, e in enumerate(embeddings) if k != i]
             mean = normalize([sum(col) / len(rest) for col in zip(*rest, strict=True)])
-            if not self._policy.accepts(cosine_similarity(mean, embeddings[i])):
+            if not enrollment_policy.accepts(cosine_similarity(mean, embeddings[i])):
                 return "unstable_samples"
         return None
 

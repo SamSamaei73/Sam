@@ -110,6 +110,7 @@ def test_error_bodies_do_not_leak_the_token() -> None:
             {"confirmation_id": "c", "approved": True, "principal": "x"},
         ),
         ("/voice/utterance", {"audio_base64": "AA==", "principal": "x"}),
+        ("/voice/conversation/end", {"principal": "x"}),
         (
             "/tts/speak",
             {"text": "hi", "voice_profile": "sam_default", "endpoint": "http://x"},
@@ -645,6 +646,7 @@ def test_router_has_only_the_documented_routes() -> None:
             ("GET", "/desktop/v1/activity"),
             ("POST", "/desktop/v1/confirmations/decide"),
             ("POST", "/desktop/v1/voice/utterance"),
+            ("POST", "/desktop/v1/voice/conversation/end"),
             ("POST", "/desktop/v1/voice/wake"),
             ("POST", "/desktop/v1/voice/activation"),
             ("POST", "/desktop/v1/tts/speak"),
@@ -718,7 +720,7 @@ def test_desktop_source_has_no_generic_capabilities() -> None:
     assert "PermissionGrant(" not in api_text
     assert "create_grant" not in api_text
     assert "allow_all" not in api_text
-    assert inspect.getsource(desktop_api).count("@router.") == 16
+    assert inspect.getsource(desktop_api).count("@router.") == 17
 
 
 # --------------------------------------------- CRITICAL step-up / audit

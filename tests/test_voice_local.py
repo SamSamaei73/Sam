@@ -50,10 +50,10 @@ def fake_model(tmp_path: Path, content: dict[str, bytes]) -> registry.TrustedMod
 
 
 def test_registry_pins_every_model_to_a_commit_and_a_hash() -> None:
-    models = [registry.SPEAKER_MODEL, *registry.STT_MODELS.values()]
+    models = [*registry.SPEAKER_MODELS.values(), *registry.STT_MODELS.values()]
     for m in models:
         assert re.fullmatch(r"[0-9a-f]{40}", m.revision), m.key
-        assert m.license in {"Apache-2.0", "MIT"}
+        assert m.license in {"Apache-2.0", "MIT", "CC-BY-4.0"}
         for f in m.files:
             assert re.fullmatch(r"[0-9a-f]{64}", f.sha256) and f.size > 0
     assert set(registry.STT_MODELS) == {"small", "medium", "large-v3"}
@@ -61,6 +61,7 @@ def test_registry_pins_every_model_to_a_commit_and_a_hash() -> None:
         ".en" in m.repo_id for m in registry.STT_MODELS.values()
     )  # multilingual only
     assert registry.SPEAKER_MODEL.repo_id == "speechbrain/spkrec-ecapa-voxceleb"
+    assert set(registry.SPEAKER_MODELS) == {"ecapa", "wespeaker"}
 
 
 def test_only_allowlisted_stt_models_can_be_selected() -> None:
@@ -289,7 +290,14 @@ def test_hub_downloads_exist_only_in_the_explicit_setup_module() -> None:
 
 
 def test_no_network_or_persistence_in_the_runtime_providers() -> None:
-    for name in ("speaker.py", "stt.py", "audio.py", "registry.py", "factory.py"):
+    for name in (
+        "speaker.py",
+        "speaker_wespeaker.py",
+        "stt.py",
+        "audio.py",
+        "registry.py",
+        "factory.py",
+    ):
         tree = ast.parse(SOURCES[name])
         imported = {
             (n.module or "").split(".")[0]

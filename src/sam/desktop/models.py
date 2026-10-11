@@ -16,6 +16,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from sam.language.catalog import LanguageCode
+
 # Bounds (kept in one place; all are checked again by the engines they feed).
 MAX_CHAT_MESSAGE_CHARS = 100_000  # matches sam.agent.models.AgentRequest
 MAX_TTS_INPUT_CHARS = 20_000  # the TTS gateway enforces its own tighter limit
@@ -105,6 +107,18 @@ class VoiceUtteranceRequest(_Request):
     # A turn of a hands-free conversation: a whole-utterance stop phrase
     # ("go to sleep") ends the conversation and is never sent to the agent.
     hands_free: bool = False
+    # Ephemeral conversation lookup only. Every recording still independently
+    # verifies its speaker before this context can be used.
+    conversation_id: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{32}$", repr=False
+    )
+
+
+class VoiceConversationEndRequest(_Request):
+    # Omission also invalidates a first turn whose reply is still in flight.
+    conversation_id: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{32}$", repr=False
+    )
 
 
 # A wake candidate is a few seconds of 16 kHz mono PCM16 at most.
@@ -178,7 +192,7 @@ class SpeakRequest(_Request):
     # The language of the text. If given, the backend refuses a profile that
     # cannot speak it (text-only instead) and never falls back to another
     # profile or provider.
-    language: Literal["fa", "en"] | None = None
+    language: LanguageCode | None = None
     confirmation_id: str | None = Field(default=None, max_length=MAX_ID_CHARS)
 
 
@@ -209,7 +223,7 @@ class OperationResult(BaseModel):
 
 class ChatResponse(OperationResult):
     reply: str | None = None
-    language: Literal["fa", "en"] | None = None
+    language: LanguageCode | None = None
     direction: Literal["rtl", "ltr"] | None = None
 
 
@@ -223,7 +237,7 @@ class SpeechProfile(BaseModel):
     profile_id: str
     # Languages this trusted voice can speak. A response in a language no
     # profile covers stays text-only (never silently sent to another provider).
-    languages: list[Literal["fa", "en"]] = ["en"]
+    languages: list[LanguageCode] = ["en"]
 
 
 class SubsystemHealthItem(BaseModel):
@@ -390,8 +404,9 @@ class VoiceResponse(OperationResult):
     # Safe, normalized speaker metadata: never a score, embedding, or template.
     speaker: Literal["owner", "guest"] | None = None
     speaker_result: str | None = None
-    language: Literal["fa", "en"] | None = None
+    language: LanguageCode | None = None
     direction: Literal["rtl", "ltr"] | None = None
+    conversation_id: str | None = Field(default=None, repr=False)
 
 
 class VoiceWakeResponse(OperationResult):
@@ -454,9 +469,12 @@ class IdentityStatusResponse(BaseModel):
     step_up_configured: bool = False
     models: VoiceModelsInfo = VoiceModelsInfo()
     enrolled: bool | None = None  # None: the secure store could not be read
+    profile_compatible: bool | None = None  # safe model/preprocessing metadata only
     mode: Literal["owner_only", "guest_mode"] = "owner_only"
     guest: GuestInfo = GuestInfo(active=False)
-    last_verification: Literal["verified", "not_verified", "unknown"] | None = None
+    last_verification: (
+        Literal["verified", "not_verified", "insufficient_audio", "unknown"] | None
+    ) = None
     speaker_model: Capability = "not_configured"
     local_stt: Capability = "not_configured"
     persian_tts: Capability = "not_configured"
@@ -485,7 +503,7 @@ class ChallengeResponse(OperationResult):
 # ------------------------------------------------ AI providers (Phase 13)
 
 ProviderIdLiteral = Literal[
-    "claude_subscription", "gemini_free", "openai_api", "grok_api"
+    "claude_subscription", "gemini_free", "openai_api", "grok_api", "openrouter"
 ]
 ProviderStateLiteral = Literal[
     "available",

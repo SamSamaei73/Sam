@@ -17,6 +17,7 @@ from sam.voice_identity.errors import (
 )
 from sam.voice_identity.models import OwnerTemplate
 from sam.voice_identity.policy import (
+    MIN_ENROLLMENT_MATCH_THRESHOLD,
     THRESHOLD_MAX,
     THRESHOLD_MIN,
     SpeakerClass,
@@ -54,6 +55,14 @@ def test_threshold_boundary_is_inclusive_and_nan_safe() -> None:
     assert policy.accepts(0.5) and policy.accepts(0.9)
     assert not policy.accepts(0.4999999)
     assert not policy.accepts(math.nan) and not policy.accepts(math.inf * 0)
+
+
+def test_default_threshold_keeps_an_inclusive_bounded_decision() -> None:
+    policy = ThresholdPolicy()
+    assert policy.threshold == 0.5
+    assert policy.accepts(0.5)
+    assert not policy.accepts(0.4999999)
+    assert not policy.accepts(math.nan)
 
 
 @pytest.mark.parametrize(
@@ -411,13 +420,59 @@ def test_threshold_boundary_with_a_constructed_similarity() -> None:
         assert got.result == expected, score
 
 
-def test_short_and_quiet_audio_is_insufficient() -> None:
+def test_below_quarter_second_is_insufficient_before_model_work() -> None:
     h = Harness()
     h.enroll_owner()
+    calls = h.embedder.call_count
     assert (
-        h.verifier.verify(h.audio(OWNER_VOICE, frames=8_000)).result
+        h.verifier.verify(h.audio(OWNER_VOICE, frames=3_999)).result
         == "insufficient_audio"
     )
+    assert h.embedder.call_count == calls
+
+
+@pytest.mark.parametrize("frames", [4_000, 8_000, 15_999])
+def test_short_requests_still_require_a_fresh_speaker_match(frames: int) -> None:
+    h = Harness()
+    h.enroll_owner()
+    calls = h.embedder.call_count
+    # A successful short owner request grants no authority to the next clip.
+    for index, (voice, expected) in enumerate(
+        [
+            (OWNER_VOICE, "owner_verified"),
+            (OTHER_VOICE, "owner_not_verified"),
+            (OWNER_VOICE, "owner_verified"),
+        ],
+        start=1,
+    ):
+        assert h.verifier.verify(h.audio(voice, frames=frames)).result == expected
+        assert h.embedder.call_count == calls + index
+
+
+@pytest.mark.parametrize(("threshold", "pairwise"), [(0.3, 0.35), (0.7, 0.5)])
+def test_enrollment_keeps_stronger_held_out_evidence(
+    threshold: float, pairwise: float
+) -> None:
+    h = Harness(threshold=threshold)
+    session = h.enrollment.begin(h.step_up.mint("enroll"))
+    vectors = []
+    # Three different unit vectors, each with this exact pairwise similarity.
+    for index in range(3):
+        vector = [0.0] * DIM
+        vector[0] = math.sqrt(pairwise)
+        vector[index + 1] = math.sqrt(1 - pairwise)
+        vectors.append(tuple(vector))
+        clip = h.audio(OWNER_VOICE)
+        h.embedder.register(clip.metadata.digest_sha256, vector)
+        assert h.enrollment.add_sample(session, clip).accepted
+    held_out = cosine_similarity(
+        vectors[0], normalize([a + b for a, b in zip(*vectors[1:], strict=True)])
+    )
+    assert held_out > 0.3
+    assert held_out < max(threshold, MIN_ENROLLMENT_MATCH_THRESHOLD)
+    result = h.enrollment.complete(session)
+    assert not result.completed and result.reason_code == "unstable_samples"
+    assert h.store.load() is None
 
 
 def test_store_read_failure_is_an_error_never_not_enrolled() -> None:
