@@ -1,155 +1,125 @@
 # Sam
 
-Phase 2 provides Sam's agent core foundation: a typed FastAPI service with environment-based configuration, centralized logging, a provider abstraction, a lifecycle-managed Claude provider, and a bounded `/agent` endpoint.
+**A personal AI desktop assistant with local voice processing and explicit permissions.**
 
-Phase 3 adds Sam's Permission Engine: a deterministic, provider-neutral authorization boundary in `src/sam/permissions/` that will sit between a future planner/tool router and any real tool execution. It decides ALLOW / DENY / CONFIRM_REQUIRED for a typed `(principal, action, resource, scope)` request — never the LLM — and fails closed on anything unknown, malformed, revoked, expired, or unexpected. See [`docs/permissions.md`](docs/permissions.md) for the full model, precedence rules, and threat model. No tool, MCP server, or integration is implemented yet, and no new API endpoints were added — see that doc's "Future integration boundary" section for why.
+Sam combines a React + Tauri desktop interface with a typed Python/FastAPI
+backend. It brings together conversation, source-attributed knowledge, scoped
+memory, professional evidence, and review-first career workflows. A
+deterministic permission engine decides what an operation may do; model output
+and voice recognition do not grant authority.
 
-Phase 4 adds Sam's Memory Engine: a cloud-ready-but-not-cloud-dependent store for working, episodic, semantic, and project memory in `src/sam/memory/`. A `MemoryCandidate` always passes through a deterministic `MemoryPolicy` before anything is persisted — the LLM can propose a memory, never write one directly — and every read/update/delete is scoped to an explicit principal, enforced by the store itself. See [`docs/memory.md`](docs/memory.md) for the full model, the secret-detection policy, and the intended future PostgreSQL + pgvector migration. Only an in-memory reference store is implemented; no database, embeddings, or new API endpoints were added.
+> **Development status:** Phase 17 production hardening is pending independent
+> re-review and is **not approved**. Short-phrase owner voice verification remains
+> unreliable. Sam is under active development, not a production-ready release.
 
-Phase 5 adds Sam's Computer Control foundation: a typed, modular abstraction in `src/sam/computer/` for screenshots, active-window queries, and bounded mouse/keyboard interaction — never an unrestricted autonomous computer agent. Every `ComputerAction` maps to a `PermissionRequest` and is authorized exclusively by the existing Phase 3 Permission Engine (extended with one new `COMPUTER` resource) before `ComputerController` ever calls a backend; keyboard actions require confirmation, never a grant alone. See [`docs/computer-control.md`](docs/computer-control.md) for the full architecture, risk model, and security write-up. No real OS backend ships in Phase 5 — only a deterministic fake for tests and a structurally-complete placeholder that honestly reports itself unavailable — and no shell, terminal, filesystem, browser, or clipboard capability exists anywhere in the package.
+[Get started](#get-started) · [Architecture](docs/architecture.md) ·
+[Development](docs/development.md) · [Roadmap](docs/roadmap.md) ·
+[Contributing](CONTRIBUTING.md)
 
-Phase 6 adds Sam's Coding Agent foundation: a controlled engineering workflow in `src/sam/coding/` for repository inspection, bounded file writes with optimistic concurrency (a SHA-256 hash check that refuses to overwrite a file changed since it was read), and a closed set of allowlisted verification commands (tests/lint/typecheck/`git diff --check`) — never an unrestricted shell agent. Every operation passes through the existing Phase 3 Permission Engine (extended with one new `CODE` resource, reusing the pre-existing `GIT` resource for git status/diff) before `CodingExecutor` ever calls `RepositoryBackend`; running tests/lint/typecheck always requires confirmation. Command execution never uses a shell, resolves executables only from a small trusted directory list (never the repository or the ambient `PATH`), and passes the spawned process a minimal explicit environment. See [`docs/coding-agent.md`](docs/coding-agent.md) for the full architecture and security write-up. No real Claude Code/Codex provider integration was implemented — only a narrow `CodingProvider` Protocol and a deterministic fake — and `git commit`/`push`/`reset`/`clean`/`restore` do not exist as operations at all.
+## Interface preview
 
-Phase 7 adds Sam's Knowledge Layer: a provider-independent system in `src/sam/knowledge/` for ingesting user-provided reference material (PDF, TXT, Markdown, JSON, CSV) into deterministically-chunked, source-attributed storage — separate from Personal Memory and never wired into it automatically. Every operation (ingest / get / list / retrieve / remove) passes through the existing Phase 3 Permission Engine (extended with one new `KNOWLEDGE` resource) before `KnowledgeEngine` ever calls its store, index, or parser; deleting a resource always requires confirmation. A best-effort PDF text/page extractor (standard-library-only — no external PDF dependency) preserves page boundaries and never fabricates a citation for content it did not actually find; a scanned/image-only PDF is honestly rejected rather than silently "learned" as empty. See [`docs/knowledge.md`](docs/knowledge.md) for the full architecture and security write-up. Only an in-memory store and a deterministic lexical index are implemented — no vector database, no real embedding provider (`FakeEmbeddingProvider` only), and no wiring into `AgentCore`.
+![Sam home interface with navigation, voice orb and voice setup prompt](docs/images/sam-home-demo.png)
 
-Phase 8 adds Sam's MCP Gateway & Integrations Framework: a secure, provider-independent path (`src/sam/mcp/`) from a proposed tool call to an external side effect, built and tested entirely against deterministic fakes — **no real integration is connected**. MCP is treated as an integration protocol, not a security boundary: a trusted registry (not the server), split into a read-only runtime view and a separate administrative interface that the runtime path never receives, owns each tool's permission binding, scope, credential reference, timeout, size limits and verification requirement; tool descriptions, server metadata and tool results are untrusted data; and every call passes canonical-id resolution, schema validation, deterministic scope derivation and the existing Phase 3 `PermissionEngine` (the sole authorization authority, with confirmations bound to the exact arguments) before a credential is resolved from a trusted reference and at most one bounded, timed transport call is made. Results are validated, checked for credential echo, optionally verified, audited content-free, and never written to Memory or Knowledge. AgentCore is unchanged; `MCPAgentBoundary` is the typed integration surface. See [`docs/mcp.md`](docs/mcp.md) for the trust model, lifecycle, and limitations.
+*Development preview using the built-in synthetic setup fixture at commit
+`f0e46ab`. No owner data or live voice verification is shown.*
 
-Phase 9 adds Sam's Secure Voice Input & Speech Understanding Foundation: a provider-independent path (`src/sam/voice/`) from one explicitly supplied, bounded audio input to a normalized transcript with provenance, built and tested entirely against deterministic fakes — **no real speech-to-text, microphone, wake word, background listening, or biometric enrollment**. Only 16-bit PCM and PCM-WAV are accepted (structurally validated, no codecs, no ffmpeg, no subprocess); every operation passes the existing Phase 3 `PermissionEngine` (a new `VOICE` resource) before any provider is called; the transcription provider is untrusted (validated results, contained errors, Sam-owned timeouts, at most one call, no retries); and an optional voice-identity result is only a transient, signed, one-time, session/utterance/audio-bound *authentication signal* — **voice identity is not authorization, and voice input never bypasses PermissionEngine, confirmation, or stronger authentication**. Raw audio and transcripts are never persisted, audited, or written to Memory or Knowledge, and a transcript that looks like it contains a secret is withheld entirely and never forwarded to AgentCore or an LLM provider. The voice layer creates no threads: provider timeouts are Sam-owned and passed to the provider, with late results discarded. AgentCore is unchanged; `VoiceAgentBoundary` forwards only the validated transcript text as ordinary user input. See [`docs/voice.md`](docs/voice.md) for the trust model and limitations.
+## What is here today
 
-Phase 10 adds Sam's Secure Voice Synthesis layer (`src/sam/tts/`): explicit, non-streaming REST text-to-speech with a provider-independent `TTSGateway` and **Fish Audio as the first real provider** (`FishAudioProvider`, exercised in tests only through `httpx.MockTransport` — no live call, no real key, no billing). **Fish Audio is a synthesis provider, not an authorization or security boundary**, and **Phase 10 does not implement voice cloning**. Synthesis has its own `PermissionResource.SPEECH_SYNTHESIS` (`SEND`, MEDIUM) so a Phase 9 `voice` grant can never authorize sending text to an external service; the voice and model come only from a trusted, read-only voice profile catalog (never from the LLM, the text, or Fish); the endpoint is pinned (`https://api.fish.audio/v1/tts`, no redirects, no ambient proxy/env, no base-URL setting); the API key exists only at the provider execution boundary; **secret-containing text is never sent to Fish Audio**; provider output is validated (size, MP3 signature, digest computed by Sam); there is at most one HTTP call per request and no retries; and text and audio are never persisted, audited, or written to Memory or Knowledge. See [`docs/tts.md`](docs/tts.md) for the verified Fish API assumptions, trust model, and limitations.
+| Area | Implemented scope and limits |
+| --- | --- |
+| Desktop | React/TypeScript interface in a Tauri/Rust shell, connected to a bounded local backend bridge. |
+| Voice | Optional local wake recognition, speaker verification and multilingual transcription on macOS/Apple silicon; native macOS speech and optional configured cloud speech. Brief owner utterances can still fail verification. |
+| Model routing | Policy-driven provider selection, readiness and privacy controls. Explicit OpenRouter configuration can use paid credits; automatic paid fallback is off. |
+| Knowledge and memory | Separate domains for source-attributed document retrieval and policy-checked personal memory. They do not automatically absorb every conversation. |
+| Professional and career | Evidence-backed professional claims and review-first application/outreach drafts. Real submission and email adapters remain unavailable. |
+| Automations | Bounded reminders, summaries and condition watches with an in-app inbox. They do not inherit permission to send, submit or purchase. |
+| Production hardening | Local SQLite persistence, recovery and backup mechanisms under Phase 17 review. Their presence is not release approval. |
+| Computer, coding and MCP | Permission-checked foundations; availability depends on configured, reviewed adapters. This is not an unrestricted computer-control agent. |
 
-Phase 13 adds Sam's Multi-Model Router (`src/sam/models/`): one deterministic, policy-driven boundary between `AgentCore` and every language-model provider, plus a cost policy, a privacy policy and an owner-controlled personal-content policy. **The router is not an authorization boundary** (PermissionEngine still is) and provider output is untrusted text that can never execute a tool, approve an action, or change policy. Claude is used **only through your own Claude Code subscription** via a tightly constrained `claude -p` adapter (allowlisted environment so no `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` can reach it, `--restricted` isolation, all tools disabled, the exact claude.ai subscription login confirmed through `claude auth status`, owner-local deployments only, unavailable if managed policy is present), never the paid API; Gemini runs on the **Free Tier** only and only after you attest the project is unbilled (Sam cannot verify Google Cloud billing); OpenAI and Grok are present but permanently disabled; **`PAID_FALLBACK = OFF`**. Secrets and voice-identity material are never sent to any provider, private content is denied to the Gemini Free Tier by default, and Sam adds no topic censorship of its own while never bypassing a provider's own safety policy. See [`docs/model-routing.md`](docs/model-routing.md) and [`docs/privacy.md`](docs/privacy.md).
+## Get started
 
-Phase 14 adds Sam's Professional Intelligence layer (`src/sam/professional/`): an **evidence-backed** model of your professional profile (skills, employment, projects, education, publications, research) built only from documents you choose to add, never from what Sam is told. Every fact keeps its provenance; documentary evidence strength (corroborated across independent source families, single source, or none), the owner's review and acceptance are separate, computed facts, so a second version of the same CV never counts as corroboration, the owner's confirmation never masquerades as a document, a refresh replaces a source's evidence atomically, and deleting one source never destroys another source's corroborating evidence. It is separate from Memory and Knowledge, has its own `PROFESSIONAL` permission resource (removal is always confirmed), is in-memory only, refuses Guest Mode, and shows a model only a read-only, privacy-filtered view. A model may suggest items but they stay unverified until you confirm them; conflicting sources are kept for you to resolve; and years of experience are computed by code, never estimated. This is not the career or application agent (that is a later phase). See [`docs/professional-intelligence.md`](docs/professional-intelligence.md).
+### Backend development
 
-Phase 15 adds Sam's Proactive Agent foundation (`src/sam/proactive/`): reminders, scheduled summaries and condition watches that run over time and surface meaningful changes in an in-app **Automations** inbox. **Proactive is not autonomous authority**: every run is authorized by the PermissionEngine at run time under its own `PROACTIVE` resource, task text is data, a confirmation is never stored or reused, and a run only reads and notifies (it never sends, deletes, buys, publishes or performs a HIGH/CRITICAL action). Schedules are deterministic with an explicit timezone (DST-safe), at most hourly; the bounded scheduler never overlaps a task, never replays missed runs, and enforces timeouts. Watches use trusted observers only, with Sam-owned deduplication and cooldown. Summaries go through the Phase 13 router with the task's current privacy class (secrets never leave the device, paid fallback stays off, refusals are final). Background scheduling is off until you switch it on; in-memory only; owner-only (Guest Mode refused). This is not the career agent (a later phase). See [`docs/proactive-agent.md`](docs/proactive-agent.md).
-
-Phase 16 adds Sam's Career & PhD Agent (`src/sam/career/`): **review-first** job and PhD application support built only from evidence you have accepted in Professional Intelligence. It imports listings (unknown salary, funding, deadline or sponsorship stay unknown), deduplicates them with the official source as canonical, checks each requirement against your evidence (no scores), drafts CVs, cover letters, research statements and outreach in which every factual line is checked and dates are copied exactly, and leaves sensitive questions (salary, sponsorship, work authorization and similar) for you to answer. It never submits, sends, uploads or creates accounts on its own: submitting needs `CAREER SUBMIT` and sending needs `CAREER SEND` (plus the e-mail tool's permission), each with a one-time confirmation bound to the hash of an immutable manifest of the exact payload (destination, documents, answers; or recipient, subject and body). Each action runs at most once, and a result Sam cannot verify (a timeout or lost response) is recorded as outcome unknown: never retried automatically and never marked submitted. It never guesses e-mail addresses; LinkedIn is drafts only. In-memory only; owner-only (Guest Mode refused). The desktop app configures no submission adapter, e-mail tool or listing source, so those fail closed. The attempt ledger is in memory, so real submission and sending stay disabled until a later phase adds durable, restart-safe attempt storage. See [`docs/career-phd-agent.md`](docs/career-phd-agent.md).
-
-Phase 17 (in progress, pending review) hardens Sam for durable local production (`src/sam/storage/`, `src/sam/system/`). With `APP_ENV=production`, Sam keeps its Professional, Proactive and Career state in one owner-only SQLite database in `~/Library/Application Support/app.sam.desktop` (never in this repository), with explicit migrations, integrity checks at startup, a single-instance lock and verified local backups (`python -m sam.system.cli backup`, `restore <id> --confirm <id>` with Sam stopped). A Career submission or message is recorded durably as in-flight **before** anything is sent, the database itself refuses a duplicate, and after a crash an interrupted action becomes *outcome unknown*, never retried automatically. Confirmations never survive a restart; sensitive application answers are never written to disk; scheduling stays off after a restart unless you chose to keep it on. Credentials come from the environment or the macOS Keychain, never a plaintext fallback. The System panel shows content-free health. Development and tests stay in memory. Real Career submission and sending remain unavailable. See [`docs/production-hardening.md`](docs/production-hardening.md).
-
-## Requirements
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-
-## Setup
-
-```bash
-uv sync
-cp .env.example .env
-```
-
-For one account across hosted AI, set `OPENROUTER_API_KEY` in `.env`.
-Sam then uses `OPENROUTER_MODEL` (default `openai/gpt-4.1-mini`) for its
-language-model features and the same key for optional cloud speech output.
-The default speech model is `openai/gpt-4o-mini-tts-2025-12-15`; configure its
-stock voice with `OPENROUTER_TTS_VOICE`. No separate vendor keys are needed
-for these paths. Requests use your OpenRouter balance, and paid fallback stays
-off. Wake detection, owner verification and transcription remain local.
-See [OpenRouter setup and packaged-app configuration](docs/model-routing.md#openrouter-one-account-for-hosted-models).
-
-Local voice capture, spoken replies and verified follow-up context are described
-in [voice activation](docs/voice-activation.md). Short-phrase owner verification
-is still unreliable; these changes do not resolve that matching limitation.
-
-## Run
+Install Python **3.12+** and [uv](https://docs.astral.sh/uv/), then:
 
 ```bash
+git clone https://github.com/SamSamaei73/Sam.git
+cd Sam
+uv sync --frozen
+cp -n .env.example .env
 make run
 ```
 
-The server reads `API_HOST` and `API_PORT` from the Pydantic settings model, so
-values in `.env` control the development binding. The defaults bind only to
-`127.0.0.1:8000`.
-
-The service exposes `GET /health`.
-
-The agent exposes `POST /agent` with a JSON body containing a `message`.
-It uses the shared model router, including the configured OpenRouter model.
-Provider endpoints are pinned to HTTPS, requests are bounded, and credentials
-are never passed to the desktop webview. Settings shows provider readiness,
-the configured model and billing class. Model availability does not grant tools
-permission to perform actions.
-
-## Checks
+In another terminal:
 
 ```bash
-make check
+curl --fail http://127.0.0.1:8000/health
 ```
 
-Phase 2 intentionally contains no tools with side effects, integrations beyond
-the Claude provider, memory, UI, voice, automation, or permission system.
-Phase 3 intentionally contains no memory, database, Redis, MCP integrations,
-real external tools (filesystem, terminal, browser, Gmail, Git, ...), or
-autonomous/background execution — see `docs/permissions.md` for the full
-scope boundary.
-Phase 4 intentionally contains no PostgreSQL, pgvector, Supabase, Redis,
-vector database, embeddings, MCP integrations, real authentication, or
-autonomous/background memory behavior — see `docs/memory.md` for the full
-scope boundary.
-Phase 5 intentionally contains no shell/terminal execution, filesystem
-manipulation, browser automation, clipboard access, MCP, real
-authentication, a real OS backend, or autonomous/background action
-loops — see `docs/computer-control.md` for the full scope boundary.
-Phase 6 intentionally contains no arbitrary shell/command execution,
-`eval`/`exec`, file deletion, git commit/push/reset/clean/restore, a
-real Claude Code/Codex provider adapter, MCP, real authentication, or
-autonomous/background coding loops — see `docs/coding-agent.md` for the
-full scope boundary.
-Phase 7 intentionally contains no automatic writes to Memory, PostgreSQL/
-pgvector/Supabase/Redis/vector database, real embedding provider, OCR,
-MCP, AgentCore wiring, UI, or autonomous/background ingestion — see
-`docs/knowledge.md` for the full scope boundary.
-Phase 8 intentionally contains no real Gmail/Calendar/GitHub/Meta/Buffer/
-Metricool/RevenueCat integration, real OAuth or credential storage, network
-or subprocess transport, MCP SDK dependency, automatic Memory/Knowledge
-writes, AgentCore rewrite, autonomous tool loop, or background polling — see
-`docs/mcp.md` for the full scope boundary.
-Phase 9 intentionally contains no real speech-to-text or cloud STT API, text-to-speech
-(Fish Audio is Phase 10), microphone or audio-device access, wake word,
-always-on/background listening, biometric enrollment or database, challenge-
-response, OS-level authentication, MCP/tool execution from voice, automatic
-Memory/Knowledge writes, or AgentCore rewrite — see `docs/voice.md` for the
-full scope boundary.
-Phase 10 intentionally contains no voice cloning, voice creation/enrollment or reference-audio
-upload, WebSocket/streaming synthesis, arbitrary Fish API operations, Fish ASR, audio
-playback, UI, automatic synthesis of agent output, MCP/tool execution from speech, or
-automatic Memory/Knowledge writes — see `docs/tts.md` for the full scope boundary.
+The development server defaults to loopback (`127.0.0.1:8000`). The health
+endpoint does not require a hosted model. Agent replies require a configured
+provider; see [model routing and OpenRouter setup](docs/model-routing.md).
+OpenRouter requests consume the owner's configured balance. Keep credentials
+in local configuration, outside version control.
 
-## Test-stack compatibility
+### Explore the interface
 
-Starlette 1.6.0 still imports a deprecated AnyIO type alias from its test client.
-The test configuration narrowly filters that single upstream warning until a
-Starlette release includes the existing upstream fix. All other warnings are
-treated as errors, and no warning suppression exists for the `httpx`
-deprecation described below.
+Use **Node.js 22.22.2+ within the 22.x line** for the locked desktop toolchain
+(22.23.2 was used for the documentation preview).
 
-Two HTTP clients are declared, for two different purposes:
-
-```text
-httpx   (runtime dependency)
-  -> Sam's production HTTP client: the Fish Audio provider, and the transport
-     the Anthropic SDK is driven with. Tests use httpx.MockTransport for both.
-
-httpx2  (development/test dependency only, in the `dev` group)
-  -> required by the current Starlette TestClient, which prefers httpx2 and
-     deprecates httpx. Nothing under src/ imports it; Sam and Fish traffic
-     never use it.
+```bash
+cd desktop
+npm ci
+npm run dev -- --host 127.0.0.1
 ```
 
-`httpx2` is the Pydantic-maintained continuation of `httpx` (PyPI project
-`httpx2`, source `github.com/pydantic/httpx2`). It resolves from the standard
-PyPI registry with no path, git, or index override, and brings `httpcore2` and
-`truststore` transitively. Its `httpx2-jsfetch` dependency is gated to
-`sys_platform == 'emscripten'` and is never installed on macOS or Linux.
-Because it is declared and locked, `uv sync --frozen` reproduces the suite
-exactly; an undeclared copy in a virtual environment is not relied on.
+Open the local URL printed by Vite. In a plain development browser, Sam uses
+its existing **demo bridge**: displayed replies and capability states are
+synthetic. This preview needs no model key and does not demonstrate real
+speaker verification or backend authorization. See the
+[development guide](docs/development.md) for the real Tauri app, local voice
+setup and verification commands.
 
-## Desktop UI (Phase 11)
+## Architecture at a glance
 
-A Tauri + React desktop app lives in `desktop/` and talks to the backend through a narrow local bridge. The UI is not an authorization boundary; `PermissionEngine` stays the sole authority. See [docs/desktop.md](docs/desktop.md). Use `make desktop-check` and `make desktop-rust-check` (kept separate from `make check`).
+```mermaid
+flowchart LR
+    UI[React desktop UI] --> Shell[Tauri Rust shell]
+    Shell --> Bridge[Authenticated loopback bridge]
+    Bridge --> Domains[Typed domain services]
+    Domains --> Policy[PermissionEngine]
+    Policy --> Exec[Bounded authorized adapters]
+    Domains --> Router[Model router and privacy policy]
+    Router --> Providers[Configured model providers]
+    Domains --> State[Scoped memory and storage]
+```
 
-## Owner voice identity, Persian and Guest Mode (Phase 12)
+This is a map of boundaries, not an autonomous execution loop. The webview,
+language models, retrieved documents and tool results are untrusted inputs.
+The [architecture overview](docs/architecture.md) maps these boundaries to
+source directories and explains the review constraints.
 
-Optional local voice stack (`uv sync --group voice-local`, macOS/Apple silicon): owner speaker verification with a Keychain-stored template, local Persian/English speech-to-text, an explicit language policy with RTL rendering, and owner-authorized restricted Guest Mode. Voice identity is an authentication signal, not authorization. See [docs/voice_identity.md](docs/voice_identity.md) and [docs/persian.md](docs/persian.md).
+## Documentation
+
+| Start with | Then explore |
+| --- | --- |
+| [Architecture](docs/architecture.md) | [Permission model](docs/permissions.md), [privacy](docs/privacy.md), [security notes](SECURITY.md) |
+| [Development and checks](docs/development.md) | [Desktop bridge](docs/desktop.md), [production hardening](docs/production-hardening.md) |
+| [Voice activation](docs/voice-activation.md) | [Owner identity](docs/voice_identity.md), [Persian and language behavior](docs/persian.md), [speech output](docs/tts.md) |
+| [Knowledge](docs/knowledge.md) | [Memory](docs/memory.md), [Obsidian](docs/obsidian.md) |
+| [Professional evidence](docs/professional-intelligence.md) | [Career and PhD workflows](docs/career-phd-agent.md), [automations](docs/proactive-agent.md) |
+| [Roadmap](docs/roadmap.md) | [Phase history](docs/phase-history.md), [architectural specification](PROJECT_SPEC.json) |
+
+## Contribute
+
+Use a focused branch and pull request for a real improvement. Include the
+problem, evidence and relevant verification. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+before changing permission, voice-identity, storage or provider boundaries.
+Existing phase review requirements remain in force.
+
+## License and releases
+
+No project license has been selected in this repository. Do not infer an
+open-source license from its public visibility. License selection remains an
+owner decision. There is no published GitHub release at this documentation
+update; the roadmap describes the work that precedes a reviewed release.

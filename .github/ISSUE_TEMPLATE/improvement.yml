@@ -1,0 +1,22 @@
+name: Improvement
+description: Propose a focused documentation or product improvement.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who encounters this problem, and what is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe one coherent improvement and how to verify it.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Scope and review considerations
+      description: Note affected phase, permissions, identity, privacy or external actions.
