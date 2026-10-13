@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible Sam issue using sanitized information.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, owner audio, biometric data or private documents.
+        For security concerns, read SECURITY.md before disclosing sensitive details.
+  - type: input
+    id: version
+    attributes:
+      label: Commit and environment
+      description: Commit SHA, operating system and relevant Python/Node/Rust versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic inputs and a minimal reproduction where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks and sanitized diagnostics
+      description: Commands, results, and whether this occurs on the base commit.
