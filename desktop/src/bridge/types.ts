@@ -51,6 +51,7 @@ export interface ChatResponse extends OperationResult {
 export interface StatusResponse {
   backend: { status: string; service: string; environment: string };
   agent: Capability;
+  model_issue?: { provider: string | null; reason_code: string; message: string; resolution: string } | null;
   knowledge: Capability;
   memory: Capability;
   tools: Capability;
@@ -197,6 +198,8 @@ export interface ActivityResponse {
 }
 
 export interface VoiceResponse extends OperationResult {
+  speech_id?: string | null;
+  speech_reason?: string | null;
   /** Ephemeral context lookup, never owner authentication. */
   conversation_id?: string | null;
   transcript: string | null;
@@ -205,6 +208,7 @@ export interface VoiceResponse extends OperationResult {
   /** Safe, normalized speaker metadata: never a score or biometric value. */
   speaker: "owner" | "guest" | null;
   speaker_result: string | null;
+  verification_reason?: string | null;
   language: ResponseLanguage | null;
   direction: Direction | null;
 }
@@ -265,6 +269,8 @@ export interface IdentityStatus {
   enrolled: boolean | null;
   /** False: a saved template needs re-enrollment for the current voice processing. */
   profile_compatible?: boolean | null;
+  reason_code?: string | null;
+  last_verification_reason?: string | null;
   mode: "owner_only" | "guest_mode";
   guest: GuestInfo;
   last_verification: "verified" | "not_verified" | "insufficient_audio" | "unknown" | null;
@@ -981,6 +987,30 @@ export type VoiceActivationState = "on" | "off" | "unavailable";
 export interface VoiceWakeResponse extends OperationResult {
   wake: boolean;
   followed: boolean;
+  owner_verified?: boolean;
+  speech_id?: string | null;
+  speech_reason?: string | null;
+  language?: ResponseLanguage | null;
+}
+
+export interface SamVoiceStatus {
+  state: "SAM_VOICE_READY" | "SAM_VOICE_NOT_CONFIGURED" | "SAM_VOICE_PROVIDER_UNAVAILABLE" | "SAM_VOICE_PERMISSION_REQUIRED";
+  reason_code: string | null;
+  enabled: boolean;
+  external_approved: boolean;
+  provider: string | null;
+  profile: string | null;
+  voice_name: string | null;
+  language: ResponseLanguage;
+  external: boolean;
+}
+
+export interface SpeechTicketResponse extends OperationResult {
+  speech_id: string | null;
+}
+
+export interface SpeechPlaybackResponse extends SpeakResponse {
+  kind: "local" | "audio" | null;
 }
 
 export interface VoiceActivationResponse extends OperationResult {

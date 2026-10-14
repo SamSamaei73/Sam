@@ -6,6 +6,23 @@ import { fakeAudioEnvironment } from "./helpers";
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("bounded neural capture", () => {
+  it("reports a stuck microphone request and closes any permission grant that arrives late", async () => {
+    vi.useFakeTimers();
+    const fake = fakeAudioEnvironment();
+    let grant!: (stream: MediaStream) => void;
+    fake.env.getUserMedia = () => new Promise((resolve) => { grant = resolve; });
+    const diagnostics = vi.fn();
+    const listener = new Listener(fake.env, vi.fn(), undefined, undefined, undefined, diagnostics);
+    const start = expect(listener.start()).rejects.toMatchObject({ code: "failed" });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await start;
+    expect(diagnostics).toHaveBeenLastCalledWith(expect.objectContaining({ listener: "ERROR", reason: "microphone_start_timeout" }));
+    grant({ getTracks: () => [fake.track] } as unknown as MediaStream);
+    await Promise.resolve();
+    expect(fake.track.stop).toHaveBeenCalledTimes(1);
+    expect(listener.isActive).toBe(false);
+  });
+
   it("wipes pending and stale frames across pause, then delivers only fresh audio", () => {
     const sent: { frame: Float32Array; epoch: number }[] = [];
     const delivered: Float32Array[] = [];
@@ -103,7 +120,7 @@ describe("bounded neural capture", () => {
       destination: {}, resume,
     } as unknown as AudioContext;
     const failed = expect(createNeuralSpeechInput(context, {} as MediaStream, vi.fn(), vi.fn()))
-      .rejects.toThrow("Local speech detector failed");
+      .rejects.toMatchObject({ reason: "wake_model_timeout" });
     await vi.advanceTimersByTimeAsync(1);
     expect(resume).toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(15_000);
@@ -122,7 +139,7 @@ describe("bounded neural capture", () => {
       .mockImplementation(oldFactory);
     const listener = new Listener(fake.env, vi.fn());
     const first = listener.start();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(fake.env.createSpeechInput).toHaveBeenCalledTimes(1));
     listener.stop();
     await listener.start();
     expect(listener.isActive).toBe(true);

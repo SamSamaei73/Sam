@@ -1,7 +1,8 @@
 import { RecorderError, browserAudioEnvironment, voiceCaptureConstraints, type AudioEnvironment } from "./recorder";
 import { SLEEP_TIMING, VoiceSegmenter, type SegmentEnd, type VadTiming } from "./vad";
 import { TARGET_SAMPLE_RATE, bytesToBase64, encodeWav, resample } from "./wav";
-import type { SpeechInput } from "./neuralVoice";
+import { SpeechInputError, type SpeechInput } from "./neuralVoice";
+import { CaptureMeter, emptyCapture, type CaptureDiagnostics } from "./voiceDiagnostics";
 
 /**
  * Hands-free microphone for voice activation. It runs only while the owner
@@ -23,6 +24,8 @@ export class Listener {
   private paused = false;
   private generation = 0;
   private timing: VadTiming = SLEEP_TIMING;
+  private meter = new CaptureMeter();
+  private diagnostics: CaptureDiagnostics = { ...emptyCapture };
 
   constructor(
     private readonly env: AudioEnvironment | null = browserAudioEnvironment(),
@@ -30,7 +33,13 @@ export class Listener {
     private readonly onLevel: (level: number) => void = () => undefined,
     private readonly onSpeech: (active: boolean) => void = () => undefined,
     private readonly onFailure: () => void = () => undefined,
+    private readonly onDiagnostics: (state: CaptureDiagnostics) => void = () => undefined,
   ) {}
+
+  private report(update: Partial<CaptureDiagnostics>): void {
+    this.diagnostics = { ...this.diagnostics, ...update };
+    this.onDiagnostics(this.diagnostics);
+  }
 
   get isActive(): boolean {
     return this.input !== null;
@@ -42,15 +51,38 @@ export class Listener {
 
   async start(timing: VadTiming = SLEEP_TIMING): Promise<void> {
     if (this.isActive) return;
-    if (!this.env?.createSpeechInput) throw new RecorderError("unsupported");
+    if (!this.env?.createSpeechInput) {
+      this.report({ listener: "ERROR", microphone: "ERROR", reason: "microphone_unsupported" });
+      throw new RecorderError("unsupported");
+    }
+    this.meter = new CaptureMeter();
+    this.report({ ...emptyCapture, listener: "STARTING" });
     const generation = ++this.generation;
     this.timing = timing;
     let stream: MediaStream;
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      stream = await this.env.getUserMedia(voiceCaptureConstraints());
+      const capture = this.env.getUserMedia(voiceCaptureConstraints()).then((granted) => {
+        if (timedOut) {
+          granted.getTracks().forEach((track) => track.stop());
+          throw new RecorderError("failed");
+        }
+        return granted;
+      });
+      stream = await Promise.race([capture, new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          timedOut = true;
+          reject(new RecorderError("failed"));
+        }, 20_000);
+      })]);
     } catch (error) {
       const name = (error as { name?: string } | null)?.name ?? "";
-      throw new RecorderError(name === "NotAllowedError" || name === "SecurityError" ? "denied" : "failed");
+      const denied = name === "NotAllowedError" || name === "SecurityError";
+      this.report({ listener: "ERROR", microphone: denied ? "DENIED" : "ERROR", reason: timedOut ? "microphone_start_timeout" : denied ? "microphone_permission_required" : "microphone_capture_failed" });
+      throw new RecorderError(denied ? "denied" : "failed");
+    } finally {
+      clearTimeout(timeout);
     }
     if (generation !== this.generation) {
       stream.getTracks().forEach((track) => track.stop());
@@ -60,6 +92,9 @@ export class Listener {
       // Own the granted stream before audio graph creation can fail, so the
       // common failure path always closes the microphone.
       this.stream = stream;
+      const track = stream.getAudioTracks?.()[0] ?? stream.getTracks()[0];
+      const device = track?.label?.split("").filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127).join("").slice(0, 120);
+      this.report({ device: device || "Default microphone" });
       // Browser-native sample-rate conversion provides anti-aliased 16 kHz
       // input for the streaming model, independently of hardware sample rate.
       const context = this.env.createContext(TARGET_SAMPLE_RATE);
@@ -73,9 +108,10 @@ export class Listener {
       );
       const input = await this.env.createSpeechInput(context, stream,
         (frame, probability) => { if (generation === this.generation) this.frame(frame, probability); },
-        () => {
+        (reason) => {
           if (generation !== this.generation) return;
           this.stop();
+          this.report({ listener: "ERROR", microphone: "ERROR", reason: reason ?? "microphone_capture_failed" });
           this.onFailure();
         },
       );
@@ -86,10 +122,12 @@ export class Listener {
         return;
       }
       this.input = input;
+      this.report({ listener: "LISTENING", microphone: "READY", reason: null });
       if (this.paused) input.pause();
-    } catch {
+    } catch (error) {
       if (generation !== this.generation) return;
       this.stop();
+      this.report({ listener: "ERROR", microphone: "ERROR", reason: error instanceof SpeechInputError ? error.reason : "microphone_capture_failed" });
       throw new RecorderError("failed");
     }
   }
@@ -101,10 +139,10 @@ export class Listener {
   }
 
   /** Stop hearing (Sam is thinking or speaking): frames are discarded unseen. */
-  pause(): void {
+  pause({ preserveBufferedAudio = false }: { preserveBufferedAudio?: boolean } = {}): void {
     this.paused = true;
     this.input?.pause();
-    this.segmenter?.reset();
+    if (!preserveBufferedAudio) this.segmenter?.reset();
     this.onLevel(0);
   }
 
@@ -126,10 +164,13 @@ export class Listener {
     this.context = null;
     this.paused = false;
     this.onLevel(0);
+    this.report({ listener: "STOPPED", microphone: "STOPPED", reason: null });
   }
 
   private frame(frame: Float32Array, probability: number): void {
     if (this.paused || !this.segmenter) return;
+    const metrics = this.meter.push(frame, this.context?.sampleRate ?? TARGET_SAMPLE_RATE);
+    if (metrics) this.report(metrics);
     const level = this.segmenter.push(frame, probability);
     this.onLevel(Math.min(1, level * 4));
   }

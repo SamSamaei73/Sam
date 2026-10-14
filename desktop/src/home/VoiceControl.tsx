@@ -104,9 +104,9 @@ function HandsFreeControls({ onType }: { onType: () => void }) {
   const { t } = useSam();
   const session = useSession();
   const phase = session.handsFree.phase;
-  const inConversation = phase === "attending" || phase === "thinking" || phase === "speaking";
+  const inConversation = phase === "attending" || phase === "thinking" || phase === "speaking" || phase === "greeting";
   const hint =
-    session.voice === "speaking"
+    session.voice === "speaking" || session.voice === "greeting"
       ? t("home.hint.speaking")
       : session.voice === "thinking"
         ? t("home.hint.thinking")
@@ -119,7 +119,7 @@ function HandsFreeControls({ onType }: { onType: () => void }) {
         {hint}
       </p>
       <div className="hands-free-tools">
-        {session.voice === "speaking" ? (
+        {session.voice === "speaking" || session.voice === "greeting" ? (
           <IconButton label={t("home.stopSpeaking")} onClick={session.stopSpeaking}>
             <IconStop />
           </IconButton>

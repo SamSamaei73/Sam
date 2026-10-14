@@ -144,9 +144,15 @@ describe("Enrollment", () => {
 
   it("records samples explicitly, tracks progress and completes only when enough", async () => {
     let count = 0;
+    let current = available;
     const bridge = mockBridge({
-      identityStatus: vi.fn(async () => available),
+      status: vi.fn(async () => voiceStatus),
+      identityStatus: vi.fn(async () => current),
       identityEnrollSample: vi.fn(async () => ({ ...ok, accepted: true, sample_count: ++count, samples_needed: 3 })),
+      identityEnrollComplete: vi.fn(async () => {
+        current = enrolled;
+        return ok;
+      }),
     });
     const { user, env } = await settings(bridge);
     await user.click(await screen.findByRole("button", { name: "Enroll" }));
@@ -167,6 +173,36 @@ describe("Enrollment", () => {
     await user.click(finish);
     await waitFor(() => expect(bridge.identityEnrollComplete).toHaveBeenCalledWith("enroll-1"));
     expect(await within(dialog).findByText("Your voice is enrolled.")).toBeInTheDocument();
+    expect(screen.getByText("Enrolled")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    await record(user, env, "Talk to Sam");
+    await waitFor(() => expect(bridge.voiceUtterance).toHaveBeenCalledTimes(1));
+    expect(bridge.identityEnrollBegin).toHaveBeenCalledTimes(1);
+    expect(bridge.guestChallenge).not.toHaveBeenCalled();
+    expect(bridge.restartBackend).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Owner verification required/)).toBeNull();
+  });
+
+  it("does not report completion when the Keychain read-back fails", async () => {
+    const bridge = mockBridge({
+      identityStatus: vi.fn(async () => available),
+      identityEnrollSample: vi.fn(async () => ({ ...ok, accepted: true, sample_count: 3, samples_needed: 3 })),
+      identityEnrollComplete: vi.fn(async () => ({
+        ...ok, status: "rejected" as const, reason_code: "profile_load_failed",
+        message: "Owner voice profile couldn't be loaded.",
+      })),
+    });
+    const { user, env } = await settings(bridge);
+    await user.click(await screen.findByRole("button", { name: "Enroll" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Step-up secret"), "synthetic-step-up-value");
+    await user.click(within(dialog).getByRole("button", { name: "Begin" }));
+    await within(dialog).findByRole("button", { name: "Finish enrollment" });
+    await record(user, env);
+    await user.click(within(dialog).getByRole("button", { name: "Finish enrollment" }));
+    expect(await within(dialog).findByText("Owner voice profile couldn't be loaded.")).toBeInTheDocument();
+    expect(screen.queryByText("Your voice is enrolled.")).toBeNull();
   });
 
   it("offers three English examples for language-independent enrollment and explains a rejected sample", async () => {
@@ -339,21 +375,39 @@ describe("Voice results", () => {
   };
   const base = { ...ok, forwarded_to_agent: false, reply: null, language: null, direction: null };
 
+  it.each([
+    ["voice_not_enrolled", "Set up your voice so Sam can recognize you."],
+    ["profile_load_failed", "Owner voice profile couldn't be loaded."],
+    ["profile_schema_mismatch", "The saved owner voice profile has an incompatible format."],
+    ["guest_session_invalid", "Guest Mode has ended. Ask the owner to start it again."],
+  ])("preserves the specific safe message for %s", async (reason_code, message) => {
+    await speak(mockBridge({
+      status: vi.fn(async () => voiceStatus),
+      voiceUtterance: vi.fn(async () => ({
+        ...base, status: "denied" as const, reason_code, message,
+        transcript: "WITHHELD-CONTENT", speaker: null, speaker_result: "verification_error",
+      })),
+    }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/Owner verification required/)).toBeNull();
+    expect(document.body.textContent).not.toContain("WITHHELD-CONTENT");
+  });
+
   it("a non-owner is stopped with the fixed message and no transcript is shown", async () => {
     const bridge = mockBridge({
       status: vi.fn(async () => voiceStatus),
       voiceUtterance: vi.fn(async () => ({
         ...base,
         status: "denied" as const,
-        reason_code: "owner_verification_required",
-        message: "Owner verification required.",
+        reason_code: "speaker_not_recognized",
+        message: "I couldn't verify that this is you. Try again.",
         transcript: "LEAKED-TRANSCRIPT",
         speaker: null,
         speaker_result: "owner_not_verified",
       })),
     });
     await speak(bridge);
-    expect(await screen.findByText("Owner verification required.")).toBeInTheDocument();
+    expect(await screen.findByText("I couldn't verify that this is you. Try again.")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("LEAKED-TRANSCRIPT");
   });
 

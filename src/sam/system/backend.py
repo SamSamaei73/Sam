@@ -103,6 +103,9 @@ def main() -> int:
     if env_error is not None:
         print(f"sam.system.backend: {env_error}", file=sys.stderr)
         return 2
+    # Set here, not inherited from the desktop's parent. A stray .env in the
+    # bundle must not disable providers or override the sealed launch settings.
+    os.environ["SAM_PACKAGED_BACKEND"] = "1"
     from sam.main import app  # the ONE production app, built at import
 
     config = uvicorn.Config(

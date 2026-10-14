@@ -7,6 +7,7 @@ Synthetic documents and fake providers only.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -72,7 +73,7 @@ def test_an_empty_profile_is_honest_not_prepopulated() -> None:
 
 
 def test_ingest_then_the_profile_shows_provenance_and_strength() -> None:
-    b = Bridge()
+    b = Bridge(clock=lambda: datetime(2026, 9, 15, tzinfo=UTC))
     result = ingest(b)
     assert result["status"] == "ok" and result["ingest_status"] == "ingested"
     assert result["claims_created"] > 10 and result["candidate_extraction"] == "off"

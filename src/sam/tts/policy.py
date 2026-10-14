@@ -50,13 +50,20 @@ def build_permission_request(
     *,
     request_id: str,
     text: str,
+    assistant_mode: bool = False,
 ) -> PermissionRequest:
     try:
         return PermissionRequest(
             principal=principal,
             action=ACTION,
             resource=RESOURCE,
-            scope=PermissionScope(segments=(profile.provider_id, profile.profile_id)),
+            scope=PermissionScope(
+                segments=(
+                    *(("assistant",) if assistant_mode else ()),
+                    profile.provider_id,
+                    profile.profile_id,
+                )
+            ),
             reason=None,
             target=f"synthesize #{text_digest(text)[:16]}",
             correlation_id=request_id,

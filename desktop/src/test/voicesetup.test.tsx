@@ -48,7 +48,7 @@ describe("fresh install: voice components", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/Owner verification required/)).toBeNull();
     await user.click(screen.getByRole("button", { name: /Action required/ }));
-    expect(screen.getByText("Install voice components")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install components" })).toBeInTheDocument();
     // Text is independent of voice: the keyboard fallback is still offered.
     expect(screen.getByRole("button", { name: /type|keyboard/i })).toBeEnabled();
   });

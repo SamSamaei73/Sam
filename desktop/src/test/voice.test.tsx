@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { baseIdentity, baseStatus, fakeAudioEnvironment, mockBridge, ok, renderApp } from "./helpers";
 
+import type { SpeechPlaybackResponse } from "../bridge/types";
+
 const voiceStatus = { ...baseStatus, voice_input: "configured" as const };
 const speechStatus = {
   ...baseStatus,
@@ -147,6 +149,7 @@ describe("Sam presence follows real state", () => {
     const bridge = mockBridge({
       status: vi.fn(async () => voiceStatus),
       voiceUtterance: vi.fn(() => new Promise((resolve) => (release = resolve))) as never,
+      playSamSpeech: vi.fn(() => new Promise<SpeechPlaybackResponse>((resolve) => { finishSpeech = () => resolve({ ...ok, kind: "local", audio_base64: null, audio_format: null, byte_length: null }); })),
     });
     renderApp(bridge, fake.env, { speak: (_text, _language, onEnd) => {
       finishSpeech = onEnd;
@@ -176,6 +179,7 @@ describe("Sam presence follows real state", () => {
         transcript: "hello",
         forwarded_to_agent: true,
         reply: "Hi.",
+        speech_id: "reply-ticket",
         speaker: "owner",
         speaker_result: "owner_verified",
         language: "en",

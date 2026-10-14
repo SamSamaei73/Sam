@@ -24,6 +24,10 @@ class ProfileStoreError(VoiceIdentityError):
     reason_code = "profile_store_error"
 
 
+class ProfileSchemaError(ProfileStoreError):
+    reason_code = "profile_schema_mismatch"
+
+
 class ChallengeError(VoiceIdentityError):
     reason_code = "challenge_error"
 
@@ -58,6 +62,7 @@ __all__ = [
     "GuestModeError",
     "InsufficientSpeechError",
     "ModelSetupError",
+    "ProfileSchemaError",
     "ProfileStoreError",
     "VoiceIdentityError",
 ]

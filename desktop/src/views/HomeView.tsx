@@ -34,12 +34,15 @@ export function HomeView({ onNavigate }: { onNavigate: (view: ViewId) => void })
             <button
               type="button"
               className="attention-pill"
-              onClick={() => setPanelOpen(true)}
+              onClick={() => setPanelOpen((open) => !open)}
+              aria-expanded={panelOpen}
+              aria-controls="sam-context-panel"
               aria-label={`${t("home.actionRequired")}: ${items.length}`}
             >
               <span className="attention-dot" aria-hidden="true" />
               {t("home.actionRequired")}
               <span className="attention-count">{items.length}</span>
+              <span className="attention-summary">{items.map((item) => item.label).join(" · ")}</span>
             </button>
           ) : null}
           <IconButton

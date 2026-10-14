@@ -76,7 +76,7 @@ export function EnrollmentDialog({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const { bridge, t } = useSam();
+  const { bridge, t, refreshIdentity } = useSam();
   const errorText = useErrorText();
   const [stepUp, setStepUp] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -144,7 +144,9 @@ export function EnrollmentDialog({
     try {
       const result = await bridge.identityEnrollComplete(session);
       if (result.status === "ok") {
+        sessionRef.current = null;
         setSession(null);
+        await refreshIdentity();
         setFinished(true);
         onDone();
       } else {

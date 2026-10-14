@@ -118,9 +118,13 @@ def system_health(runtime: DesktopRuntime) -> SystemHealth:
     else:
         put("keychain", Component.OK)
 
+    from sam.models.diagnostics import model_blocker
+
+    model_ready = runtime.agent_configured
     put(
         "model_router",
-        Component.OK if runtime.agent_configured else Component.NOT_CONFIGURED,
+        Component.OK if model_ready else Component.UNAVAILABLE,
+        None if model_ready else model_blocker(runtime.model_router).reason_code,
     )
     put("knowledge", Component.OK, None if durable is not None else "session_only")
     put("professional", Component.OK)
@@ -136,7 +140,16 @@ def system_health(runtime: DesktopRuntime) -> SystemHealth:
         "reconciliation_required" if unknown else "external_actions_unavailable",
     )
     put("voice", Component.OK if runtime.voice_boundary else Component.NOT_CONFIGURED)
-    put("tts", Component.OK if runtime.speech_boundary else Component.NOT_CONFIGURED)
+    put(
+        "tts",
+        Component.OK
+        if runtime.speech_boundary
+        or (
+            runtime.owner_settings.voice_responses()
+            and runtime.sam_speech.status("en").state == "SAM_VOICE_READY"
+        )
+        else Component.NOT_CONFIGURED,
+    )
     put(
         "mcp",
         Component.OK if runtime.mcp_registry.list_tools() else Component.NOT_CONFIGURED,

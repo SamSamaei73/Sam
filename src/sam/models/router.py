@@ -444,6 +444,27 @@ class ModelRouter:
             )
         )
 
+    def refresh_availability(self) -> None:
+        """Refresh local authentication probes; no inference or paid fallback.
+
+        A confirmed login may clear an authentication cooldown. Rate/usage
+        limits retain their deadlines and cannot be bypassed by Retry.
+        """
+        for descriptor in self._registry:
+            if not descriptor.enabled:
+                continue
+            refresh = getattr(
+                self._providers.get(descriptor.provider_id), "refresh", None
+            )
+            if callable(refresh):
+                state = refresh()
+                if (
+                    state is Availability.AVAILABLE
+                    and self._health.state(descriptor.provider_id)
+                    is Availability.UNAUTHORIZED
+                ):
+                    self._health.record_success(descriptor.provider_id)
+
     def capabilities_for(self, language: str) -> frozenset[Capability]:
         if language == "fa":
             return frozenset({Capability.TEXT, Capability.PERSIAN})

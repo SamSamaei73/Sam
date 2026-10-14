@@ -31,11 +31,21 @@ pub struct AppState {
 
 type CommandResult = Result<Value, String>;
 
-fn run(state: &State<'_, AppState>, route: Route, body: Option<Value>) -> CommandResult {
-    state
-        .backend
-        .call(route, body)
-        .map_err(|error: BridgeError| error.as_code().to_string())
+// Blocking backend work must not starve WebKit's microphone frame delivery.
+// Route, validation, credentials and PermissionEngine checks are unchanged.
+async fn run_async(
+    state: &State<'_, AppState>,
+    route: Route,
+    body: Option<Value>,
+) -> CommandResult {
+    let backend = state.backend.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        backend
+            .call(route, body)
+            .map_err(|error| error.as_code().to_string())
+    })
+    .await
+    .map_err(|_| "unavailable".to_string())?
 }
 
 fn invalid<T>(result: Result<T, BridgeError>) -> Result<T, String> {
@@ -70,8 +80,77 @@ fn sam_local_stop(
 }
 
 #[tauri::command]
-fn sam_status(state: State<'_, AppState>) -> CommandResult {
-    let mut status = run(&state, Route::Status, None)?;
+async fn sam_speech_status(state: State<'_, AppState>, language: String) -> CommandResult {
+    invalid(validate::speech_language(Some(&language)))?;
+    run_async(
+        &state,
+        Route::SpeechStatus,
+        Some(json!({ "language": language })),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn sam_speech_settings(
+    state: State<'_, AppState>,
+    enabled: bool,
+    external_approved: bool,
+    language: String,
+) -> CommandResult {
+    invalid(validate::speech_language(Some(&language)))?;
+    run_async(
+        &state,
+        Route::SpeechSettings,
+        Some(json!({
+            "enabled": enabled, "external_approved": external_approved, "language": language,
+        })),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn sam_speech_preview(state: State<'_, AppState>, language: String) -> CommandResult {
+    invalid(validate::speech_language(Some(&language)))?;
+    run_async(
+        &state,
+        Route::SpeechPreview,
+        Some(json!({ "language": language })),
+    )
+    .await
+}
+
+/// Only the backend can mint a speech ticket. No text/provider/voice supplied
+/// by the webview crosses this production automatic-playback command.
+#[tauri::command]
+async fn sam_speech_play(
+    state: State<'_, AppState>,
+    local: State<'_, local_speech::LocalSpeech>,
+    speech_id: String,
+) -> CommandResult {
+    invalid(validate::id(&speech_id))?;
+    let backend = state.backend.clone();
+    let speech = local.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = backend
+            .call(Route::SpeechPlay, Some(json!({ "speech_id": speech_id })))
+            .map_err(|e| e.as_code().to_string())?;
+        if result["status"] == "ok" && result["kind"] == "local" {
+            let text = result["text"].as_str().ok_or("speech_failed")?;
+            let language = result["language"].as_str().ok_or("speech_failed")?;
+            return match speech.speak(&speech_id, text, language) {
+                Ok(()) => Ok(json!({ "status": "ok", "kind": "local" })),
+                Err(reason) => Ok(json!({ "status": "failed", "reason_code": reason })),
+            };
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|_| "speech_failed".to_string())?
+}
+
+#[tauri::command]
+async fn sam_status(state: State<'_, AppState>) -> CommandResult {
+    let mut status = run_async(&state, Route::Status, None).await?;
     // Which shell is running, so a stale or development build is obvious in
     // About. A fixed label only: no path, port, token or environment value.
     if let Some(map) = status.as_object_mut() {
@@ -86,7 +165,7 @@ fn sam_status(state: State<'_, AppState>) -> CommandResult {
 }
 
 #[tauri::command]
-fn sam_chat(
+async fn sam_chat(
     state: State<'_, AppState>,
     message: String,
     language: Option<String>,
@@ -97,30 +176,32 @@ fn sam_chat(
     invalid(validate::language(&language))?;
     let privacy = privacy.unwrap_or_else(|| "normal".to_string());
     invalid(validate::privacy_label(&privacy))?;
-    run(
+    run_async(
         &state,
         Route::Chat,
         Some(json!({ "message": message, "language": language, "privacy": privacy })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_knowledge_list(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::KnowledgeList, None)
+async fn sam_knowledge_list(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::KnowledgeList, None).await
 }
 
 #[tauri::command]
-fn sam_knowledge_query(state: State<'_, AppState>, query: String) -> CommandResult {
+async fn sam_knowledge_query(state: State<'_, AppState>, query: String) -> CommandResult {
     invalid(validate::text(&query, validate::MAX_QUERY_CHARS))?;
-    run(
+    run_async(
         &state,
         Route::KnowledgeQuery,
         Some(json!({ "query": query })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_knowledge_ingest(
+async fn sam_knowledge_ingest(
     state: State<'_, AppState>,
     name: String,
     resource_type: String,
@@ -134,7 +215,7 @@ fn sam_knowledge_ingest(
         validate::MAX_DOCUMENT_BASE64,
     ))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::KnowledgeIngest,
         Some(json!({
@@ -144,58 +225,61 @@ fn sam_knowledge_ingest(
             "confirmation_id": confirmation_id,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_knowledge_remove(
+async fn sam_knowledge_remove(
     state: State<'_, AppState>,
     resource_id: String,
     confirmation_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::id(&resource_id))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::KnowledgeRemove,
         Some(json!({ "resource_id": resource_id, "confirmation_id": confirmation_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_memory_search(state: State<'_, AppState>, text: Option<String>) -> CommandResult {
+async fn sam_memory_search(state: State<'_, AppState>, text: Option<String>) -> CommandResult {
     if let Some(value) = text.as_deref() {
         invalid(validate::text_allow_empty(value, validate::MAX_QUERY_CHARS))?;
     }
-    run(&state, Route::MemorySearch, Some(json!({ "text": text })))
+    run_async(&state, Route::MemorySearch, Some(json!({ "text": text }))).await
 }
 
 #[tauri::command]
-fn sam_tools(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::Tools, None)
+async fn sam_tools(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::Tools, None).await
 }
 
 #[tauri::command]
-fn sam_permissions(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::Permissions, None)
+async fn sam_permissions(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::Permissions, None).await
 }
 
 #[tauri::command]
-fn sam_revoke_grant(state: State<'_, AppState>, grant_id: String) -> CommandResult {
+async fn sam_revoke_grant(state: State<'_, AppState>, grant_id: String) -> CommandResult {
     invalid(validate::id(&grant_id))?;
-    run(
+    run_async(
         &state,
         Route::RevokeGrant,
         Some(json!({ "grant_id": grant_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_activity(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::Activity, None)
+async fn sam_activity(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::Activity, None).await
 }
 
 #[tauri::command]
-fn sam_decide_confirmation(
+async fn sam_decide_confirmation(
     state: State<'_, AppState>,
     confirmation_id: String,
     approved: bool,
@@ -203,7 +287,7 @@ fn sam_decide_confirmation(
 ) -> CommandResult {
     invalid(validate::id(&confirmation_id))?;
     invalid(validate::optional_step_up(step_up.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::DecideConfirmation,
         Some(json!({
@@ -212,10 +296,11 @@ fn sam_decide_confirmation(
             "step_up": step_up,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_voice_utterance(
+async fn sam_voice_utterance(
     state: State<'_, AppState>,
     audio_base64: String,
     confirmation_id: Option<String>,
@@ -231,7 +316,7 @@ fn sam_voice_utterance(
     invalid(validate::optional_id(conversation_id.as_deref()))?;
     let language = language.unwrap_or_else(|| "auto".to_string());
     invalid(validate::language(&language))?;
-    run(
+    run_async(
         &state,
         Route::VoiceUtterance,
         Some(json!({
@@ -242,61 +327,76 @@ fn sam_voice_utterance(
             "conversation_id": conversation_id,
         })),
     )
+    .await
 }
 
 /// Erase ephemeral voice text; this cannot authenticate or authorize a turn.
 #[tauri::command]
-fn sam_voice_conversation_end(
+async fn sam_voice_conversation_end(
     state: State<'_, AppState>,
     conversation_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::optional_id(conversation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::VoiceConversationEnd,
         Some(json!({ "conversation_id": conversation_id })),
     )
+    .await
 }
 
 /// One short speech segment: was it Sam's name? The backend answers with one
 /// bit (never the recognized text), using its LOCAL recognizer only.
 #[tauri::command]
-fn sam_voice_wake(state: State<'_, AppState>, audio_base64: String) -> CommandResult {
+async fn sam_voice_wake(
+    state: State<'_, AppState>,
+    audio_base64: String,
+    language: Option<String>,
+) -> CommandResult {
+    let language = language.unwrap_or_else(|| "en".to_string());
+    invalid(validate::speech_language(Some(&language)))?;
     invalid(validate::base64_payload(
         &audio_base64,
         validate::MAX_WAKE_BASE64,
     ))?;
-    run(
+    run_async(
         &state,
         Route::VoiceWake,
-        Some(json!({ "audio_base64": audio_base64 })),
+        Some(json!({ "audio_base64": audio_base64, "language": language })),
     )
+    .await
 }
 
 /// The owner explicitly starts installing Sam's pinned local voice models.
 /// There is no argument: which models, from where, and their hashes are
 /// decided by the backend's trusted registry alone.
 #[tauri::command]
-fn sam_voice_models_install(state: State<'_, AppState>) -> CommandResult {
-    run(
+async fn sam_voice_models_install(state: State<'_, AppState>) -> CommandResult {
+    run_async(
         &state,
         Route::VoiceModelsInstall,
         Some(json!({ "accept": true })),
     )
+    .await
 }
 
 /// First-time owner security setup: the chosen step-up secret (twice) goes
 /// to the backend, which stores it only in the Keychain and begins voice
 /// enrollment. Not stored or logged here.
 #[tauri::command]
-fn sam_owner_setup(state: State<'_, AppState>, step_up: String, confirm: String) -> CommandResult {
+async fn sam_owner_setup(
+    state: State<'_, AppState>,
+    step_up: String,
+    confirm: String,
+) -> CommandResult {
     invalid(validate::required_step_up(&step_up))?;
     invalid(validate::required_step_up(&confirm))?;
-    run(
+    run_async(
         &state,
         Route::OwnerSetup,
         Some(json!({ "step_up": step_up, "confirm": confirm })),
     )
+    .await
 }
 
 /// Restart Sam's own backend so newly installed, verified voice components
@@ -327,16 +427,17 @@ fn sam_restart_backend(state: State<'_, AppState>) -> CommandResult {
 
 /// The owner-only hands-free switch (the backend refuses it in Guest Mode).
 #[tauri::command]
-fn sam_voice_activation(state: State<'_, AppState>, enabled: bool) -> CommandResult {
-    run(
+async fn sam_voice_activation(state: State<'_, AppState>, enabled: bool) -> CommandResult {
+    run_async(
         &state,
         Route::VoiceActivation,
         Some(json!({ "enabled": enabled })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_speak(
+async fn sam_speak(
     state: State<'_, AppState>,
     text: String,
     voice_profile: String,
@@ -347,7 +448,7 @@ fn sam_speak(
     invalid(validate::profile_id(&voice_profile))?;
     invalid(validate::speech_language(language.as_deref()))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::Speak,
         Some(json!({
@@ -357,29 +458,31 @@ fn sam_speak(
             "language": language,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_identity_status(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::IdentityStatus, None)
+async fn sam_identity_status(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::IdentityStatus, None).await
 }
 
 #[tauri::command]
-fn sam_identity_enroll_begin(
+async fn sam_identity_enroll_begin(
     state: State<'_, AppState>,
     step_up: String,
     re_enroll: bool,
 ) -> CommandResult {
     invalid(validate::required_step_up(&step_up))?;
-    run(
+    run_async(
         &state,
         Route::IdentityEnrollBegin,
         Some(json!({ "step_up": step_up, "re_enroll": re_enroll })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_identity_enroll_sample(
+async fn sam_identity_enroll_sample(
     state: State<'_, AppState>,
     session_id: String,
     audio_base64: String,
@@ -389,50 +492,60 @@ fn sam_identity_enroll_sample(
         &audio_base64,
         validate::MAX_AUDIO_BASE64,
     ))?;
-    run(
+    run_async(
         &state,
         Route::IdentityEnrollSample,
         Some(json!({ "session_id": session_id, "audio_base64": audio_base64 })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_identity_enroll_complete(state: State<'_, AppState>, session_id: String) -> CommandResult {
+async fn sam_identity_enroll_complete(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> CommandResult {
     invalid(validate::id(&session_id))?;
-    run(
+    run_async(
         &state,
         Route::IdentityEnrollComplete,
         Some(json!({ "session_id": session_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_identity_enroll_cancel(state: State<'_, AppState>, session_id: String) -> CommandResult {
+async fn sam_identity_enroll_cancel(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> CommandResult {
     invalid(validate::id(&session_id))?;
-    run(
+    run_async(
         &state,
         Route::IdentityEnrollCancel,
         Some(json!({ "session_id": session_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_identity_delete(state: State<'_, AppState>, step_up: String) -> CommandResult {
+async fn sam_identity_delete(state: State<'_, AppState>, step_up: String) -> CommandResult {
     invalid(validate::required_step_up(&step_up))?;
-    run(
+    run_async(
         &state,
         Route::IdentityDelete,
         Some(json!({ "step_up": step_up })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_guest_challenge(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::GuestChallenge, Some(json!({})))
+async fn sam_guest_challenge(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::GuestChallenge, Some(json!({}))).await
 }
 
 #[tauri::command]
-fn sam_guest_start(
+async fn sam_guest_start(
     state: State<'_, AppState>,
     challenge_id: String,
     audio_base64: String,
@@ -446,7 +559,7 @@ fn sam_guest_start(
     ))?;
     invalid(validate::required_step_up(&step_up))?;
     invalid(validate::guest_minutes(minutes))?;
-    run(
+    run_async(
         &state,
         Route::GuestStart,
         Some(json!({
@@ -456,20 +569,21 @@ fn sam_guest_start(
             "minutes": minutes,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_guest_end(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::GuestEnd, Some(json!({})))
+async fn sam_guest_end(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::GuestEnd, Some(json!({}))).await
 }
 
 #[tauri::command]
-fn sam_professional_profile(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::ProfessionalProfile, None)
+async fn sam_professional_profile(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::ProfessionalProfile, None).await
 }
 
 #[tauri::command]
-fn sam_professional_ingest(
+async fn sam_professional_ingest(
     state: State<'_, AppState>,
     name: String,
     source_type: String,
@@ -486,7 +600,7 @@ fn sam_professional_ingest(
         &content_base64,
         validate::MAX_DOCUMENT_BASE64,
     ))?;
-    run(
+    run_async(
         &state,
         Route::ProfessionalIngest,
         Some(json!({
@@ -498,10 +612,11 @@ fn sam_professional_ingest(
             "use_candidates": use_candidates,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_professional_review(
+async fn sam_professional_review(
     state: State<'_, AppState>,
     action: String,
     claim_id: Option<String>,
@@ -518,7 +633,7 @@ fn sam_professional_review(
     invalid(validate::optional_professional_privacy(
         privacy_class.as_deref(),
     ))?;
-    run(
+    run_async(
         &state,
         Route::ProfessionalReview,
         Some(json!({
@@ -530,35 +645,42 @@ fn sam_professional_review(
             "privacy_class": privacy_class,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_professional_remove(
+async fn sam_professional_remove(
     state: State<'_, AppState>,
     source_id: String,
     confirmation_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::id(&source_id))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::ProfessionalRemove,
         Some(json!({ "source_id": source_id, "confirmation_id": confirmation_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_professional_query(state: State<'_, AppState>, mode: String, text: String) -> CommandResult {
+async fn sam_professional_query(
+    state: State<'_, AppState>,
+    mode: String,
+    text: String,
+) -> CommandResult {
     invalid(validate::professional_query_mode(&mode))?;
     invalid(validate::text(
         &text,
         validate::MAX_PROFESSIONAL_QUERY_CHARS,
     ))?;
-    run(
+    run_async(
         &state,
         Route::ProfessionalQuery,
         Some(json!({ "mode": mode, "text": text })),
     )
+    .await
 }
 
 /// A proactive schedule: typed, closed and bounded. Unknown fields (a cron
@@ -605,13 +727,13 @@ fn schedule_json(schedule: &ScheduleArgs) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn sam_proactive_overview(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::ProactiveOverview, None)
+async fn sam_proactive_overview(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::ProactiveOverview, None).await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_proactive_create(
+async fn sam_proactive_create(
     state: State<'_, AppState>,
     title: String,
     task_type: String,
@@ -644,7 +766,7 @@ fn sam_proactive_create(
     invalid(validate::proactive_level(&notification_level))?;
     invalid(validate::proactive_proposed(&proposed_action))?;
     invalid(validate::bounded_number(cooldown_hours, 1, 720))?;
-    run(
+    run_async(
         &state,
         Route::ProactiveCreate,
         Some(json!({
@@ -664,11 +786,12 @@ fn sam_proactive_create(
             "enabled": enabled,
         })),
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_proactive_update(
+async fn sam_proactive_update(
     state: State<'_, AppState>,
     task_id: String,
     enabled: Option<bool>,
@@ -702,7 +825,7 @@ fn sam_proactive_update(
     if let Some(hours) = cooldown_hours {
         invalid(validate::bounded_number(hours, 1, 720))?;
     }
-    run(
+    run_async(
         &state,
         Route::ProactiveUpdate,
         Some(json!({
@@ -716,64 +839,69 @@ fn sam_proactive_update(
             "cooldown_hours": cooldown_hours,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_proactive_delete(
+async fn sam_proactive_delete(
     state: State<'_, AppState>,
     task_id: String,
     confirmation_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::id(&task_id))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::ProactiveDelete,
         Some(json!({ "task_id": task_id, "confirmation_id": confirmation_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_proactive_run(state: State<'_, AppState>, task_id: String) -> CommandResult {
+async fn sam_proactive_run(state: State<'_, AppState>, task_id: String) -> CommandResult {
     invalid(validate::id(&task_id))?;
-    run(
+    run_async(
         &state,
         Route::ProactiveRun,
         Some(json!({ "task_id": task_id })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_proactive_notification(
+async fn sam_proactive_notification(
     state: State<'_, AppState>,
     notification_id: String,
     action: String,
 ) -> CommandResult {
     invalid(validate::id(&notification_id))?;
     invalid(validate::notification_action(&action))?;
-    run(
+    run_async(
         &state,
         Route::ProactiveNotification,
         Some(json!({ "notification_id": notification_id, "action": action })),
     )
+    .await
 }
 
 /// The owner's switch for background scheduling: two booleans (on/off, and
 /// whether to keep it on across restarts), nothing else. The backend refuses
 /// it in Guest Mode and requires PROACTIVE/UPDATE.
 #[tauri::command]
-fn sam_proactive_scheduler(
+async fn sam_proactive_scheduler(
     state: State<'_, AppState>,
     enabled: bool,
     remember: Option<bool>,
 ) -> CommandResult {
     // `remember` (Phase 17): the owner's explicit choice to keep scheduling on
     // across restarts. Only a boolean; the backend honours it only when enabling.
-    run(
+    run_async(
         &state,
         Route::ProactiveScheduler,
         Some(json!({ "enabled": enabled, "remember": remember.unwrap_or(false) })),
     )
+    .await
 }
 
 /// Owner-approved career preferences: typed and closed. Unknown fields (a
@@ -795,13 +923,13 @@ struct CareerPreferencesArgs {
 }
 
 #[tauri::command]
-fn sam_career_overview(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::CareerOverview, None)
+async fn sam_career_overview(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::CareerOverview, None).await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_career_opportunity(
+async fn sam_career_opportunity(
     state: State<'_, AppState>,
     action: String,
     opportunity_id: Option<String>,
@@ -827,7 +955,7 @@ fn sam_career_opportunity(
     ))?;
     invalid(validate::optional_https_url(application_url.as_deref()))?;
     invalid(validate::optional_text(external_id.as_deref(), 200))?;
-    run(
+    run_async(
         &state,
         Route::CareerOpportunity,
         Some(json!({
@@ -842,26 +970,28 @@ fn sam_career_opportunity(
             "external_id": external_id,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_career_fit(
+async fn sam_career_fit(
     state: State<'_, AppState>,
     opportunity_id: String,
     contact_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::id(&opportunity_id))?;
     invalid(validate::optional_id(contact_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::CareerFit,
         Some(json!({ "opportunity_id": opportunity_id, "contact_id": contact_id })),
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_career_draft(
+async fn sam_career_draft(
     state: State<'_, AppState>,
     action: String,
     opportunity_id: Option<String>,
@@ -895,7 +1025,7 @@ fn sam_career_draft(
         500,
     ))?;
     invalid(validate::text_list(&lines, validate::MAX_CAREER_LINES, max))?;
-    run(
+    run_async(
         &state,
         Route::CareerDraft,
         Some(json!({
@@ -912,26 +1042,28 @@ fn sam_career_draft(
             "confirmation_id": confirmation_id,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_career_submit(
+async fn sam_career_submit(
     state: State<'_, AppState>,
     draft_id: String,
     confirmation_id: Option<String>,
 ) -> CommandResult {
     invalid(validate::id(&draft_id))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::CareerSubmit,
         Some(json!({ "draft_id": draft_id, "confirmation_id": confirmation_id })),
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_career_contact(
+async fn sam_career_contact(
     state: State<'_, AppState>,
     name: String,
     role: String,
@@ -952,7 +1084,7 @@ fn sam_career_contact(
     invalid(validate::optional_text(email.as_deref(), 254))?;
     invalid(validate::optional_id(opportunity_id.as_deref()))?;
     invalid(validate::text_list(&research_topics, 20, 80))?;
-    run(
+    run_async(
         &state,
         Route::CareerContact,
         Some(json!({
@@ -967,11 +1099,12 @@ fn sam_career_contact(
             "research_topics": research_topics,
         })),
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_career_outreach(
+async fn sam_career_outreach(
     state: State<'_, AppState>,
     action: String,
     outreach_id: Option<String>,
@@ -992,7 +1125,7 @@ fn sam_career_outreach(
         note.as_deref(),
         validate::MAX_CAREER_TEXT_CHARS,
     ))?;
-    run(
+    run_async(
         &state,
         Route::CareerOutreach,
         Some(json!({
@@ -1006,10 +1139,11 @@ fn sam_career_outreach(
             "note": note,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_career_send(
+async fn sam_career_send(
     state: State<'_, AppState>,
     outreach_id: String,
     confirmation_id: Option<String>,
@@ -1018,7 +1152,7 @@ fn sam_career_send(
     invalid(validate::id(&outreach_id))?;
     invalid(validate::optional_id(confirmation_id.as_deref()))?;
     invalid(validate::optional_id(email_confirmation_id.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::CareerSend,
         Some(json!({
@@ -1027,10 +1161,11 @@ fn sam_career_send(
             "email_confirmation_id": email_confirmation_id,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_career_preferences(
+async fn sam_career_preferences(
     state: State<'_, AppState>,
     preferences: CareerPreferencesArgs,
 ) -> CommandResult {
@@ -1045,7 +1180,7 @@ fn sam_career_preferences(
     invalid(validate::optional_text(p.contact_phone.as_deref(), 40))?;
     invalid(validate::optional_https_url(p.portfolio_url.as_deref()))?;
     invalid(validate::optional_https_url(p.linkedin_url.as_deref()))?;
-    run(
+    run_async(
         &state,
         Route::CareerPreferences,
         Some(json!({
@@ -1062,16 +1197,17 @@ fn sam_career_preferences(
             "linkedin_url": p.linkedin_url,
         })),
     )
+    .await
 }
 
 #[tauri::command]
-fn sam_models_status(state: State<'_, AppState>) -> CommandResult {
-    run(&state, Route::ModelsStatus, None)
+async fn sam_models_status(state: State<'_, AppState>) -> CommandResult {
+    run_async(&state, Route::ModelsStatus, None).await
 }
 
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-fn sam_models_preferences(
+async fn sam_models_preferences(
     state: State<'_, AppState>,
     preferred_provider: Option<String>,
     allow_free_fallback: bool,
@@ -1105,7 +1241,7 @@ fn sam_models_preferences(
     if let Some(secret) = step_up {
         body["step_up"] = json!(secret);
     }
-    run(&state, Route::ModelsPreferences, Some(body))
+    run_async(&state, Route::ModelsPreferences, Some(body)).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1186,6 +1322,10 @@ pub fn run_app() {
             sam_voice_conversation_end,
             sam_speak,
             sam_local_speak,
+            sam_speech_status,
+            sam_speech_settings,
+            sam_speech_preview,
+            sam_speech_play,
             sam_local_stop,
             sam_identity_status,
             sam_identity_enroll_begin,

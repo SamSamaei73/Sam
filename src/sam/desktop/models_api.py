@@ -69,6 +69,8 @@ def _status(runtime: DesktopRuntime) -> ModelsStatusResponse:
 def _provider(
     state: object, descriptor: ProviderDescriptor, detail: str | None
 ) -> ProviderStatus:
+    from sam.models.diagnostics import safe_provider_detail
+
     return ProviderStatus(
         provider_id=descriptor.provider_id.value,
         display_name=descriptor.display_name,
@@ -78,13 +80,15 @@ def _provider(
         external=descriptor.external_processing,
         free_tier_data_use=descriptor.free_tier_data_use,
         note=descriptor.data_use_note,
-        detail=detail,
+        detail=safe_provider_detail(detail),
         models=[m.model_id for m in descriptor.models if descriptor.enabled],
     )
 
 
 @router.get("/models", response_model=ModelsStatusResponse)
 def models_status(runtime: DesktopRuntime = _owner_runtime) -> ModelsStatusResponse:
+    if runtime.model_router is not None:
+        runtime.model_router.refresh_availability()
     return _status(runtime)
 
 

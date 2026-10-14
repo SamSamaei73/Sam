@@ -66,6 +66,18 @@ at the greater of 0.50 or the configured verification threshold** (held-out
 check). This retains stronger checks for the longer enrollment samples. The
 aggregate is the L2-normalized mean.
 
+Completion also requires an immediate read-back through the same Keychain
+store and an exact in-memory match to the newly saved template. Missing,
+unreadable, incompatible-format, or different read-back data cannot produce a
+success response. The enrollment session then discards its samples. Completion
+clears the previous speaker decision and challenges; it never marks the owner
+verified. Status and each new clip reload the profile, without a restart.
+
+Enrollment and hands-free capture both request a mono 16 kHz browser audio
+context with the same microphone processing. They share PCM16 encoding and
+the backend's canonical silence trimming and model preparation. Enrollment's
+longer minimum-speech requirement remains separate from verification's floor.
+
 Re-enrollment and deletion also need step-up. Re-enrollment replaces the
 template atomically (the old one stops verifying). Deleting removes the
 Keychain item and ends any Guest Mode. Nothing auto-enrolls from conversation.
@@ -100,7 +112,7 @@ Results: `OWNER_VERIFIED`, `OWNER_NOT_VERIFIED`, `UNKNOWN`, `NOT_ENROLLED`,
 | Result | Guest Mode off | Guest Mode on |
 |---|---|---|
 | owner verified | owner | owner |
-| owner not verified | **blocked** ("Owner verification required.") | guest |
+| owner not verified | **blocked** ("I couldn't verify that this is you. Try again.") | guest |
 | unknown / insufficient audio / error | blocked | blocked |
 | not enrolled | **blocked** (no profile never implies owner; enrollment is gated by the Desktop step-up secret) | blocked |
 
@@ -109,6 +121,16 @@ Sam owns the cosine threshold: `SPEAKER_VERIFICATION_THRESHOLD` (bounded
 change needs representative owner and other-speaker evaluation: lowering it
 can reduce false rejections while increasing false acceptance. There is no
 automatic lower-threshold retry or verification cache.
+
+The desktop preserves a safe `verification_reason` for rejected recordings
+and `last_verification_reason` in identity status. A speaker mismatch is
+`speaker_not_recognized`; a Keychain read failure is `profile_load_failed`;
+schema and model incompatibility have separate reason codes. Missing enrollment,
+unconfigured identity, invalid audio, and an expired Guest Mode session are
+also distinct. These diagnostics contain no scores, embeddings or recordings.
+Normal owner voice chat requires a fresh speaker match, not `OwnerProof`.
+Guest Mode activation still requires the owner challenge and step-up; side
+effects still require their PermissionEngine grants and confirmations.
 
 The minimum of 250 ms of detected speech is an input gate, not a claim that
 every such clip contains enough information for reliable speaker matching.

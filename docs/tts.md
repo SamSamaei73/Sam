@@ -50,12 +50,35 @@ download voices or read a reply using a voice for a different language. Native
 speech uses fixed `/usr/bin/say` operations with reply text only on stdin.
 Completion and cancellation control when microphone listening resumes.
 
-If no local voice is available, the desktop can request a compatible configured
-cloud profile through the existing speech permission/confirmation flow. The
-OpenRouter key stays in the backend. A missing voice, denied request, provider
+Settings → Sam Voice provides a fixed English/Persian preview and an owner-only
+**Sam speaks responses** switch. Both automatic speech and external speech
+consent default off and persist in the allowlisted owner settings (schema v4).
+With that explicit consent, backend-created preview/greeting/verified-owner
+reply tickets use the PermissionEngine's separate
+`speech_synthesis/send/assistant/<provider>/<profile>` scope. Normal speech
+needs no per-turn confirmation; the original manual Read Aloud confirmation
+scope is unchanged. No other resource, action or stronger authentication is
+authorized. Tickets are bounded, expire after 60 seconds, are single-use, and
+never accept caller-supplied text, provider or principal. Disabling speech
+invalidates tickets, revokes mode grants and stops active desktop playback.
+
+If no local voice is installed for the language, a compatible, already configured
+external profile requires separate disclosed owner consent. Sam does not fall
+back after a playback failure or change the language/provider/billing silently.
+The backend re-runs text validation and the trusted privacy classifier for every
+ticket and playback: secret-looking text is withheld, and PRIVATE/SECRET content
+is never sent to external TTS. Local output stays on the Mac. Guest Mode cannot
+configure or consume this owner speech path. The OpenRouter key stays in the
+backend. A missing voice, denied request, provider
 failure or playback failure leaves the written answer visible and shows a
 speech failure; it never silently claims that audio played. Enrollment and
 fresh owner verification on every turn remain independent of response language.
+
+The sleeping path uses only local wake STT and speaker verification. An OWNER
+decision creates a deterministic language-specific greeting; the microphone
+pauses during speech and resumes when native/audio playback completes. Neither
+preview nor greeting calls AgentCore or an LLM. Captions/history do not initiate
+playback and may be hidden without disabling speech.
 
 The remaining sections document the original Fish transport and gateway. Their
 Phase 10 playback and automatic-synthesis exclusions apply to that transport

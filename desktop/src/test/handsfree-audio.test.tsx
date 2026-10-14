@@ -29,6 +29,7 @@ function setup(rate = 16_000, utterance?: () => Promise<VoiceResponse>, speech: 
   const fake = fakeAudioEnvironment();
   Object.defineProperty(fake.context, "sampleRate", { value: rate });
   const wakeResults: ((result: VoiceWakeResponse) => void)[] = [];
+  let latestReply: VoiceResponse = response;
   const bridge = mockBridge({
     status: vi.fn(async () => ({
       ...baseStatus, voice_input: "configured" as const,
@@ -39,15 +40,23 @@ function setup(rate = 16_000, utterance?: () => Promise<VoiceResponse>, speech: 
       step_up_configured: true, speaker_model: "configured" as const,
     })),
     voiceWake: vi.fn(() => new Promise<VoiceWakeResponse>((resolve) => wakeResults.push(resolve))),
-    voiceUtterance: vi.fn(utterance ?? (async () => response)),
+    voiceUtterance: vi.fn(async () => {
+      const result = await (utterance ?? (async () => response))();
+      latestReply = result;
+      return { ...result, speech_id: result.reply ? "reply-ticket" : null };
+    }),
   });
+  bridge.playSamSpeech.mockImplementation(() => new Promise((resolve) => {
+    const handle = speech?.speak(latestReply.reply!, latestReply.language ?? "en", () => resolve({ ...ok, kind: "local" }));
+    if (!handle) resolve({ ...ok, kind: "local" });
+  }));
   const commits = vi.fn();
   render(<Profiler id="voice" onRender={commits}><App bridge={bridge} audioEnvironment={fake.env} speech={speech} /></Profiler>);
   const frames = (count: number, level: number) => act(() => {
     for (let i = 0; i < count; i++) fake.emit(new Float32Array(FRAME).fill(level));
   });
   const settleWake = async (index = 0, followed = false) => {
-    await act(async () => wakeResults[index]?.({ ...ok, wake: true, followed }));
+    await act(async () => wakeResults[index]?.({ ...ok, wake: true, owner_verified: true, followed }));
   };
   const startWake = async () => {
     await waitFor(() => expect(state()).toBe("sleeping"));
@@ -386,7 +395,7 @@ describe("hands-free audio continuity", () => {
     frames(4, 0);
     expect(bridge.voiceWake).toHaveBeenCalledTimes(2);
     await settleWake(0, true);
-    expect(state()).toBe("sleeping");
+    expect(state()).toBe("verifying"); // the newer wake check still owns verification
     expect(bridge.voiceUtterance).not.toHaveBeenCalled();
     frames(8, 0.35);
     frames(8, 0);

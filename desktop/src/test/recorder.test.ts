@@ -63,11 +63,15 @@ describe("Recorder", () => {
   it("requests the same microphone processing for enrollment and hands-free", async () => {
     const enrollmentAudio = fakeAudioEnvironment();
     const handsFreeAudio = fakeAudioEnvironment();
+    const enrollmentContext = vi.spyOn(enrollmentAudio.env, "createContext");
+    const verificationContext = vi.spyOn(handsFreeAudio.env, "createContext");
     const recorder = new Recorder(enrollmentAudio.env);
     const listener = new Listener(handsFreeAudio.env, () => undefined);
     try {
       await recorder.start();
       await listener.start();
+      expect(enrollmentContext).toHaveBeenCalledExactlyOnceWith(16_000);
+      expect(verificationContext).toHaveBeenCalledExactlyOnceWith(16_000);
       expect(enrollmentAudio.getUserMedia.mock.calls).toEqual(handsFreeAudio.getUserMedia.mock.calls);
       expect(enrollmentAudio.getUserMedia).toHaveBeenCalledWith({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },

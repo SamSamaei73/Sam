@@ -180,7 +180,25 @@ V3 = Migration(
     ),
 )
 
-MIGRATIONS: tuple[Migration, ...] = (V1, V2, V3)
+V4 = Migration(
+    4,
+    "owner_approved_speech_mode",
+    (
+        """CREATE TABLE owner_settings_v4 (
+            key TEXT PRIMARY KEY CHECK (key IN (
+                'proactive.scheduler.persistent', 'voice.activation',
+                'voice.responses', 'voice.external_speech')),
+            value TEXT NOT NULL CHECK (value IN ('true','false')),
+            updated_at TEXT NOT NULL
+        )""",
+        """INSERT INTO owner_settings_v4 (key, value, updated_at)
+            SELECT key, value, updated_at FROM owner_settings""",
+        "DROP TABLE owner_settings",
+        "ALTER TABLE owner_settings_v4 RENAME TO owner_settings",
+    ),
+)
+
+MIGRATIONS: tuple[Migration, ...] = (V1, V2, V3, V4)
 CURRENT_VERSION = MIGRATIONS[-1].version
 
 assert [m.version for m in MIGRATIONS] == list(range(1, len(MIGRATIONS) + 1))

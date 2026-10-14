@@ -18,7 +18,17 @@ export class SileroModel {
     const session = typeof model === "string"
       ? await ort.InferenceSession.create(model, options)
       : await ort.InferenceSession.create(model, options);
-    return new SileroModel(session);
+    const detector = new SileroModel(session);
+    // First inference can compile/allocate kernels. Finish it before READY,
+    // while capture is paused, so cold startup cannot overrun live audio.
+    try {
+      await detector.probability(new Float32Array(512));
+      detector.reset();
+      return detector;
+    } catch (error) {
+      await detector.close();
+      throw error;
+    }
   }
 
   async probability(frame: Float32Array): Promise<number> {

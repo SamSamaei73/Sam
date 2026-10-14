@@ -23,6 +23,7 @@ const handsFreeStatus = {
 
 const reply = (overrides: Partial<VoiceResponse> = {}): VoiceResponse => ({
   ...ok,
+  speech_id: "reply-ticket",
   transcript: "how is the project going",
   forwarded_to_agent: true,
   reply: "It's on track.",
@@ -49,6 +50,11 @@ function setup(overrides: Parameters<typeof mockBridge>[0] = {}, identity: Ident
       return { stop: () => onEnd() };
     },
   };
+  bridge.playSamSpeech.mockImplementation(() => new Promise((resolve) => {
+    spoken.push("It's on track.");
+    endings.push(() => resolve({ ...ok, kind: "local" }));
+  }));
+  bridge.stopSamSpeech.mockImplementation(async () => { endings.shift()?.(); });
   renderApp(bridge, fake.env, speech);
   const say = (frames = 6, turn = false) => {
     act(() => {
@@ -120,7 +126,7 @@ describe("hands-free voice activation", () => {
   it("wakes on its name, then talks hands-free turn after turn", async () => {
     const utterance = vi.fn(async () => reply());
     const { bridge, say, spoken, finishSpeaking } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
       voiceUtterance: utterance,
     });
     await waitFor(() => expect(state()).toBe("sleeping"));
@@ -141,7 +147,7 @@ describe("hands-free voice activation", () => {
 
   it("a stop phrase puts Sam back to sleep", async () => {
     const { say } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
       voiceUtterance: vi.fn(async () =>
         reply({ reason_code: "conversation_ended", message: "Okay.", transcript: null, reply: null }),
       ),
@@ -155,12 +161,12 @@ describe("hands-free voice activation", () => {
 
   it("an unrecognized speaker ends the conversation (fail closed)", async () => {
     const { say, bridge } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
       voiceUtterance: vi.fn(async () =>
         reply({
           status: "denied",
-          reason_code: "owner_verification_required",
-          message: "Sam didn't recognize your voice.",
+          reason_code: "speaker_not_recognized",
+          message: "I couldn't verify that this is you. Try again.",
           transcript: null,
           reply: null,
           forwarded_to_agent: false,
@@ -172,13 +178,13 @@ describe("hands-free voice activation", () => {
     await waitFor(() => expect(state()).toBe("attending"));
     say(8, true);
     await waitFor(() => expect(state()).toBe("sleeping"));
-    expect(await screen.findByText("Sam didn't recognize your voice.")).toBeInTheDocument();
+    expect(await screen.findByText("I couldn't verify that this is you. Try again.")).toBeInTheDocument();
     expect(bridge.chat).not.toHaveBeenCalled();
   });
 
   it("a conversation ends by itself after a quiet while", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { say } = setup({ voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })) });
+    const { say } = setup({ voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })) });
     await waitFor(() => expect(state()).toBe("sleeping"));
     say();
     await waitFor(() => expect(state()).toBe("attending"));
@@ -200,7 +206,7 @@ describe("hands-free voice activation", () => {
   it("the name followed by a request is answered as the first turn", async () => {
     const utterance = vi.fn(async () => reply());
     const { say } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: true })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: true })),
       voiceUtterance: utterance,
     });
     await waitFor(() => expect(state()).toBe("sleeping"));
@@ -215,7 +221,7 @@ describe("hands-free setup and safety", () => {
     expect(await screen.findByRole("button", { name: "Set up your voice so Sam can recognize you" })).toBeInTheDocument();
     expect(fake.getUserMedia).not.toHaveBeenCalled();
     await userEvent.setup().click(screen.getByRole("button", { name: /Action required/ }));
-    expect(screen.getByText("Set up your voice for hands-free Sam")).toBeInTheDocument();
+    expect(screen.getByText("Set up owner voice before starting a voice conversation.")).toBeInTheDocument();
   });
 
   it("a refused microphone fails closed with a clear action, and does not retry by itself", async () => {
@@ -234,7 +240,7 @@ describe("hands-free setup and safety", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(refuse).toHaveBeenCalledTimes(1); // no silent retry loop
     await userEvent.setup().click(screen.getByRole("button", { name: /Action required/ }));
-    expect(screen.getByText(/Microphone access is off \(System Settings/)).toBeInTheDocument();
+    expect(screen.getByText(/Allow Sam in macOS System Settings/)).toBeInTheDocument();
   });
 
   it("leaving Home closes the microphone", async () => {
@@ -297,7 +303,7 @@ describe("a text draft never blocks voice", () => {
   it("the wake word starts a conversation while a draft exists, and the draft is untouched", async () => {
     const utterance = vi.fn(async () => reply());
     const { bridge, say, finishSpeaking } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
       voiceUtterance: utterance,
     });
     const user = userEvent.setup();
@@ -330,7 +336,7 @@ describe("a text draft never blocks voice", () => {
 
   it("ending the voice conversation never submits the draft", async () => {
     const { bridge, say } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
       voiceUtterance: vi.fn(async () =>
         reply({ reason_code: "conversation_ended", message: "Okay.", transcript: null, reply: null }),
       ),
@@ -347,7 +353,7 @@ describe("a text draft never blocks voice", () => {
   });
 
   it("an open text box does not stop Sam from hearing its name", async () => {
-    const { say } = setup({ voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })) });
+    const { say } = setup({ voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })) });
     const user = userEvent.setup();
     await waitFor(() => expect(state()).toBe("sleeping"));
     await user.click(screen.getByRole("button", { name: "Type to Sam" }));
@@ -359,12 +365,12 @@ describe("a text draft never blocks voice", () => {
 
   it("security still applies: an unrecognized voice ends the conversation, draft or not", async () => {
     const { bridge, say } = setup({
-      voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+      voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
       voiceUtterance: vi.fn(async () =>
         reply({
           status: "denied",
-          reason_code: "owner_verification_required",
-          message: "Sam didn't recognize your voice.",
+          reason_code: "speaker_not_recognized",
+          message: "I couldn't verify that this is you. Try again.",
           transcript: null,
           reply: null,
           forwarded_to_agent: false,

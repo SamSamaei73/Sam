@@ -97,7 +97,7 @@ describe("static UI strings", () => {
     expect(fa("settings.ownerVoice")).toBe("صدای مالک");
     expect(fa("settings.guestMode")).toBe("حالت مهمان");
     expect(fa("mic.recording")).toBe("در حال ضبط");
-    expect(fa("voice.ownerRequired")).toBe("تأیید هویت صوتی مالک لازم است.");
+    expect(fa("voice.ownerRequired")).toBe("نتوانستم تأیید کنم که این صدای شماست. دوباره تلاش کنید.");
     expect(fa("guest.banner")).toBe("حالت مهمان فعال است");
     expect(fa("enroll.title")).toBe("ثبت صدای مالک");
     expect(fa("confirm.title")).toBe("سام به تأیید شما نیاز دارد");

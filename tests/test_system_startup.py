@@ -40,7 +40,9 @@ def test_first_run_is_secure_honest_and_opts_into_nothing(tmp_path: Path) -> Non
         assert mode(data / "logs") == 0o700
         status = client.get("/desktop/v1/status", headers=HEADERS).json()
         health = status["health"]
-        assert health["status"] == "ready" and health["phase"] == "ready"
+        assert health["status"] == "degraded" and health["phase"] == "ready"
+        assert status["agent"] == "not_configured"
+        assert status["model_issue"] is not None
         assert (
             health["storage_mode"] == "sqlite"
             and health["schema_version"] == CURRENT_VERSION

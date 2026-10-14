@@ -71,6 +71,12 @@ _MESSAGES = {
     "inconsistent_samples": "The samples didn't sound like one speaker.",
     "unstable_samples": "The samples were too different. Please try again.",
     "store_error": "The secure store couldn't be used. Nothing was saved.",
+    "profile_load_failed": "Owner voice profile couldn't be loaded.",
+    "profile_schema_mismatch": (
+        "The saved owner voice profile has an incompatible format."
+    ),
+    "profile_missing_after_save": "The owner voice profile wasn't found after saving.",
+    "profile_readback_mismatch": "The saved owner voice profile couldn't be verified.",
     "provider_error": "The speaker model couldn't process that.",
     "owner_verification_failed": "Owner verification failed.",
     "guest_active": "Guest Mode is already active. End it first.",
@@ -171,6 +177,7 @@ def identity_status(runtime: DesktopRuntime = _runtime) -> IdentityStatusRespons
             setup_state=_setup_state(runtime, models, None),
             step_up_configured=runtime.step_up_configured(),
             models=models,
+            reason_code="identity_not_configured",
         )
     enrollment = identity.enrollment.status()
     enrolled = enrollment.enrolled
@@ -196,6 +203,8 @@ def identity_status(runtime: DesktopRuntime = _runtime) -> IdentityStatusRespons
         models=models,
         enrolled=enrolled,
         profile_compatible=enrollment.profile_compatible,
+        reason_code=enrollment.reason_code,
+        last_verification_reason=identity.last_verification_reason,
         mode="guest_mode" if guest.active else "owner_only",
         guest=guest,
         last_verification=last_state,
@@ -336,7 +345,7 @@ def enroll_complete(
     if identity is None:
         return _unavailable()
     try:
-        outcome = identity.enrollment.complete(payload.session_id)
+        outcome = identity.complete_enrollment(payload.session_id)
     except EnrollmentError:
         return OperationResult(
             status="rejected",
@@ -344,6 +353,7 @@ def enroll_complete(
             message=_msg("session_invalid"),
         )
     if outcome.completed:
+        runtime.reset_voice_session()
         runtime.voice_conversations.end(runtime.principal)
         runtime.activity.add("voice", "Owner voice enrolled", "completed")
         return OperationResult(status="ok")
@@ -383,6 +393,8 @@ def delete_profile(
         return OperationResult(
             status="failed", reason_code="store_error", message=_msg("store_error")
         )
+    identity.profile_changed()
+    runtime.reset_voice_session()
     identity.guests.revoke()  # no owner profile: no guest sessions either
     runtime.activity.add("voice", "Owner voice profile removed", "removed")
     return OperationResult(status="ok")

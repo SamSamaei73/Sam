@@ -63,6 +63,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from sam.agent.models import MessageRole
@@ -233,6 +234,18 @@ def build_child_env(parent: Mapping[str, str], *, tmpdir: str) -> dict[str, str]
     env["NO_COLOR"] = "1"
     if not env.get("HOME", "").startswith("/"):
         raise ProviderFailure(FailureCategory.UNAVAILABLE, "no_home")
+    if any(ord(c) < 32 for c in env["HOME"]) or ".." in Path(env["HOME"]).parts:
+        raise ProviderFailure(FailureCategory.UNAVAILABLE, "invalid_home")
+    for name in ("USER", "LOGNAME"):
+        if name in env and not re.fullmatch(
+            r"[A-Za-z0-9_.][A-Za-z0-9_.-]{0,63}", env[name]
+        ):
+            raise ProviderFailure(FailureCategory.UNAVAILABLE, "invalid_account")
+    if "USER" in env or "LOGNAME" in env:
+        account = env.get("USER", env.get("LOGNAME", ""))
+        if env.get("LOGNAME", account) != account:
+            raise ProviderFailure(FailureCategory.UNAVAILABLE, "invalid_account")
+        env["USER"] = env["LOGNAME"] = account
     if STRIPPED_ENV & set(env):  # defence in depth: can never trigger
         raise ProviderFailure(FailureCategory.POLICY_BLOCKED, "env_not_clean")
     return env
@@ -638,6 +651,7 @@ class ClaudeSubscriptionProvider:
         self._clock = clock
         self._cli_ok_until = 0.0
         self._ready: tuple[float, Readiness] | None = None
+        self._readiness_lock = RLock()
 
     @property
     def disabled_detail(self) -> str | None:
@@ -653,6 +667,10 @@ class ClaudeSubscriptionProvider:
 
     def availability(self) -> Availability:
         return self._readiness().availability
+
+    def refresh(self) -> Availability:
+        """Retry local preflight only; never generate text or change policy."""
+        return self._readiness(refresh=True).availability
 
     def __repr__(self) -> str:
         return "ClaudeSubscriptionProvider()"
@@ -713,9 +731,20 @@ class ClaudeSubscriptionProvider:
         return classify_auth(document)
 
     def _readiness(self, *, refresh: bool = False) -> Readiness:
+        with self._readiness_lock:
+            return self._check_readiness(refresh=refresh)
+
+    def _check_readiness(self, *, refresh: bool = False) -> Readiness:
         now = self._clock()
         if self._deployment is not DeploymentMode.OWNER_LOCAL:
             return Readiness(Availability.DISABLED, "deployment_not_owner_local")
+        try:
+            build_child_env(
+                self._environ if self._environ is not None else os.environ,
+                tmpdir="/tmp",
+            )
+        except ProviderFailure as failure:
+            return Readiness(Availability.UNAVAILABLE, failure.code)
         executable = resolve_executable(self._configured)
         if executable is None:
             return Readiness(Availability.NOT_CONFIGURED, "not_installed")

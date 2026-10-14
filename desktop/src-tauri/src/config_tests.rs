@@ -14,7 +14,7 @@ const MAIN_RS: &str = include_str!("main.rs");
 const CARGO: &str = include_str!("../Cargo.toml");
 const BACKEND_PATHS: &str = include_str!("../../../src/sam/storage/paths.py");
 
-const COMMANDS: [&str; 54] = [
+const COMMANDS: [&str; 58] = [
     "sam_status",
     "sam_chat",
     "sam_knowledge_list",
@@ -32,6 +32,10 @@ const COMMANDS: [&str; 54] = [
     "sam_speak",
     "sam_local_speak",
     "sam_local_stop",
+    "sam_speech_status",
+    "sam_speech_settings",
+    "sam_speech_preview",
+    "sam_speech_play",
     "sam_identity_status",
     "sam_identity_enroll_begin",
     "sam_identity_enroll_sample",
@@ -245,11 +249,17 @@ fn career_link_data_is_confined_to_career_commands() {
             let owner = preceding
                 .iter()
                 .rev()
-                .find(|l| l.starts_with("fn sam_") || l.starts_with("struct "))
+                .find(|l| {
+                    l.trim_start_matches("async ").starts_with("fn sam_")
+                        || l.starts_with("struct ")
+                })
                 .copied()
                 .unwrap_or_default();
             assert!(
-                owner.starts_with("fn sam_career_") || owner == "struct CareerPreferencesArgs {",
+                owner
+                    .trim_start_matches("async ")
+                    .starts_with("fn sam_career_")
+                    || owner == "struct CareerPreferencesArgs {",
                 "{line} outside a Career command: {owner}"
             );
         }
@@ -302,7 +312,9 @@ fn career_link_data_cannot_open_or_fetch_anything() {
     for body in career_fns {
         let forwarded = body.split("\n}").next().unwrap_or_default();
         assert!(
-            forwarded.contains("run(") && forwarded.contains("Route::Career"),
+            forwarded.contains("run_async(")
+                && forwarded.contains("Route::Career")
+                && forwarded.contains(".await"),
             "career command must only forward to the fixed backend route"
         );
     }
@@ -313,7 +325,10 @@ fn commands_take_no_authority_or_destination_arguments() {
     let signatures: String = LIB_RS
         .lines()
         .filter(|l| {
-            l.trim_start().starts_with("fn sam_") || l.starts_with("    ") && l.contains(": ")
+            l.trim_start()
+                .trim_start_matches("async ")
+                .starts_with("fn sam_")
+                || l.starts_with("    ") && l.contains(": ")
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -456,6 +471,35 @@ fn release_builds_never_use_an_environment_configured_backend() {
     assert!(debug < from_env && from_env < release);
     assert!(body.contains("Err(_) => slot.set(Slot::Failed)"));
     assert_eq!(LIB_RS.matches("Backend::from_env()").count(), 1);
+}
+
+#[test]
+fn voice_and_health_ipc_never_block_microphone_delivery_on_the_ui_thread() {
+    for command in [
+        "sam_status",
+        "sam_chat",
+        "sam_voice_utterance",
+        "sam_voice_conversation_end",
+        "sam_voice_wake",
+        "sam_identity_status",
+        "sam_models_status",
+        "sam_speech_status",
+        "sam_speech_settings",
+        "sam_speech_preview",
+    ] {
+        let signature = format!("async fn {command}(");
+        let start = LIB_RS.find(&signature).expect("background command");
+        let body = &LIB_RS[start..start + LIB_RS[start..].find("\n}").unwrap()];
+        assert!(
+            body.contains("run_async("),
+            "{command} must dispatch off the UI thread"
+        );
+        assert!(body.contains(".await"));
+    }
+    let start = LIB_RS.find("async fn run_async(").unwrap();
+    let body = &LIB_RS[start..start + LIB_RS[start..].find("\n}").unwrap()];
+    assert!(body.contains("spawn_blocking"));
+    assert!(body.contains(".call(route, body)"));
 }
 
 /// The window never waits on the backend, and quitting always stops it, even

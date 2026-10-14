@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { SamBridge } from "./bridge/bridge";
 import { BridgeError, toBridgeError } from "./bridge/bridge";
-import type { Challenge, IdentityStatus, OperationResult, StatusResponse } from "./bridge/types";
+import type { Challenge, IdentityStatus, OperationResult, StatusResponse, SamVoiceStatus } from "./bridge/types";
 import { translate, type StringKey } from "./i18n/strings";
 import { ConfirmationDialog } from "./components/ConfirmationDialog";
 import { loadPrefs, savePrefs, type Prefs } from "./lib/prefs";
@@ -33,6 +33,9 @@ interface SamContextValue {
   /** Owner voice identity + Guest Mode state (safe metadata only). */
   identity: IdentityStatus | null;
   refreshIdentity: () => Promise<void>;
+  samVoice: SamVoiceStatus | null;
+  refreshSamVoice: () => Promise<void>;
+  setSamVoice: (enabled: boolean, externalApproved?: boolean) => Promise<void>;
   /** Static, reviewed UI text in the chosen interface language. */
   t: (key: StringKey) => string;
   /** Test seam: the audio environment recorders use (defaults to the browser). */
@@ -86,10 +89,39 @@ export function SamProvider({
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [failed, setFailed] = useState(false);
   const [identity, setIdentity] = useState<IdentityStatus | null>(null);
+  const [samVoice, setSamVoiceState] = useState<SamVoiceStatus | null>(null);
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const alive = useRef(true);
   const identityGeneration = useRef<symbol | null>(null);
+  const identityStartupFailed = useRef(false);
+  const speechGeneration = useRef(0);
+  const speechSaving = useRef(false);
+  const speechLanguage = prefs.responseLanguage === "auto" ? prefs.uiLanguage : prefs.responseLanguage;
+  const refreshSamVoice = useCallback(async () => {
+    if (speechSaving.current) return;
+    const generation = ++speechGeneration.current;
+    try {
+      const next = await bridge.samVoiceStatus(speechLanguage);
+      if (alive.current && generation === speechGeneration.current) setSamVoiceState(next);
+    } catch {
+      if (alive.current && generation === speechGeneration.current) setSamVoiceState(null);
+    }
+  }, [bridge, speechLanguage]);
+  const setSamVoice = useCallback(async (enabled: boolean, externalApproved = false) => {
+    speechSaving.current = true;
+    const generation = ++speechGeneration.current;
+    try {
+      const next = await bridge.setSamVoice(enabled, externalApproved, speechLanguage);
+      if (alive.current && generation === speechGeneration.current) setSamVoiceState(next);
+    } finally { speechSaving.current = false; }
+  }, [bridge, speechLanguage]);
+
+  useEffect(() => {
+    void refreshSamVoice();
+    const timer = window.setInterval(() => void refreshSamVoice(), STATUS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [refreshSamVoice, identity?.guest.active]);
 
   const startedAt = useRef(Date.now());
   const startupRetry = useRef<number | undefined>(undefined);
@@ -123,11 +155,26 @@ export function SamProvider({
     identityGeneration.current = generation;
     try {
       const next = await bridge.identityStatus();
-      if (alive.current && generation === identityGeneration.current) setIdentity(next);
-    } catch {
-      if (alive.current && generation === identityGeneration.current) setIdentity(null);
+      if (alive.current && generation === identityGeneration.current) {
+        identityStartupFailed.current = false;
+        setIdentity(next);
+      }
+    } catch (error) {
+      if (alive.current && generation === identityGeneration.current) {
+        identityStartupFailed.current = toBridgeError(error).code === "starting";
+        setIdentity(null);
+      }
     }
   }, [bridge]);
+
+  // The first identity/speech requests can precede sidecar readiness. Retry
+  // as soon as the backend is ready, so enabled wake mode starts immediately.
+  useEffect(() => {
+    if (status?.backend.status === "ok") {
+      if (identityStartupFailed.current) void refreshIdentity();
+      void refreshSamVoice();
+    }
+  }, [status?.backend.status, refreshIdentity, refreshSamVoice]);
 
   useEffect(() => {
     alive.current = true;
@@ -217,6 +264,9 @@ export function SamProvider({
       refreshStatus,
       identity,
       refreshIdentity,
+      samVoice,
+      refreshSamVoice,
+      setSamVoice,
       t,
       audioEnvironment,
       prefs,
@@ -231,6 +281,9 @@ export function SamProvider({
       refreshStatus,
       identity,
       refreshIdentity,
+      samVoice,
+      refreshSamVoice,
+      setSamVoice,
       t,
       audioEnvironment,
       prefs,

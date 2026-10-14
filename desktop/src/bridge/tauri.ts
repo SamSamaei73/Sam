@@ -58,7 +58,12 @@ export const tauriBridge: SamBridge = {
     }),
   endVoiceConversation: (conversationId) =>
     call("sam_voice_conversation_end", { conversationId: conversationId ?? null }),
-  voiceWake: (audioBase64) => call("sam_voice_wake", { audioBase64 }),
+  voiceWake: (audioBase64, language = "en") => call("sam_voice_wake", { audioBase64, language }),
+  samVoiceStatus: (language) => call("sam_speech_status", { language }),
+  setSamVoice: (enabled, externalApproved, language) => call("sam_speech_settings", { enabled, externalApproved, language }),
+  previewSamVoice: (language) => call("sam_speech_preview", { language }),
+  playSamSpeech: (speechId) => call("sam_speech_play", { speechId }),
+  stopSamSpeech: (speechId) => call("sam_local_stop", { speechId }),
   setVoiceActivation: (enabled) => call("sam_voice_activation", { enabled }),
   speak: ({ text, voiceProfile, language, confirmationId }) =>
     call("sam_speak", {

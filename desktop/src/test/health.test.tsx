@@ -80,7 +80,7 @@ describe("system health", () => {
       subsystems: subsystems({ career: { status: "degraded", reason_code: "reconciliation_required" } }),
     };
     const panel = await openPanel({ ...baseStatus, health: pending });
-    expect(within(panel).getByText("Needs attention")).toBeInTheDocument();
+    expect(within(panel).getAllByText("Needs attention").length).toBeGreaterThan(0);
     expect(within(panel).getByText(/1 item\(s\) need checking/)).toBeInTheDocument();
   });
 

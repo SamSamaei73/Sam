@@ -236,6 +236,7 @@ export function demoBridge(): SamBridge {
     origin: "desktop_bootstrap",
   }));
   const activity: ActivityItem[] = [];
+  let automaticSpeechEnabled = true;
   const pending = new Map<string, Challenge>();
   const approved = new Set<string>();
 
@@ -243,6 +244,24 @@ export function demoBridge(): SamBridge {
     activity.unshift({ timestamp: iso(), kind, label, outcome, risk });
 
   return {
+    async samVoiceStatus(language) {
+      return { state: automaticSpeechEnabled ? "SAM_VOICE_READY" : "SAM_VOICE_PERMISSION_REQUIRED",
+        reason_code: automaticSpeechEnabled ? null : "automatic_speech_off", enabled: automaticSpeechEnabled,
+        external_approved: false, provider: "macos-system", profile: `sam-local-${language}`,
+        voice_name: "Samantha", language, external: false };
+    },
+    async setSamVoice(enabled, _externalApproved, language) {
+      automaticSpeechEnabled = enabled;
+      return this.samVoiceStatus(language);
+    },
+    async previewSamVoice() {
+      return { ...empty, status: "ok", speech_id: "demo-preview" };
+    },
+    async playSamSpeech() {
+      return { ...empty, status: "failed", kind: null, reason_code: "demo_speech_unavailable",
+        audio_base64: null, audio_format: null, byte_length: null };
+    },
+    async stopSamSpeech() {},
     async status() {
       await wait(60);
       return {
@@ -386,7 +405,7 @@ export function demoBridge(): SamBridge {
     },
     async voiceWake() {
       await wait(250);
-      return { ...empty, status: "ok", wake: activation === "on", followed: false };
+      return { ...empty, status: "ok", wake: activation === "on", followed: false, owner_verified: true };
     },
     async setVoiceActivation(enabled) {
       await wait(100);
@@ -399,8 +418,8 @@ export function demoBridge(): SamBridge {
         return {
           ...empty,
           status: "denied",
-          reason_code: "owner_verification_required",
-          message: "Sam didn't recognize your voice.",
+          reason_code: "speaker_not_recognized",
+          message: "I couldn't verify that this is you. Try again.",
           transcript: null,
           forwarded_to_agent: false,
           reply: null,

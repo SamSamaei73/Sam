@@ -348,12 +348,14 @@
 }
 
 /* thinking: controlled counter-rotating arcs */
+.presence[data-state="verifying"] .arcs,
 .presence[data-state="thinking"] .arcs {
   opacity: 1;
 }
 .presence[data-state="thinking"] .arcs path {
   opacity: 0.95;
 }
+.presence[data-state="verifying"] .arcs.outer,
 .presence[data-state="thinking"] .arcs.outer {
   animation: spin 5s linear infinite;
 }
@@ -370,10 +372,13 @@
 }
 
 /* speaking: a steady pulse with a waveform ring */
+.presence[data-state="greeting"] .wave,
 .presence[data-state="speaking"] .wave {
   opacity: 0.85;
   animation: spin 14s linear infinite, wave 0.9s ease-in-out infinite;
 }
+.presence[data-state="greeting"] .core,
+.presence[data-state="greeting"] .core-glow,
 .presence[data-state="speaking"] .core,
 .presence[data-state="speaking"] .core-glow {
   animation: speak 0.9s ease-in-out infinite;
@@ -636,6 +641,20 @@
   color: var(--warn);
   font-weight: 600;
 }
+.attention-summary {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+.attention-detail { min-width: 0; padding: 8px 0; }
+.attention-detail p { margin: 6px 0; font-size: 12px; line-height: 1.5; }
+.attention-state { display: block; color: var(--warn); font-size: 11px; margin-top: 3px; }
+.attention-detail details { margin-top: 8px; color: var(--text-dim); font-size: 11px; }
+.attention-detail code { overflow-wrap: anywhere; }
+.voice-preview { display: flex; align-items: center; gap: 12px; }
+.voice-preview .presence { width: 120px; }
 .attention ul {
   list-style: none;
   margin: 0 0 16px;

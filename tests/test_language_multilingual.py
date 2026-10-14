@@ -130,7 +130,7 @@ def test_one_enrolled_owner_can_switch_spoken_languages_without_changing_identit
         for event in bridge.runtime.identity.audit.events()
     )
     rejected = bridge.utter(OTHER_VOICE)
-    assert rejected["reason_code"] == "owner_verification_required"
+    assert rejected["reason_code"] == "speaker_not_recognized"
     assert bridge.voice_stt.call_count == 1  # Non-owner still cannot reach ASR.
     assert bridge.agent.languages == [tag]
 

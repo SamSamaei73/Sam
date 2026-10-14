@@ -167,6 +167,7 @@ def test_migrations_are_explicit_ordered_and_idempotent(tmp_path: Path) -> None:
         (1, "initial_durable_state"),
         (2, "durable_idempotency_memory_knowledge"),
         (3, "owner_setting_voice_activation"),
+        (4, "owner_approved_speech_mode"),
     ]
     assert [m.version for m in MIGRATIONS] == list(range(1, CURRENT_VERSION + 1))
 

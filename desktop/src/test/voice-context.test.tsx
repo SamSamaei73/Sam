@@ -13,6 +13,7 @@ const CONTEXT_ID = "a".repeat(32);
 const FRAME = 1_600;
 const response: VoiceResponse = {
   ...ok,
+  speech_id: "reply-ticket",
   transcript: "Please remember the blue example for this conversation.",
   reply: "I can use that example for your next question.",
   forwarded_to_agent: true,
@@ -59,7 +60,7 @@ function setup(utterance = vi.fn<SamBridge["voiceUtterance"]>().mockResolvedValu
       step_up_configured: true,
       speaker_model: "configured" as const,
     })),
-    voiceWake: vi.fn(async () => ({ ...ok, wake: true, followed: false })),
+    voiceWake: vi.fn(async () => ({ ...ok, wake: true, owner_verified: true, followed: false })),
     voiceUtterance: utterance,
   });
   const endings: (() => void)[] = [];
@@ -67,6 +68,10 @@ function setup(utterance = vi.fn<SamBridge["voiceUtterance"]>().mockResolvedValu
     endings.push(() => end("ended"));
     return { stop: () => end("stopped") };
   });
+  bridge.playSamSpeech.mockImplementation(() => new Promise((resolve) => {
+    spoken(response.reply!, "en", () => resolve({ ...ok, kind: "local" }));
+  }));
+  bridge.stopSamSpeech.mockImplementation(async () => { endings.shift()?.(); });
   render(
     <SamProvider bridge={bridge} audioEnvironment={fake.env}>
       <SessionProvider speech={{ speak: spoken }}><SessionControls /></SessionProvider>
@@ -136,8 +141,8 @@ describe("temporary voice conversation context", () => {
     const utterance = vi.fn<SamBridge["voiceUtterance"]>()
       .mockResolvedValueOnce(response)
       .mockResolvedValueOnce({
-        ...response, status: "denied", reason_code: "owner_verification_required",
-        message: "Sam didn't recognize your voice.", transcript: null, reply: null,
+        ...response, status: "denied", reason_code: "speaker_not_recognized",
+        message: "I couldn't verify that this is you. Try again.", transcript: null, reply: null,
         forwarded_to_agent: false, speaker: null, speaker_result: "owner_rejected", conversation_id: null,
       })
       .mockResolvedValue(response);

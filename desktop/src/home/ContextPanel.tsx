@@ -3,6 +3,7 @@ import { useSam } from "../state";
 import type { ViewId } from "../views/viewIds";
 import { ActionRequired } from "./ActionRequired";
 import type { AttentionItem, NextUp } from "./useAttention";
+import { VoiceDiagnostics } from "./VoiceDiagnostics";
 
 /** Identity as safe labels only: never a score, embedding or threshold. */
 export function identityLabel(
@@ -17,10 +18,8 @@ export function identityLabel(
     return { label: t("home.identity.none"), tone: "muted" };
   }
   if (identity.last_verification === "verified") return { label: t("home.identity.owner"), tone: "ok" };
-  if (identity.last_verification === "insufficient_audio") {
-    return { label: t("settings.verification.insufficient_audio"), tone: "warn" };
-  }
-  if (identity.last_verification === "not_verified") return { label: t("home.identity.verify"), tone: "warn" };
+  // Enrollment is readiness, never a blanket verification. A past failed
+  // clip is shown in history; current failures have one actionable card.
   return { label: t("home.identity.unknown"), tone: "muted" };
 }
 
@@ -37,7 +36,8 @@ export function ContextPanel({
   const who = identityLabel(identity, t);
   return (
     <SystemPanel status={status}>
-      <ActionRequired items={items} onNavigate={onNavigate} />
+      <div id="sam-context-panel"><ActionRequired items={items} onNavigate={onNavigate} /></div>
+      <VoiceDiagnostics />
       <section className="context-block" aria-label={t("home.identity.title")}>
         <h3>{t("home.identity.title")}</h3>
         <p className="identity-line" data-tone={who.tone}>

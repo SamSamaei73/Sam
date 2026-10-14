@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import type { StatusResponse, VoiceSetupState } from "../bridge/types";
+import { speechProblem } from "../lib/samVoice";
+import { getCaptureDiagnostics } from "../lib/voiceDiagnostics";
+import type { StatusResponse, VoiceSetupState, IdentityStatus, SamVoiceStatus } from "../bridge/types";
 import type { ConnectionState } from "../state";
 import { useSession } from "../session";
 import { useSam } from "../state";
@@ -8,6 +10,14 @@ import type { ViewId } from "../views/viewIds";
 export interface AttentionItem {
   id: string;
   label: string;
+  reason_code: string;
+  subsystem: string;
+  explanation: string;
+  blocks: string[];
+  state: string;
+  action: string;
+  retryVoice?: boolean;
+  retryModel?: boolean;
   tone: "warn" | "danger" | "info";
   /** Where the owner can resolve it (never an automatic action). */
   target?: ViewId;
@@ -32,8 +42,8 @@ const SUBSYSTEM_TEXT: Record<string, string> = {
  * nothing here approves, grants or changes anything.
  */
 export function useAttention(): { items: AttentionItem[]; nextUp: NextUp | null } {
-  const { bridge, status, connection, identity } = useSam();
-  const { handsFree } = useSession();
+  const { bridge, status, connection, identity, samVoice } = useSam();
+  const { handsFree, identityIssue, speechIssue } = useSession();
   const [reviews, setReviews] = useState(0);
   const [unread, setUnread] = useState(0);
   const [nextUp, setNextUp] = useState<NextUp | null>(null);
@@ -74,6 +84,9 @@ export function useAttention(): { items: AttentionItem[]; nextUp: NextUp | null 
 
   const voice = {
     micDenied: handsFree.micDenied,
+    micFailed: handsFree.micFailed,
+    micReason: handsFree.micFailed ? getCaptureDiagnostics().reason : null,
+    identity, samVoice, identityIssue, speechIssue,
     needsSetup: handsFree.needsSetup,
     setupState: handsFree.setupState,
   };
@@ -83,69 +96,93 @@ export function useAttention(): { items: AttentionItem[]; nextUp: NextUp | null 
   };
 }
 
+export interface VoiceAttentionState {
+  micDenied: boolean;
+  needsSetup: boolean;
+  micFailed?: boolean;
+  micReason?: string | null;
+  setupState?: VoiceSetupState | null;
+  identity?: IdentityStatus | null;
+  samVoice?: SamVoiceStatus | null;
+  identityIssue?: string | null;
+  speechIssue?: string | null;
+}
+
 export function attentionItems(
   status: StatusResponse | null,
   connection: ConnectionState,
-  verification: string | null,
+  _verification: string | null,
   reviews: number,
   unread: number,
-  voice: { micDenied: boolean; needsSetup: boolean; setupState?: VoiceSetupState | null } = {
-    micDenied: false,
-    needsSetup: false,
-  },
+  voice: VoiceAttentionState = { micDenied: false, needsSetup: false },
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
+  const add = (id: string, label: string, reason: string, explanation: string, blocks: string[], action: string,
+    target?: ViewId, state = "Needs attention", retryVoice = false) => {
+    if (!items.some((item) => item.id === id)) items.push({ id, label, reason_code: reason,
+      subsystem: id, explanation, blocks, action, target, state, retryVoice, tone: "warn" });
+  };
   if (connection === "unavailable") {
-    items.push({ id: "offline", label: "Sam's backend isn't reachable", tone: "danger" });
+    add("offline", "Sam engine", "backend_unreachable", "Sam's local engine is not responding.",
+      ["Voice conversation", "Wake greeting"], "Check connection", "settings");
     return items;
   }
   const health = status?.health;
   if (health?.status === "blocked") {
-    items.push({ id: "blocked", label: "Sam couldn't start safely", tone: "danger", target: "settings" });
+    add("blocked", "Sam startup", "startup_blocked", "Sam couldn't start safely. Review the health details in Settings.",
+      ["Conversation", "Speech", "Wake mode"], "Review startup", "settings");
+    return items;
   }
   for (const sub of health?.subsystems ?? []) {
-    if (sub.status === "degraded" || sub.status === "unavailable" || sub.status === "blocked") {
-      const label = SUBSYSTEM_TEXT[sub.name];
-      if (label && health?.status !== "blocked") {
-        items.push({
-          id: `health-${sub.name}`,
-          label,
-          tone: "warn",
-          target: sub.name === "career" ? "career" : "settings",
-        });
-      }
+    if (["degraded", "unavailable", "blocked"].includes(sub.status) && SUBSYSTEM_TEXT[sub.name]) {
+      add(`health-${sub.name}`, sub.name === "keychain" ? "Secure storage" : "Sam health",
+        `${sub.name}_unavailable`, SUBSYSTEM_TEXT[sub.name]!, [sub.name], "Review", sub.name === "career" ? "career" : "settings");
     }
   }
   if (status && status.agent !== "configured") {
-    items.push({ id: "model", label: "No language model is available", tone: "warn", target: "settings" });
+    const problem = status.model_issue;
+    add("model", problem?.message ?? "No configured model provider is ready", problem?.reason_code ?? "language_model_unavailable",
+      problem?.resolution ?? "Review AI providers in Settings. Local voice preview and the wake greeting are independent of the model.",
+      ["Conversation answers"], "Review AI providers", "settings", "Unavailable");
+    items[items.length - 1]!.retryModel = true;
   }
   if (voice.micDenied) {
-    // macOS permission, not a Sam permission: only the owner can change it.
-    items.push({
-      id: "mic",
-      label: "Microphone access is off (System Settings › Privacy & Security › Microphone)",
-      tone: "warn",
-    });
+    add("mic", "Microphone", "microphone_permission_required",
+      "Allow Sam in macOS System Settings → Privacy & Security → Microphone, then retry.",
+      ["Voice input", "Wake mode"], "Retry microphone", undefined, "Permission required", true);
+  } else if (voice.micFailed) {
+    add("mic", "Voice listener", voice.micReason ?? "microphone_capture_failed",
+      voice.micReason === "microphone_start_timeout"
+        ? "macOS did not open the microphone. Check Sam's microphone permission and the selected input in System Settings, then retry."
+        : "The microphone listener stopped. Retry to reopen local capture.",
+      ["Voice input", "Wake mode"], "Retry listener", undefined, "Stopped", true);
   }
-  if (voice.needsSetup) {
-    const label =
-      voice.setupState === "models_missing"
-        ? "Install voice components"
-        : voice.setupState === "restart_required"
-          ? "Finish voice setup: restart Sam's engine"
-          : voice.setupState === "setup_required"
-            ? "Set up owner security and your voice"
-            : "Set up your voice for hands-free Sam";
-    items.push({ id: "voice-setup", label, tone: "info", target: "settings" });
+  const identity = voice.identity;
+  const setup = identity?.setup_state ?? voice.setupState;
+  if (identity?.enrolled === true && identity.profile_compatible !== false) {
+    // Last verification is history, not a persistent setup blocker. Only a
+    // failure from the current voice session asks for a retry.
+    if (voice.identityIssue) add("owner", "Owner voice", voice.identityIssue,
+      "The last recording could not verify you. Your profile is enrolled; try speaking again.",
+      ["Owner voice conversation", "Verified wake greeting"], "Try again", undefined, "Retry needed", true);
+  } else if (identity?.reason_code === "profile_load_failed" || identity?.enrolled === null && identity.available) {
+    add("owner", "Owner voice", identity.reason_code ?? "profile_load_failed", "The saved owner profile couldn't be loaded.",
+      ["Owner voice conversation", "Verified wake greeting"], "Check voice profile", "settings", "Unavailable");
+  } else if (voice.needsSetup || identity?.available && setup !== "enrolled") {
+    const detail = setup === "models_missing" ? ["voice_models_missing", "Install the local voice components.", "Install components"]
+      : setup === "restart_required" ? ["voice_restart_required", "The installed components need an engine restart.", "Finish setup"]
+      : setup === "voice_unavailable" ? ["identity_not_configured", "Local owner verification is unavailable.", "Check voice setup"]
+      : identity?.profile_compatible === false ? ["profile_model_mismatch", "The saved profile is incompatible with the selected speaker model.", "Review profile"]
+      : ["voice_not_enrolled", "Set up owner voice before starting a voice conversation.", "Set up your voice"];
+    add("owner", "Owner voice", detail[0]!, detail[1]!, ["Owner voice conversation", "Verified wake greeting"], detail[2]!, "settings");
   }
-  if (verification === "not_verified") {
-    items.push({ id: "owner", label: "Owner verification required", tone: "warn", target: "settings" });
-  }
-  if (reviews > 0) {
-    items.push({ id: "career", label: `${reviews} career item(s) need your review`, tone: "info", target: "career" });
-  }
-  if (unread > 0) {
-    items.push({ id: "automations", label: `${unread} automation notice(s)`, tone: "info", target: "proactive" });
-  }
+  const speech = voice.samVoice;
+  const speechReason = voice.speechIssue ?? (speech?.state !== "SAM_VOICE_READY" ? speech?.reason_code : null);
+  if (speechReason) add("sam-voice", "Sam Voice", speechReason, speechProblem(speechReason),
+    ["Spoken greeting", "Spoken answers"], "Set up / preview voice", "settings", speech?.state === "SAM_VOICE_PERMISSION_REQUIRED" ? "Permission required" : "Unavailable");
+  if (reviews > 0) add("career", "Career review", "career_review_pending", `${reviews} career item(s) need your review.`,
+    [], "Review items", "career");
+  if (unread > 0) add("automations", "Automation notices", "automation_notices_unread", `${unread} automation notice(s) are unread.`,
+    [], "Read notices", "proactive");
   return items;
 }
