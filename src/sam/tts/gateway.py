@@ -98,6 +98,7 @@ class TTSGateway:
         audit_sink: TTSAuditSink | None = None,
         clock: Callable[[], datetime] = utc_now,
         provider_timeout_seconds: float = DEFAULT_TTS_TIMEOUT_SECONDS,
+        assistant_mode: bool = False,
     ) -> None:
         if not 0 < provider_timeout_seconds <= MAX_TTS_TIMEOUT_SECONDS:
             raise ValueError("timeout must be within the speech-synthesis bound")
@@ -115,6 +116,7 @@ class TTSGateway:
         self._audit = audit_sink
         self._clock = clock
         self._timeout = provider_timeout_seconds
+        self._assistant_mode = assistant_mode
         self._seen: OrderedDict[tuple[str, str, str], None] = OrderedDict()
         self._seen_lock = RLock()
 
@@ -169,7 +171,11 @@ class TTSGateway:
         # 5-6. policy builds; the PermissionEngine decides
         try:
             perm = policy.build_permission_request(
-                request.principal, profile, request_id=request.request_id, text=text
+                request.principal,
+                profile,
+                request_id=request.request_id,
+                text=text,
+                assistant_mode=self._assistant_mode,
             )
         except TTSError as error:
             return self._result(request, run, now, rejected, error.category)
@@ -194,9 +200,7 @@ class TTSGateway:
         )
         deadline = time.monotonic() + self._timeout
         try:
-            raw = provider.synthesize(
-                provider_request, timeout_seconds=self._timeout
-            )
+            raw = provider.synthesize(provider_request, timeout_seconds=self._timeout)
         except TimeoutError:
             return self._result(request, run, now, _S.FAILED, _C.TIMEOUT)
         except TTSError as error:

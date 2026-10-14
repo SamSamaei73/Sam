@@ -7,6 +7,7 @@ import { ModelSettings } from "../components/ModelSettings";
 import { EnrollmentDialog, GuestDialog, RemoveProfileDialog } from "../components/IdentityDialogs";
 import { NeonButton } from "../components/primitives";
 import { useSam } from "../state";
+import { SamVoiceSettings } from "../components/SamVoiceSettings";
 
 const CAPABILITY: Record<Capability, { label: string; tone: Tone }> = {
   available: { label: "Available", tone: "ok" },
@@ -160,6 +161,7 @@ export function SettingsView() {
       </section>
 
       {identity?.guest.active ? null : <VoiceActivation />}
+      <SamVoiceSettings />
 
       <section className="glass panel" aria-labelledby="guest-h">
         <h3 id="guest-h">{t("settings.guestMode")}</h3>

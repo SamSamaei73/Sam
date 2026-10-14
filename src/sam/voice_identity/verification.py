@@ -14,7 +14,11 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from sam.voice.models import DEFAULT_VOICE_PROVIDER_TIMEOUT_SECONDS, ValidatedAudio
-from sam.voice_identity.errors import InsufficientSpeechError, ProfileStoreError
+from sam.voice_identity.errors import (
+    InsufficientSpeechError,
+    ProfileSchemaError,
+    ProfileStoreError,
+)
 from sam.voice_identity.models import OwnerTemplate, SpeakerVerification, utc_now
 from sam.voice_identity.policy import (
     MAX_EMBEDDING_DIMENSION,
@@ -40,6 +44,7 @@ _DIAGNOSTIC_REASONS = frozenset(
         "audio_too_quiet",
         "audio_clipped",
         "profile_unreadable",
+        "profile_schema_mismatch",
         "not_enrolled",
         "model_mismatch",
         "provider_error",
@@ -161,8 +166,13 @@ class SpeakerVerifier:
         problem = quality_problem(audio)
         if problem is not None:
             return self._result(SpeakerResult.INSUFFICIENT_AUDIO, problem, audio)
-        template = self._load_template()
-        if template is False:
+        try:
+            template = self._store.load()
+        except ProfileSchemaError:
+            return self._result(
+                SpeakerResult.VERIFICATION_ERROR, "profile_schema_mismatch", audio
+            )
+        except ProfileStoreError:
             return self._result(
                 SpeakerResult.VERIFICATION_ERROR, "profile_unreadable", audio
             )
@@ -219,12 +229,5 @@ class SpeakerVerifier:
         return self._result(
             SpeakerResult.OWNER_NOT_VERIFIED, "speaker_mismatch", audio, score
         )
-
-    def _load_template(self) -> OwnerTemplate | None | bool:
-        try:
-            return self._store.load()
-        except ProfileStoreError:
-            return False
-
 
 __all__ = ["SpeakerVerifier", "valid_embedding"]

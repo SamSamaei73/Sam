@@ -29,7 +29,7 @@ describe("Action Required", () => {
     expect(presence().dataset.attention).toBe("true");
     const panel = screen.getByRole("complementary", { name: "System panel" });
     const list = within(panel).getByRole("region", { name: "Action required" });
-    await user.click(within(list).getByRole("button", { name: "1 career item(s) need your review" }));
+    await user.click(within(list).getByRole("button", { name: "Review items" }));
     // Navigating only: nothing was approved, submitted or sent.
     expect(bridge.careerSubmit).not.toHaveBeenCalled();
     expect(bridge.careerSend).not.toHaveBeenCalled();

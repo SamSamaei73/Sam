@@ -105,7 +105,10 @@ export class Recorder {
     }
     try {
       this.stream = stream;
-      const context = this.env.createContext();
+      // Use the same browser-native conversion as hands-free capture. The
+      // hardware-rate recorder previously used a different resampler when
+      // enrolling the template than when verifying a hands-free turn.
+      const context = this.env.createContext(TARGET_SAMPLE_RATE);
       this.context = context;
       const source = context.createMediaStreamSource(stream);
       this.source = source;

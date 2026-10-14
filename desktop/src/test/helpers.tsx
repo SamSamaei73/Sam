@@ -11,6 +11,7 @@ import type {
   ProfessionalProfile,
   ProvidersStatus,
   StatusResponse,
+  SamVoiceStatus,
 } from "../bridge/types";
 import type { LocalSpeechOutput } from "../lib/localSpeech";
 import type { AudioEnvironment } from "../lib/recorder";
@@ -21,6 +22,12 @@ export const ok: OperationResult = {
   message: null,
   reference_id: null,
   challenge: null,
+};
+
+export const readyVoice: SamVoiceStatus = {
+  state: "SAM_VOICE_READY", enabled: true, external_approved: false,
+  provider: "macos-system", profile: "sam-local-en", voice_name: "Samantha",
+  language: "en", external: false, reason_code: null,
 };
 
 export const baseStatus: StatusResponse = {
@@ -227,6 +234,15 @@ export function mockBridge(overrides: Partial<SamBridge> = {}): MockBridge {
       confirmation_id: id,
     })),
     endVoiceConversation: vi.fn(async () => ok),
+    samVoiceStatus: vi.fn(async () => readyVoice),
+    setSamVoice: vi.fn(async (enabled, external_approved, language) => ({
+      ...readyVoice, enabled, external_approved, language,
+      state: enabled ? "SAM_VOICE_READY" as const : "SAM_VOICE_PERMISSION_REQUIRED" as const,
+      reason_code: enabled ? null : "automatic_speech_off",
+    })),
+    previewSamVoice: vi.fn(async () => ({ ...ok, speech_id: "preview-ticket" })),
+    playSamSpeech: vi.fn(async () => ({ ...ok, kind: "local" as const, audio_base64: null, audio_format: null, byte_length: null })),
+    stopSamSpeech: vi.fn(async () => undefined),
     voiceUtterance: vi.fn(async () => ({
       ...ok,
       transcript: null,

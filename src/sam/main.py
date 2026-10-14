@@ -21,6 +21,7 @@ from sam.desktop.models_api import router as desktop_models_router
 from sam.desktop.proactive_api import router as desktop_proactive_router
 from sam.desktop.professional_api import router as desktop_professional_router
 from sam.desktop.runtime import build_desktop_runtime
+from sam.desktop.speech_api import router as desktop_speech_router
 from sam.models.adapter import RoutedLLMProvider
 from sam.models.factory import build_model_router
 from sam.system.secrets import credential_store_for, resolve_credentials
@@ -142,6 +143,7 @@ def create_app(
     application.include_router(agent_router)
     application.include_router(desktop_router)
     application.include_router(desktop_identity_router)
+    application.include_router(desktop_speech_router)
     application.include_router(desktop_models_router)
     application.include_router(desktop_professional_router)
     application.include_router(desktop_proactive_router)

@@ -126,6 +126,7 @@ MAX_WAKE_BASE64_CHARS = 400_000
 
 
 class VoiceWakeRequest(_Request):
+    language: LanguageCode = "en"
     audio_base64: str = Field(min_length=1, max_length=MAX_WAKE_BASE64_CHARS)
 
 
@@ -269,9 +270,17 @@ class SystemHealthItem(BaseModel):
     subsystems: list[SubsystemHealthItem]
 
 
+class ModelIssue(BaseModel):
+    provider: str | None = None
+    reason_code: str
+    message: str
+    resolution: str
+
+
 class StatusResponse(BaseModel):
     backend: HealthState
     agent: Capability
+    model_issue: ModelIssue | None = None
     knowledge: Capability
     memory: Capability
     tools: Capability
@@ -398,12 +407,15 @@ class ActivityResponse(BaseModel):
 
 
 class VoiceResponse(OperationResult):
+    speech_id: str | None = Field(default=None, repr=False)
+    speech_reason: str | None = None
     transcript: str | None = None
     forwarded_to_agent: bool = False
     reply: str | None = None
     # Safe, normalized speaker metadata: never a score, embedding, or template.
     speaker: Literal["owner", "guest"] | None = None
     speaker_result: str | None = None
+    verification_reason: str | None = None
     language: LanguageCode | None = None
     direction: Literal["rtl", "ltr"] | None = None
     conversation_id: str | None = Field(default=None, repr=False)
@@ -414,6 +426,10 @@ class VoiceWakeResponse(OperationResult):
 
     wake: bool = False
     followed: bool = False
+    owner_verified: bool = False
+    speech_id: str | None = Field(default=None, repr=False)
+    speech_reason: str | None = None
+    language: LanguageCode | None = None
 
 
 class VoiceActivationResponse(OperationResult):
@@ -470,6 +486,8 @@ class IdentityStatusResponse(BaseModel):
     models: VoiceModelsInfo = VoiceModelsInfo()
     enrolled: bool | None = None  # None: the secure store could not be read
     profile_compatible: bool | None = None  # safe model/preprocessing metadata only
+    reason_code: str | None = None
+    last_verification_reason: str | None = None
     mode: Literal["owner_only", "guest_mode"] = "owner_only"
     guest: GuestInfo = GuestInfo(active=False)
     last_verification: (

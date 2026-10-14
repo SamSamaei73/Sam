@@ -82,7 +82,7 @@ describe("shell and connection", () => {
     expect(await screen.findByLabelText("Connection: Unavailable")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Sam is offline" })).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Action required: 1" }));
-    expect(screen.getByText(/backend isn't reachable/i)).toBeInTheDocument();
+    expect(screen.getByText("Sam's local engine is not responding.")).toBeInTheDocument();
   });
 
   it("shows Degraded and disables chat when the model isn't configured", async () => {
@@ -90,7 +90,7 @@ describe("shell and connection", () => {
     expect(await screen.findByLabelText("Connection: Degraded")).toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Action required/ }));
-    expect(screen.getByText("No language model is available")).toBeInTheDocument();
+    expect(screen.getAllByText("No configured model provider is ready").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "Type to Sam" }));
     expect(screen.getByText("Sam can't answer text right now.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();

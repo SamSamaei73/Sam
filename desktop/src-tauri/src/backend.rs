@@ -84,11 +84,19 @@ pub enum Route {
     VoiceActivation,
     VoiceModelsInstall,
     OwnerSetup,
+    SpeechStatus,
+    SpeechSettings,
+    SpeechPreview,
+    SpeechPlay,
 }
 
 impl Route {
     #[cfg(test)]
-    pub const ALL: [Route; 51] = [
+    pub const ALL: [Route; 55] = [
+        Route::SpeechStatus,
+        Route::SpeechSettings,
+        Route::SpeechPreview,
+        Route::SpeechPlay,
         Route::Status,
         Route::Chat,
         Route::KnowledgeList,
@@ -195,6 +203,10 @@ impl Route {
             Route::VoiceActivation => "/desktop/v1/voice/activation",
             Route::VoiceModelsInstall => "/desktop/v1/voice/models/install",
             Route::OwnerSetup => "/desktop/v1/voice/identity/setup",
+            Route::SpeechStatus => "/desktop/v1/speech/status",
+            Route::SpeechSettings => "/desktop/v1/speech/settings",
+            Route::SpeechPreview => "/desktop/v1/speech/preview",
+            Route::SpeechPlay => "/desktop/v1/speech/play",
         }
     }
 
@@ -219,6 +231,7 @@ impl Route {
             Route::Chat
             | Route::VoiceUtterance
             | Route::Speak
+            | Route::SpeechPlay
             | Route::KnowledgeIngest
             | Route::ProfessionalIngest
             | Route::IdentityEnrollSample

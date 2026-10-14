@@ -92,7 +92,7 @@ from sam.knowledge.models import (
     RetrievalQuery,
     RetrieveRequest,
 )
-from sam.language.catalog import SUPPORTED_LANGUAGE_CODES
+from sam.language.catalog import SUPPORTED_LANGUAGE_CODES, LanguageCode
 from sam.language.hint import language_hint_scope
 from sam.language.policy import LanguagePreference
 from sam.memory.models import Memory
@@ -120,7 +120,7 @@ from sam.voice.wake import (
     detect_wake,
     is_stop_phrase,
 )
-from sam.voice_identity.policy import SpeakerClass, SpeakerResult
+from sam.voice_identity.policy import SpeakerClass
 
 router = APIRouter(prefix="/desktop/v1", tags=["desktop"])
 _runtime = Depends(bridge_runtime)
@@ -186,9 +186,23 @@ _MESSAGES = {
     "invalid_audio": "The voice service returned unusable audio.",
     "output_too_large": "The generated audio was too large.",
     "agent_error": "Sam couldn't reply to that.",
-    "owner_verification_required": "Sam didn't recognize your voice.",
+    "speaker_not_recognized": "I couldn't verify that this is you. Try again.",
+    "profile_load_failed": "Owner voice profile couldn't be loaded.",
+    "profile_schema_mismatch": (
+        "The saved owner voice profile has an incompatible format."
+    ),
+    "profile_model_mismatch": (
+        "The saved owner voice profile uses different voice processing."
+    ),
+    "guest_session_invalid": "Guest Mode has ended. Ask the owner to start it again.",
+    "audio_too_quiet": "That recording is too quiet. Please try again.",
+    "audio_clipped": "That recording is distorted. Move back from the microphone.",
     "voice_not_enrolled": "Set up your voice so Sam can recognize you.",
     "voice_identity_unavailable": "Sam can't check your voice right now.",
+    "wake_recognizer_unavailable": (
+        "Sam's local wake listener is unavailable. Check voice components in Settings."
+    ),
+    "guest_not_allowed": "Owner voice is unavailable in Guest Mode.",
     "voice_not_heard": "Sam didn't catch that.",
     "voice_activation_off": "Voice activation is off.",
     "conversation_ended": "Okay.",
@@ -336,23 +350,38 @@ def _profile_languages(runtime: DesktopRuntime, profile_id: str) -> list[str]:
 
 @router.get("/status", response_model=StatusResponse)
 def status(runtime: DesktopRuntime = _status_runtime) -> StatusResponse:
+    from dataclasses import asdict
+
+    from sam.desktop.models import ModelIssue
+    from sam.models.diagnostics import model_blocker
+
     registry = runtime.mcp_registry
     tools = registry.list_tools()
     servers = registry.list_servers()
+    ready = runtime.agent_configured
     return StatusResponse(
         backend=HealthState(
             status="ok" if runtime.blocked_reason is None else "degraded",
             service=runtime.settings.app_name,
             environment=runtime.settings.app_env,
         ),
-        agent="configured" if runtime.agent_configured else "not_configured",
+        agent="configured" if ready else "not_configured",
+        model_issue=None
+        if ready
+        else ModelIssue(**asdict(model_blocker(runtime.model_router))),
         knowledge="available",
         memory="available",
         tools="configured" if tools else "foundation_ready",
         tool_count=len(tools),
         server_count=len(servers),
         voice_input="configured" if runtime.voice_boundary else "not_configured",
-        speech_output="configured" if runtime.speech_boundary else "not_configured",
+        speech_output="configured"
+        if runtime.speech_boundary
+        or (
+            runtime.owner_settings.voice_responses()
+            and runtime.sam_speech.status("en").state == "SAM_VOICE_READY"
+        )
+        else "not_configured",
         speech_profiles=[
             SpeechProfile(
                 profile_id=p,
@@ -737,6 +766,8 @@ def revoke(
         runtime.owner_settings.revoke_bootstrap_grant(
             bootstrap_identity(grant.resource, grant.action, grant.scope)
         )
+    elif grant.metadata.get("origin") == "owner_speech_mode":
+        runtime.sam_speech.configure(False, False)
     runtime.activity.add("permission", "Grant revoked", "revoked")
     return OperationResult(status="ok")
 
@@ -944,22 +975,24 @@ def voice_utterance(
     speaker: Literal["owner", "guest"] | None = None
     speaker_result: str | None = None
     guest_context = None
-    decision = identity.coordinator.decide(
+    decision = identity.decide(
         AudioInput(content=audio, declared_format=AudioFormat.WAV_PCM16)
     )
-    identity.last_speaker_result = decision.result.value
     speaker_result = decision.result.value
     if decision.speaker_class is SpeakerClass.BLOCKED:
         runtime.voice_conversations.end(runtime.principal)
-        runtime.activity.add("voice", "Speaker blocked", decision.result.value)
+        runtime.activity.add("voice", "Speaker blocked", decision.reason_code)
         # Say WHY (safely): a missing profile is a setup step, not a failed
         # identity check. Never a score, threshold or embedding.
-        blocked = _BLOCKED_REASON.get(decision.result, "owner_verification_required")
+        blocked = _BLOCKED_REASON.get(
+            decision.reason_code, "voice_identity_unavailable"
+        )
         return VoiceResponse(
             status="denied",
             reason_code=blocked,
             message=_message(blocked),
             speaker_result=speaker_result,
+            verification_reason=decision.reason_code,
         )
     if decision.speaker_class is SpeakerClass.GUEST:
         runtime.voice_conversations.end(runtime.principal)
@@ -967,8 +1000,8 @@ def voice_utterance(
         if guest_context is None:
             return VoiceResponse(
                 status="denied",
-                reason_code="owner_verification_required",
-                message=_message("owner_verification_required"),
+                reason_code="guest_session_invalid",
+                message=_message("guest_session_invalid"),
                 speaker_result=speaker_result,
             )
         boundary = guest_context.boundary_factory(preference)
@@ -1028,6 +1061,8 @@ def voice_utterance(
         if voice.error_category.value in ("session_error", "session_limit"):
             runtime.reset_voice_session()
     runtime.activity.add("voice", "Voice processed", voice.status.value)
+    if speaker == "owner" and outcome.forwarded_to_agent:
+        runtime.activity.add("voice", "Owner voice reached AgentCore", "forwarded")
     permission = voice.permission_outcome.value if voice.permission_outcome else None
     reason = voice.error_category.value if voice.error_category else None
     if contextual_agent is not None and contextual_agent.error_code is not None:
@@ -1051,6 +1086,27 @@ def voice_utterance(
             if outcome.agent_message:
                 identity.guests.remember_turn("sam", outcome.agent_message)
         if outcome.agent_error:
+            notice_language: LanguageCode = (
+                "fa" if decision_lang.response_language == "fa" else "en"
+            )
+            notice = (
+                (
+                    "الان نمی‌توانم به مدل زبانی‌ام وصل شوم."
+                    if notice_language == "fa"
+                    else "I can't reach my language model right now."
+                )
+                if not runtime.agent_configured
+                else (
+                    "نتوانستم این درخواست را کامل کنم."
+                    if notice_language == "fa"
+                    else "I couldn't complete that request."
+                )
+            )
+            spoken_error = (
+                runtime.sam_speech.queue(notice, notice_language)
+                if speaker == "owner"
+                else None
+            )
             return VoiceResponse(
                 status="failed",
                 reason_code="agent_error",
@@ -1061,9 +1117,20 @@ def voice_utterance(
                 speaker_result=speaker_result,
                 language=decision_lang.response_language,
                 direction=decision_lang.direction,
+                speech_id=spoken_error.speech_id if spoken_error else None,
+                speech_reason=spoken_error.reason_code if spoken_error else None,
             )
+        spoken = (
+            runtime.sam_speech.queue(
+                outcome.agent_message, decision_lang.response_language
+            )
+            if speaker == "owner" and outcome.agent_message
+            else None
+        )
         return VoiceResponse(
             status="ok",
+            speech_id=spoken.speech_id if spoken else None,
+            speech_reason=spoken.reason_code if spoken else None,
             transcript=voice.transcript,
             forwarded_to_agent=outcome.forwarded_to_agent,
             reply=outcome.agent_message,
@@ -1091,9 +1158,15 @@ def voice_utterance(
 
 
 _BLOCKED_REASON = {
-    SpeakerResult.NOT_ENROLLED: "voice_not_enrolled",
-    SpeakerResult.VERIFICATION_ERROR: "voice_identity_unavailable",
-    SpeakerResult.INSUFFICIENT_AUDIO: "voice_not_heard",
+    "not_enrolled": "voice_not_enrolled",
+    "profile_unreadable": "profile_load_failed",
+    "profile_schema_mismatch": "profile_schema_mismatch",
+    "model_mismatch": "profile_model_mismatch",
+    "speaker_mismatch": "speaker_not_recognized",
+    "audio_invalid": "malformed_audio",
+    "audio_too_short": "voice_not_heard",
+    "audio_too_quiet": "audio_too_quiet",
+    "audio_clipped": "audio_clipped",
 }
 
 WAKE_TIMEOUT_SECONDS = 10.0
@@ -1154,7 +1227,7 @@ def voice_wake(
                 session_id="wake",
                 utterance_id=uuid4().hex,
                 audio=validated,
-                language_hint="en",
+                language_hint=None,
             ),
             timeout_seconds=WAKE_TIMEOUT_SECONDS,
         )
@@ -1163,11 +1236,44 @@ def voice_wake(
     except Exception:
         return VoiceWakeResponse(
             status="failed",
-            reason_code="voice_identity_unavailable",
-            message=_message("voice_identity_unavailable"),
+            reason_code="wake_recognizer_unavailable",
+            message=_message("wake_recognizer_unavailable"),
         )
-    # The recognized text goes no further than detect_wake.
-    return VoiceWakeResponse(status="ok", wake=match.wake, followed=match.followed)
+    # Wake detection is not an identity decision. Never greet or enter the
+    # owner conversation until THIS recording passes local speaker recognition.
+    if not match.wake:
+        return VoiceWakeResponse(status="ok")
+    assert runtime.identity is not None
+    decision = runtime.identity.decide(
+        AudioInput(content=audio, declared_format=AudioFormat.WAV_PCM16)
+    )
+    if decision.speaker_class is not SpeakerClass.OWNER:
+        reason = _BLOCKED_REASON.get(decision.reason_code, "voice_identity_unavailable")
+        if decision.speaker_class is SpeakerClass.GUEST:
+            reason = "guest_not_allowed"
+        runtime.activity.add("voice", "Wake owner check blocked", decision.reason_code)
+        return VoiceWakeResponse(
+            status="denied", wake=True, reason_code=reason, message=_message(reason)
+        )
+    from sam.desktop.speech import GREETING
+
+    # A Persian wake is acknowledged in Persian. A bare Latin name follows
+    # the active conversation language supplied as a presentation preference.
+    language: LanguageCode = (
+        "fa" if isinstance(text, str) and "سام" in text else payload.language
+    )
+    greeting = GREETING.get(language)
+    spoken = runtime.sam_speech.queue(greeting, language) if greeting else None
+    runtime.activity.add("voice", "Owner wake recognized", "owner_verified")
+    return VoiceWakeResponse(
+        status="ok",
+        wake=True,
+        followed=match.followed,
+        owner_verified=True,
+        speech_id=spoken.speech_id if spoken else None,
+        speech_reason=spoken.reason_code if spoken else "speech_language_unavailable",
+        language=language,
+    )
 
 
 @router.post("/voice/activation", response_model=VoiceActivationResponse)

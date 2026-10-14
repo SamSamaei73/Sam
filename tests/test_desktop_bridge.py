@@ -650,6 +650,10 @@ def test_router_has_only_the_documented_routes() -> None:
             ("POST", "/desktop/v1/voice/wake"),
             ("POST", "/desktop/v1/voice/activation"),
             ("POST", "/desktop/v1/tts/speak"),
+            ("POST", "/desktop/v1/speech/status"),
+            ("POST", "/desktop/v1/speech/settings"),
+            ("POST", "/desktop/v1/speech/preview"),
+            ("POST", "/desktop/v1/speech/play"),
             # Phase 12: owner voice identity and Guest Mode
             ("GET", "/desktop/v1/voice/identity"),
             ("POST", "/desktop/v1/voice/identity/enroll/begin"),

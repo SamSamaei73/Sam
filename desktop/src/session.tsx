@@ -15,11 +15,13 @@ import { translate } from "./i18n/strings";
 import { playSynthesizedAudio, type Playback } from "./lib/audioPlayback";
 import { detectLanguage, directionFor, languageBase, uiLanguageFor } from "./lib/language";
 import { Listener } from "./lib/listener";
+import { getCaptureDiagnostics, publishCaptureDiagnostics } from "./lib/voiceDiagnostics";
 import { localSpeechOutput, type LocalSpeechOutput, type SpeechHandle, type SpeechOutcome } from "./lib/localSpeech";
 import { Recorder, RecorderError } from "./lib/recorder";
 import { SLEEP_TIMING, TURN_TIMING, type SegmentEnd } from "./lib/vad";
 import { MAX_RECORDING_SAMPLES, TARGET_SAMPLE_RATE, joinWavSegments } from "./lib/wav";
 import { useSam } from "./state";
+import { speechProblem } from "./lib/samVoice";
 
 /**
  * Sam's interaction state. Every value is derived from something REAL:
@@ -54,11 +56,13 @@ export type VoiceState =
   | "listening"
   | "thinking"
   | "speaking"
+  | "verifying"
+  | "greeting"
   | "permission"
   | "error"
   | "offline";
 
-export type HandsFreePhase = "off" | "sleeping" | "waking" | "attending" | "thinking" | "speaking";
+export type HandsFreePhase = "off" | "sleeping" | "waking" | "attending" | "thinking" | "speaking" | "greeting";
 
 export interface HandsFreeInfo {
   /** The hands-free loop is running right now (mic open for the wake word). */
@@ -73,6 +77,9 @@ export interface HandsFreeInfo {
   micDenied: boolean;
   /** The local listening pipeline stopped and may be retried. */
   micFailed: boolean;
+  lastWake: string | null;
+  wakeChecks: number;
+  ownerWakes: number;
 }
 
 export interface Conversation {
@@ -98,7 +105,11 @@ export const WAKE_FLASH_MS = 900;
 /** Longest segment worth checking for the wake word. */
 const WAKE_MAX_SECONDS = 4;
 const IDENTITY_STOPS = new Set([
-  "owner_verification_required",
+  "speaker_not_recognized",
+  "profile_load_failed",
+  "profile_schema_mismatch",
+  "profile_model_mismatch",
+  "guest_session_invalid",
   "voice_not_enrolled",
   "voice_identity_unavailable",
   "identity_not_configured",
@@ -181,6 +192,10 @@ interface SessionValue {
   textDraft: string;
   setTextDraft: (text: string) => void;
   speakingId: string | null;
+  speechIssue: string | null;
+  identityIssue: string | null;
+  previewingVoice: boolean;
+  previewSamVoice: () => Promise<void>;
   speak: (message: ChatMessage) => Promise<void>;
   stopSpeaking: () => void;
   profileFor: (language: ResponseLanguage) => string | null;
@@ -219,6 +234,8 @@ export function SessionProvider({
     confirmationPending,
     t,
     refreshIdentity,
+    samVoice,
+    refreshSamVoice,
     audioEnvironment,
   } = useSam();
   // Conversation history is session-local React state: never persisted.
@@ -244,13 +261,17 @@ export function SessionProvider({
     setLevel(next);
   }, []);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [speechIssue, setSpeechIssue] = useState<string | null>(null);
+  const [identityIssue, setIdentityIssue] = useState<string | null>(null);
+  const [previewingVoice, setPreviewingVoice] = useState(false);
+  const [checkingWake, setCheckingWake] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
   const recorder = useRef<Recorder | null>(null);
   const phaseRef = useRef<HandsFreePhase>("off");
   const lastVoiceLanguage = useRef<ResponseLanguage | null>(null);
   const speechHandle = useRef<SpeechHandle | null>(null);
   const speechGeneration = useRef(0);
-  const automaticSpeech = useRef<(message: ChatMessage, isCurrent: () => boolean) => Promise<void>>(async () => undefined);
+  const automaticSpeech = useRef<(message: ChatMessage, isCurrent: () => boolean, speechId?: string | null) => Promise<void>>(async () => undefined);
   const playback = useRef<Playback | null>(null);
   const finishRef = useRef<() => void>(() => undefined);
   const errorTimer = useRef<number | undefined>(undefined);
@@ -325,6 +346,7 @@ export function SessionProvider({
       const context = contextGeneration.current;
       const isCurrent = () => context === contextGeneration.current && generation === speechGeneration.current;
       setBusy(true);
+      setIdentityIssue(null);
       try {
         if (contextEnd.current) await contextEnd.current;
         if (!isCurrent()) return;
@@ -335,12 +357,7 @@ export function SessionProvider({
         voiceContextId.current = result.status === "ok" ? result.conversation_id ?? undefined : undefined;
         if (result.status !== "ok") clearVoiceContext();
         void refreshIdentity();
-        if (result.reason_code === "owner_verification_required") {
-          // A non-owner speaker is stopped before any transcription: a fixed
-          // notice, never a transcript.
-          const notice = append({ role: "notice", text: t("voice.ownerRequired"), status: "failed" });
-          setExchange({ heard: null, reply: notice });
-        } else if (result.status === "ok" && result.transcript) {
+        if (result.status === "ok" && result.transcript) {
           lastVoiceLanguage.current = result.language ?? detectLanguage(result.transcript) ?? "en";
           const heard = append({
             role: result.speaker === "guest" ? "guest" : "user",
@@ -359,9 +376,11 @@ export function SessionProvider({
             : null;
           setExchange({ heard, reply });
           if (reply && generation === speechGeneration.current) {
-            await automaticSpeech.current(reply, () => generation === speechGeneration.current);
+            await automaticSpeech.current(reply, () => generation === speechGeneration.current, result.speech_id);
           }
+          if (result.speech_reason && result.speech_reason !== "automatic_speech_off") setSpeechIssue(result.speech_reason);
         } else {
+          if (result.speaker_result) setIdentityIssue(result.verification_reason ?? result.reason_code ?? "voice_identity_unavailable");
           // Secret-looking or otherwise ineligible transcripts are never shown.
           const notice = append({
             role: "notice",
@@ -377,7 +396,7 @@ export function SessionProvider({
         setBusy(false);
       }
     },
-    [append, bridge, clearVoiceContext, confirmable, prefs.responseLanguage, refreshIdentity, setError, t],
+    [append, bridge, clearVoiceContext, confirmable, prefs.responseLanguage, refreshIdentity, setError],
   );
 
   const stopListening = useCallback(async () => {
@@ -491,6 +510,72 @@ export function SessionProvider({
     speechHandle.current?.stop(); // a hands-free reply: back to listening
   }, []);
 
+  const playSpeechTicket = useCallback((speechId: string, isCurrent: () => boolean): Promise<void> => {
+    setSpeechIssue(null);
+    setSpeakingId(speechId);
+    return new Promise<void>((resolve) => {
+      let done = false;
+      let output: Playback | null = null;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        if (speechHandle.current === handle) {
+          speechHandle.current = null;
+          setSpeakingId(null);
+        }
+        if (playback.current === output) playback.current = null;
+        resolve();
+      };
+      const handle: SpeechHandle = { stop: () => {
+        output?.stop();
+        // A failed stop must wait for the original native playback to end;
+        // otherwise Sam could record its own still-playing voice.
+        void bridge.stopSamSpeech(speechId).then(finish, () => undefined);
+      } };
+      speechHandle.current = handle;
+      void bridge.playSamSpeech(speechId).then((result) => {
+        if (done || !isCurrent()) { finish(); return; }
+        if (result.status !== "ok") {
+          setSpeechIssue(result.reason_code ?? "speech_failed");
+          setError(speechProblem(result.reason_code));
+          finish();
+        } else if (result.kind === "audio" && result.audio_base64) {
+          output = playSynthesizedAudio(result.audio_base64, result.audio_format, (failed) => {
+            if (failed && isCurrent()) {
+              setSpeechIssue("speech_failed");
+              setError(speechProblem("speech_failed"));
+            }
+            finish();
+          });
+          if (!done) playback.current = output;
+          else output.stop();
+        } else finish(); // native playback returns only when the OS has finished
+      }, () => {
+        if (!done && isCurrent()) {
+          setSpeechIssue("speech_failed");
+          setError(speechProblem("speech_failed"));
+        }
+        finish();
+      });
+    });
+  }, [bridge, setError]);
+
+  const previewSamVoice = useCallback(async () => {
+    stopSpeaking();
+    const generation = speechGeneration.current;
+    const isCurrent = () => generation === speechGeneration.current;
+    const language = prefs.responseLanguage === "auto" ? prefs.uiLanguage : prefs.responseLanguage;
+    setPreviewingVoice(true);
+    setSpeechIssue(null);
+    try {
+      const result = await bridge.previewSamVoice(language);
+      if (!isCurrent()) return;
+      if (result.status === "ok" && result.speech_id) await playSpeechTicket(result.speech_id, isCurrent);
+      else setSpeechIssue(result.reason_code ?? "speech_failed");
+    } catch { if (isCurrent()) setSpeechIssue("speech_failed"); }
+    finally { setPreviewingVoice(false); void refreshSamVoice(); }
+  }, [bridge, playSpeechTicket, prefs.responseLanguage, prefs.uiLanguage, refreshSamVoice, stopSpeaking]);
+
   const speakThroughProvider = useCallback(
     (message: ChatMessage, isCurrent: () => boolean): Promise<void> => {
       const language = message.language ?? detectLanguage(message.text) ?? "en";
@@ -566,6 +651,9 @@ export function SessionProvider({
   const [justWoke, setJustWoke] = useState(false);
   const [micDenied, setMicDenied] = useState(false);
   const [micFailed, setMicFailed] = useState(false);
+  const [lastWake, setLastWake] = useState<string | null>(null);
+  const [wakeChecks, setWakeChecks] = useState(0);
+  const [ownerWakes, setOwnerWakes] = useState(0);
   const listenerRef = useRef<Listener | null>(null);
   const idleTimer = useRef<number | undefined>(undefined);
   const wakeTimer = useRef<number | undefined>(undefined);
@@ -576,6 +664,7 @@ export function SessionProvider({
   const runTurnRef = useRef<(audio: string) => Promise<void>>(async () => undefined);
   const invalidateVoiceRequests = useCallback(() => {
     voiceGeneration.current++;
+    setCheckingWake(false);
     wakeBusy.current?.segments.splice(0);
     wakeBusy.current = null;
     bufferedTurn.current = [];
@@ -659,6 +748,8 @@ export function SessionProvider({
   const attend = useCallback((preserveBufferedAudio = false) => {
     const listener = listenerRef.current;
     if (!listener) return;
+    window.clearTimeout(wakeTimer.current);
+    setJustWoke(false);
     setPhase("attending");
     captureRemaining(listener, bufferedSamples(bufferedTurn.current));
     listener.resume({ preserveBufferedAudio });
@@ -709,16 +800,15 @@ export function SessionProvider({
     });
   }, []);
 
-  const speakAutomatically = useCallback(async (message: ChatMessage, isCurrent: () => boolean) => {
-    setSpeakingId(message.id);
-    const outcome = await speakLocally(message.text, message.language ?? detectLanguage(message.text) ?? "en");
-    if (isCurrent() && (outcome === "unavailable" || outcome === "failed")) {
-      await speakThroughProvider(message, isCurrent);
-    }
-    if (isCurrent()) setSpeakingId(null);
-  }, [speakLocally, speakThroughProvider]);
+  const speakAutomatically = useCallback(async (_message: ChatMessage, isCurrent: () => boolean, speechId?: string | null) => {
+    if (speechId && isCurrent()) await playSpeechTicket(speechId, isCurrent);
+  }, [playSpeechTicket]);
 
   useEffect(() => { automaticSpeech.current = speakAutomatically; }, [speakAutomatically]);
+
+  useEffect(() => {
+    if (samVoice && !samVoice.enabled) stopSpeaking();
+  }, [samVoice, stopSpeaking]);
 
   const speak = useCallback(async (message: ChatMessage) => {
     const previous = phaseRef.current;
@@ -746,6 +836,7 @@ export function SessionProvider({
       const generation = voiceGeneration.current;
       const isCurrent = () => generation === voiceGeneration.current && phaseRef.current !== "off";
       setPhase("thinking");
+      setIdentityIssue(null);
       clearIdle();
       listenerRef.current?.pause(); // Sam doesn't hear while it thinks or speaks
       setError(null);
@@ -783,7 +874,10 @@ export function SessionProvider({
           setExchange({ heard, reply });
           if (reply) {
             setPhase("speaking");
-            await speakAutomatically(reply, isCurrent);
+            await speakAutomatically(reply, isCurrent, result.speech_id);
+            if (result.speech_reason && result.speech_reason !== "automatic_speech_off") {
+              setSpeechIssue(result.speech_reason);
+            }
           }
           if (isCurrent()) attend();
           return;
@@ -805,7 +899,7 @@ export function SessionProvider({
           // visible afterward; an unavailable local voice cannot block retry.
           setPhase("speaking");
           try {
-            await speakLocally(translate(language, "voice.repeatQuestion"), language);
+            if (samVoice?.enabled) await speakLocally(translate(language, "voice.repeatQuestion"), language);
           } catch {
             // The visible notice is sufficient if local speech cannot start.
           }
@@ -819,16 +913,26 @@ export function SessionProvider({
           referenceId: result.reference_id,
         });
         setExchange({ heard: null, reply: notice });
-        // An identity problem ends the conversation (fail closed).
-        if (IDENTITY_STOPS.has(result.reason_code ?? "")) sleep();
-        else attend();
+        // A denied identity cannot authorize speech, even if a malformed
+        // response contains a ticket left over from a previous operation.
+        if (IDENTITY_STOPS.has(result.reason_code ?? "")) {
+          setIdentityIssue(result.reason_code);
+          sleep();
+          return;
+        }
+        if (result.speaker === "owner" && result.speech_id) {
+          setPhase("speaking");
+          await playSpeechTicket(result.speech_id, isCurrent);
+          if (!isCurrent()) return;
+        }
+        attend();
       } catch (failure) {
         if (!isCurrent()) return;
         setError(failureText(failure));
         sleep();
       }
     },
-    [append, attend, bridge, clearIdle, clearVoiceContext, confirmable, prefs.responseLanguage, prefs.uiLanguage, refreshIdentity, setError, setPhase, sleep, speakAutomatically, speakLocally],
+    [append, attend, bridge, clearIdle, clearVoiceContext, confirmable, playSpeechTicket, prefs.responseLanguage, prefs.uiLanguage, refreshIdentity, setError, setPhase, sleep, speakAutomatically, speakLocally, samVoice],
   );
 
   useEffect(() => {
@@ -868,15 +972,34 @@ export function SessionProvider({
       const isCurrent = () =>
         check.generation === voiceGeneration.current && wakeBusy.current === check && phaseRef.current === "sleeping";
       try {
-        const result = await bridge.voiceWake(audioBase64);
+        setCheckingWake(true);
+        setWakeChecks((count) => count + 1);
+        const language = prefs.responseLanguage === "auto" ? lastVoiceLanguage.current ?? prefs.uiLanguage : prefs.responseLanguage;
+        const result = await bridge.voiceWake(audioBase64, language);
         if (!isCurrent()) return;
+        setLastWake(result.wake ? (result.owner_verified ? "owner_verified" : result.reason_code ?? "owner_verification_failed") : result.reason_code ?? "not_wake_word");
         wakeBusy.current = null;
-        if (result.status === "ok" && result.wake) {
+        setCheckingWake(false);
+        if (result.wake) void refreshIdentity();
+        if (result.status === "ok" && result.wake && result.owner_verified === true) {
+          setOwnerWakes((count) => count + 1);
           if (check.samples >= MAX_RECORDING_SAMPLES) { rejectLongTurn(); return; }
           bufferedTurn.current = result.followed ? [segment, ...check.segments] : check.segments;
+          setIdentityIssue(null);
           flashAwake();
+          // Keep speech already captured while the wake check was in flight;
+          // frames from Sam's greeting itself are still discarded.
+          listener.pause({ preserveBufferedAudio: true });
+          setPhase("greeting");
+          if (result.speech_id) {
+            await playSpeechTicket(result.speech_id, () => check.generation === voiceGeneration.current && phaseRef.current === "greeting");
+          } else if (result.speech_reason && result.speech_reason !== "automatic_speech_off") {
+            setSpeechIssue(result.speech_reason);
+          }
+          if (check.generation !== voiceGeneration.current || phaseRef.current !== "greeting") return;
           attend(true);
         } else {
+          if (result.wake && result.reason_code) setIdentityIssue(result.reason_code);
           listener.setTiming(SLEEP_TIMING);
           listener.resume();
           cooldownUntil.current =
@@ -884,14 +1007,18 @@ export function SessionProvider({
         }
       } catch {
         if (!isCurrent()) return;
+        setLastWake("wake_check_failed");
         listener.setTiming(SLEEP_TIMING);
         listener.resume();
         cooldownUntil.current = Date.now() + WAKE_BACKOFF_MS;
       } finally {
-        if (wakeBusy.current === check) wakeBusy.current = null;
+        if (wakeBusy.current === check) {
+          setCheckingWake(false);
+          wakeBusy.current = null;
+        }
       }
     },
-    [attend, bridge, flashAwake, flushBufferedTurn, rejectLongTurn],
+    [attend, bridge, flashAwake, flushBufferedTurn, rejectLongTurn, playSpeechTicket, prefs.responseLanguage, prefs.uiLanguage, refreshIdentity, setPhase],
   );
   const onSegmentRef = useRef(onSegment);
   useEffect(() => {
@@ -919,6 +1046,7 @@ export function SessionProvider({
         setMicFailed(true);
         setError(t("home.micFailed"));
       },
+      (diagnostics) => { if (!cancelled) publishCaptureDiagnostics(diagnostics); },
     );
     listenerRef.current = listener;
     listener
@@ -951,6 +1079,8 @@ export function SessionProvider({
       setPhaseState("off");
       setHeardSpeech(false);
       setJustWoke(false);
+      const capture = getCaptureDiagnostics();
+      if (capture.listener !== "ERROR") publishCaptureDiagnostics({ ...capture, listener: "STOPPED", microphone: "STOPPED", reason: null });
       publishLevel(0);
     };
   }, [handsFreeOn, audioEnvironment, invalidateVoiceRequests, micError, onSpeech, publishLevel, setError, setPhase, t]);
@@ -964,6 +1094,7 @@ export function SessionProvider({
   }, [homeActive, visible, clearVoiceContext, cancelListening, stopSpeaking]);
 
   const wakeNow = useCallback(() => {
+    setIdentityIssue(null);
     if (micDenied || micFailed) {
       setMicDenied(false); // try the microphone again
       setMicFailed(false);
@@ -990,6 +1121,10 @@ export function SessionProvider({
     ? "permission"
     : recording
       ? "listening"
+      : phase === "greeting"
+        ? "greeting"
+        : checkingWake
+          ? "verifying"
       : speakingId || phase === "speaking"
         ? "speaking"
         : busy || phase === "thinking"
@@ -1044,10 +1179,14 @@ export function SessionProvider({
       textDraft,
       setTextDraft,
       speakingId,
+      speechIssue,
+      identityIssue,
+      previewingVoice,
+      previewSamVoice,
       speak,
       stopSpeaking,
       profileFor,
-      handsFree: { active: phase !== "off", phase, activation, needsSetup, setupState, micDenied, micFailed },
+      handsFree: { active: phase !== "off", phase, activation, needsSetup, setupState, micDenied, micFailed, lastWake, wakeChecks, ownerWakes },
       setHomeActive,
       wakeNow,
       sleepNow,
@@ -1061,6 +1200,9 @@ export function SessionProvider({
       setupState,
       micDenied,
       micFailed,
+      lastWake,
+      wakeChecks,
+      ownerWakes,
       wakeNow,
       sleepNow,
       conversations,
@@ -1079,6 +1221,10 @@ export function SessionProvider({
       cancelListening,
       sendText,
       speakingId,
+      speechIssue,
+      identityIssue,
+      previewingVoice,
+      previewSamVoice,
       speak,
       stopSpeaking,
       profileFor,

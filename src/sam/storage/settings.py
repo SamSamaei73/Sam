@@ -10,8 +10,11 @@
   LOCALLY for its name.
 * revoked bootstrap grants: when the owner revokes one of the desktop's
   trusted default grants, that choice survives a restart (otherwise a restart
-  would silently hand back access the owner removed). Only narrowing is ever
-  persisted: no grant is ever created from the database.
+  would silently hand back access the owner removed).
+* ``voice.responses`` and ``voice.external_speech``: explicit owner consent
+  for scoped assistant speech. Both default OFF. Only SamSpeechService may
+  use these flags to create SPEECH_SYNTHESIS grants for a trusted voice;
+  they cannot authorize other resources, guest speech or arbitrary text.
 
 Session grants, one-time confirmations and step-up state are never persisted.
 """
@@ -25,6 +28,8 @@ from sam.storage.database import Database
 
 SCHEDULER_PERSISTENT = "proactive.scheduler.persistent"
 VOICE_ACTIVATION = "voice.activation"
+VOICE_RESPONSES = "voice.responses"
+VOICE_EXTERNAL = "voice.external_speech"
 
 
 class OwnerSettingsStore(Protocol):
@@ -32,6 +37,10 @@ class OwnerSettingsStore(Protocol):
     def set_scheduler_persistent(self, value: bool) -> None: ...
     def voice_activation(self) -> bool: ...
     def set_voice_activation(self, value: bool) -> None: ...
+    def voice_responses(self) -> bool: ...
+    def set_voice_responses(self, value: bool) -> None: ...
+    def voice_external(self) -> bool: ...
+    def set_voice_external(self, value: bool) -> None: ...
     def revoked_bootstrap_grants(self) -> frozenset[str]: ...
     def revoke_bootstrap_grant(self, identity: str) -> None: ...
 
@@ -44,6 +53,8 @@ class InMemoryOwnerSettings:
     def __init__(self) -> None:
         self._scheduler = False
         self._voice_activation = False
+        self._voice_responses = False
+        self._voice_external = False
         self._revoked: set[str] = set()
 
     def scheduler_persistent(self) -> bool:
@@ -60,6 +71,18 @@ class InMemoryOwnerSettings:
 
     def revoked_bootstrap_grants(self) -> frozenset[str]:
         return frozenset(self._revoked)
+
+    def voice_responses(self) -> bool:
+        return self._voice_responses
+
+    def set_voice_responses(self, value: bool) -> None:
+        self._voice_responses = value
+
+    def voice_external(self) -> bool:
+        return self._voice_external
+
+    def set_voice_external(self, value: bool) -> None:
+        self._voice_external = value
 
     def revoke_bootstrap_grant(self, identity: str) -> None:
         self._revoked.add(identity)
@@ -94,6 +117,18 @@ class SQLiteOwnerSettings:
 
     def set_voice_activation(self, value: bool) -> None:
         self._set_flag(VOICE_ACTIVATION, value)
+
+    def voice_responses(self) -> bool:
+        return self._flag(VOICE_RESPONSES)
+
+    def set_voice_responses(self, value: bool) -> None:
+        self._set_flag(VOICE_RESPONSES, value)
+
+    def voice_external(self) -> bool:
+        return self._flag(VOICE_EXTERNAL)
+
+    def set_voice_external(self, value: bool) -> None:
+        self._set_flag(VOICE_EXTERNAL, value)
 
     def revoked_bootstrap_grants(self) -> frozenset[str]:
         rows = self._db.query("SELECT identity FROM revoked_bootstrap_grants")

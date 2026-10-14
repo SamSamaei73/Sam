@@ -23,6 +23,7 @@ from sam.voice_identity.authority import StepUpAuthority, StepUpGrant
 from sam.voice_identity.errors import (
     EnrollmentError,
     InsufficientSpeechError,
+    ProfileSchemaError,
     ProfileStoreError,
 )
 from sam.voice_identity.models import OwnerTemplate, utc_now
@@ -77,6 +78,7 @@ class EnrollmentStatus:
     model_id: str
     sample_count: int | None = None
     profile_compatible: bool | None = None
+    reason_code: str | None = None
 
 
 class EnrollmentService:
@@ -106,17 +108,29 @@ class EnrollmentService:
     def status(self) -> EnrollmentStatus:
         try:
             template = self._store.load()
+        except ProfileSchemaError:
+            return EnrollmentStatus(
+                None, self._embedder.model_id, reason_code="profile_schema_mismatch"
+            )
         except ProfileStoreError:
-            return EnrollmentStatus(None, self._embedder.model_id)
+            return EnrollmentStatus(
+                None, self._embedder.model_id, reason_code="profile_load_failed"
+            )
         if template is None:
-            return EnrollmentStatus(False, self._embedder.model_id)
+            return EnrollmentStatus(
+                False, self._embedder.model_id, reason_code="not_enrolled"
+            )
+        compatible = (
+            template.model_id == self._embedder.model_id
+            and template.model_revision == self._embedder.model_revision
+            and template.dimension == self._embedder.dimension
+        )
         return EnrollmentStatus(
             True,
             template.model_id,
             template.sample_count,
-            template.model_id == self._embedder.model_id
-            and template.model_revision == self._embedder.model_revision
-            and template.dimension == self._embedder.dimension,
+            compatible,
+            None if compatible else "profile_model_mismatch",
         )
 
     # ------------------------------------------------------------- flow
@@ -190,6 +204,23 @@ class EnrollmentService:
             except (ProfileStoreError, ValueError):
                 self._fail_locked("owner_enrollment_failed", "store_error")
                 return EnrollmentOutcome(False, len(embeddings), "store_error")
+            # A successful write alone is not enrollment completion. Reload
+            # through the same trusted boundary the next utterance uses and
+            # check the exact template in memory, without serializing/logging it.
+            try:
+                saved = self._store.load()
+                reason = (
+                    "profile_missing_after_save" if saved is None
+                    else "profile_readback_mismatch" if saved != template
+                    else None
+                )
+            except ProfileSchemaError:
+                reason = "profile_schema_mismatch"
+            except ProfileStoreError:
+                reason = "profile_load_failed"
+            if reason is not None:
+                self._fail_locked("owner_enrollment_failed", reason)
+                return EnrollmentOutcome(False, len(embeddings), reason)
             self._discard_locked()
             self._audit.record("owner_enrollment_completed", "ok")
             return EnrollmentOutcome(True, template.sample_count, "ok")

@@ -44,6 +44,9 @@ import type {
   VoiceComponentsInstallResponse,
   VoiceResponse,
   VoiceWakeResponse,
+  SamVoiceStatus,
+  SpeechTicketResponse,
+  SpeechPlaybackResponse,
 } from "./types";
 
 /**
@@ -89,7 +92,12 @@ export interface SamBridge {
   /** Erase temporary context; omission also cancels an in-flight first turn. */
   endVoiceConversation(conversationId?: string): Promise<OperationResult>;
   /** Is this short speech segment Sam's name? LOCAL recognizer; one bit back. */
-  voiceWake(audioBase64: string): Promise<VoiceWakeResponse>;
+  voiceWake(audioBase64: string, language?: ResponseLanguage): Promise<VoiceWakeResponse>;
+  samVoiceStatus(language: ResponseLanguage): Promise<SamVoiceStatus>;
+  setSamVoice(enabled: boolean, externalApproved: boolean, language: ResponseLanguage): Promise<SamVoiceStatus>;
+  previewSamVoice(language: ResponseLanguage): Promise<SpeechTicketResponse>;
+  playSamSpeech(speechId: string): Promise<SpeechPlaybackResponse>;
+  stopSamSpeech(speechId: string): Promise<void>;
   /** The owner-only hands-free switch (refused in Guest Mode). */
   setVoiceActivation(enabled: boolean): Promise<VoiceActivationResponse>;
   speak(input: {

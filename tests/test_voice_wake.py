@@ -4,7 +4,6 @@ fake speaker embedder and a stub agent: no model or provider is ever called."""
 
 from __future__ import annotations
 
-import base64
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +26,6 @@ from tests.career_support import JOB_OFFICIAL, OFFICIAL_URL
 from tests.desktop_support import Bridge
 from tests.test_desktop_identity import SECRET, IdentityBridge
 from tests.voice_identity_support import OTHER_VOICE, OWNER_VOICE
-from tests.voice_support import make_wav
 
 SECONDS = 16_000  # frames per second in the synthetic clips
 
@@ -45,7 +43,7 @@ class WakeBridge(IdentityBridge):
         return body
 
     def wake_clip(self, frames: int = SECONDS) -> dict[str, Any]:
-        audio = base64.b64encode(make_wav(frames=frames, seed=7)).decode()
+        audio = self.clip(OWNER_VOICE, frames=frames)
         body: dict[str, Any] = self.post("/voice/wake", {"audio_base64": audio}).json()
         return body
 
@@ -163,6 +161,7 @@ def test_the_wake_recognizer_is_only_set_with_owner_identity() -> None:
 
 def test_the_name_wakes_sam_and_nothing_else_happens() -> None:
     b = WakeBridge()
+    b.enroll()
     b.activate()
     grants_before = b.get("/permissions").json()["grants"]
     woke = b.wake_clip()
@@ -265,7 +264,7 @@ def test_another_speaker_does_not_become_the_owner() -> None:
     b.activate()
     assert b.wake_clip()["wake"] is True  # anyone can say the name...
     body = b.turn(OTHER_VOICE)  # ...but the turn is identity-checked
-    assert body["reason_code"] == "owner_verification_required"
+    assert body["reason_code"] == "speaker_not_recognized"
     assert body["transcript"] is None and b.agent.messages == []
 
 
@@ -390,6 +389,7 @@ def test_sleeping_mode_privacy_counters(
 
     tts = FakeSpeechSynthesisProvider()
     b = WakeBridge(wake_text="Sam", tts=tts)
+    b.enroll()
     b.activate()
     monkeypatch.chdir(tmp_path)  # any stray relative write would land here
     memory_before = b.post("/memory/search", {"text": ""}).json()["items"]

@@ -10,6 +10,8 @@ const LABEL: Record<VoiceState, StringKey> = {
   listening: "home.state.listening",
   thinking: "home.state.thinking",
   speaking: "home.state.speaking",
+  verifying: "home.state.verifying",
+  greeting: "home.state.greeting",
   permission: "home.state.permission",
   error: "home.state.error",
   offline: "home.state.offline",

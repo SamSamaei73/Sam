@@ -242,8 +242,8 @@ def test_non_owner_is_blocked_before_any_transcription_or_agent_call() -> None:
     b.enroll()
     calls_before = b.voice_stt.call_count
     r = b.utter(OTHER_VOICE)
-    assert r["status"] == "denied" and r["reason_code"] == "owner_verification_required"
-    assert r["message"] == "Sam didn't recognize your voice."
+    assert r["status"] == "denied" and r["reason_code"] == "speaker_not_recognized"
+    assert r["message"] == "I couldn't verify that this is you. Try again."
     assert r["transcript"] is None and r["reply"] is None
     assert b.voice_stt.call_count == calls_before and b.agent.messages == []
     text = json.dumps(r)

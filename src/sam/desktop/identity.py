@@ -32,13 +32,17 @@ from sam.permissions.store import InMemoryPermissionStore
 from sam.voice.agent_boundary import AgentSink, VoiceAgentBoundary
 from sam.voice.audit import InMemoryVoiceAuditSink
 from sam.voice.gateway import VoiceGateway
-from sam.voice.models import MAX_VOICE_PROVIDER_TIMEOUT_SECONDS, StartSessionRequest
+from sam.voice.models import (
+    MAX_VOICE_PROVIDER_TIMEOUT_SECONDS,
+    AudioInput,
+    StartSessionRequest,
+)
 from sam.voice.transcription import TranscriptionProvider
 from sam.voice_identity.audit import InMemoryVoiceIdentityAuditSink
 from sam.voice_identity.authority import OwnerProofAuthority, StepUpAuthority
 from sam.voice_identity.challenge import ChallengeService
-from sam.voice_identity.coordinator import VoiceIdentityCoordinator
-from sam.voice_identity.enrollment import EnrollmentService
+from sam.voice_identity.coordinator import SpeakerDecision, VoiceIdentityCoordinator
+from sam.voice_identity.enrollment import EnrollmentOutcome, EnrollmentService
 from sam.voice_identity.guest import GuestSession, GuestSessionManager
 from sam.voice_identity.policy import ThresholdPolicy
 from sam.voice_identity.providers import SpeakerEmbeddingProvider
@@ -106,8 +110,36 @@ class DesktopVoiceIdentity:
             clock=clock,
         )
         self.last_speaker_result: str | None = None
+        self.last_verification_reason: str | None = None
         self._guest_voice: _GuestVoice | None = None
         self._lock = RLock()
+
+    def profile_changed(self) -> None:
+        """Invalidate decisions/challenges belonging to the previous profile.
+
+        There is no cached template: status and every verification reload the
+        Keychain. Enrollment is not a speaker decision or an owner proof.
+        """
+        with self._lock:
+            self.last_speaker_result = None
+            self.last_verification_reason = None
+            self.session_id = secrets.token_hex(16)
+
+    def complete_enrollment(self, session_id: str) -> EnrollmentOutcome:
+        with self._lock:
+            outcome = self.enrollment.complete(session_id)
+            if outcome.completed:
+                self.profile_changed()
+            return outcome
+
+    def decide(self, audio: AudioInput) -> SpeakerDecision:
+        # A verification already in flight must not overwrite the status reset
+        # for a newly completed enrollment with the previous profile's result.
+        with self._lock:
+            decision = self.coordinator.decide(audio)
+            self.last_speaker_result = decision.result.value
+            self.last_verification_reason = decision.reason_code
+            return decision
 
     # ------------------------------------------------------------ guest voice
 

@@ -210,7 +210,7 @@ class DesktopRuntime:
         )
         self.principal = LOCAL_PRINCIPAL
         self.agent = agent
-        self.agent_configured = agent_configured
+        self._agent_configured = agent_configured
         self.model_router = model_router
         self.model_settings = model_settings
         self.mcp_registry = mcp_registry
@@ -344,6 +344,7 @@ class DesktopRuntime:
 
         self.speech_profiles = speech_profiles
         self.speech_boundary: TTSAgentBoundary | None = None
+        self.automatic_speech_gateway: TTSGateway | None = None
         self.speech_provider_id: str | None = None
         if speech_provider is not None and speech_profiles is not None:
             gateway = TTSGateway(
@@ -355,6 +356,15 @@ class DesktopRuntime:
                 clock=clock,
             )
             self.speech_boundary = TTSAgentBoundary(gateway)
+            self.automatic_speech_gateway = TTSGateway(
+                permission_engine=self.permissions,
+                provider=speech_provider,
+                extra_providers=extra_speech_providers,
+                profiles=speech_profiles,
+                audit_sink=InMemoryTTSAuditSink(),
+                clock=clock,
+                assistant_mode=True,
+            )
             self.speech_provider_id = speech_provider.provider_id
             for profile in speech_profiles.list_profiles():
                 # Language support belongs to the configured provider model,
@@ -367,6 +377,10 @@ class DesktopRuntime:
                     languages = frozenset({"en"})
                 self.speech_profile_languages[profile.profile_id] = languages
 
+        from sam.desktop.speech import SamSpeechService
+
+        self.sam_speech = SamSpeechService(self)
+
         if durable is not None and not self.startup.blocked:
             # Crash recovery for Career items (their attempts were recovered at
             # the RECOVERY phase): nothing that was in flight becomes retryable.
@@ -376,6 +390,17 @@ class DesktopRuntime:
         self.startup.done(StartupPhase.SECURITY_BOUNDARY_INIT)
 
     # ---------------------------------------------------------- phase 17
+
+    @property
+    def agent_configured(self) -> bool:
+        """Provider readiness can change after startup (for example a login)."""
+        if self.model_router is not None:
+            return self.model_router.any_usable()
+        return self._agent_configured
+
+    @agent_configured.setter
+    def agent_configured(self, configured: bool) -> None:
+        self._agent_configured = configured
 
     @property
     def blocked_reason(self) -> str | None:

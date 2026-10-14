@@ -29,7 +29,8 @@ const IMPROVEMENT: ClaudeImprovementState[] = ["unknown", "owner_reports_disable
  * prefix or provider response ever reaches this component, and nothing here
  * can enable a paid provider. */
 export function ModelSettings() {
-  const { bridge, t } = useSam();
+  const { bridge, t, refreshStatus } = useSam();
+  const [refreshing, setRefreshing] = useState(false);
   const [models, setModels] = useState<ProvidersStatus | null>(null);
   const [draft, setDraft] = useState<ProviderPreferences | null>(null);
   const [blocklist, setBlocklist] = useState("");
@@ -100,6 +101,12 @@ export function ModelSettings() {
     <>
       <section className="glass panel" aria-labelledby="models-h">
         <h3 id="models-h">{t("models.title")}</h3>
+        <NeonButton disabled={refreshing} onClick={() => {
+          setRefreshing(true);
+          void bridge.providersStatus().then((next) => setModels(next))
+            .catch(() => setError("Provider status could not be refreshed."))
+            .finally(async () => { await refreshStatus(); setRefreshing(false); });
+        }}>{refreshing ? "Checking providers…" : "Retry providers"}</NeonButton>
         {models.providers.map((provider) => (
           <div key={provider.provider_id} data-testid={`provider-${provider.provider_id}`} style={{ marginBottom: 14 }}>
             <div className="card-row">

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sam.voice_identity.errors import ProfileStoreError
+from sam.voice_identity.errors import ProfileSchemaError, ProfileStoreError
 from sam.voice_identity.policy import MAX_EMBEDDING_DIMENSION, MIN_EMBEDDING_DIMENSION
 
 TEMPLATE_FORMAT_VERSION = 1
@@ -82,8 +82,10 @@ class OwnerTemplate:
 
         try:
             data: Any = json.loads(text)
-            if not isinstance(data, dict) or data.get("v") != TEMPLATE_FORMAT_VERSION:
+            if not isinstance(data, dict):
                 raise ValueError
+            if type(data.get("v")) is not int or data["v"] != TEMPLATE_FORMAT_VERSION:
+                raise ProfileSchemaError("stored voice profile version is incompatible")
             return cls(
                 vector=tuple(float(x) for x in data["vector"]),
                 model_id=str(data["model_id"]),
@@ -91,6 +93,8 @@ class OwnerTemplate:
                 sample_count=int(data["sample_count"]),
                 created_at=datetime.fromisoformat(data["created_at"]),
             )
+        except ProfileSchemaError:
+            raise
         except Exception:
             raise ProfileStoreError("stored voice profile is unreadable") from None
 

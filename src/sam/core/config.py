@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -240,4 +241,10 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return the process-wide settings instance."""
 
+    # The packaged launcher supplies a deliberately small trusted environment.
+    # Its working directory must never become an implicit configuration source.
+    # Explicit owner-selected OpenRouter configuration is loaded separately by
+    # sam.system.backend, with its own narrow allowlist.
+    if os.environ.get("SAM_PACKAGED_BACKEND") == "1":
+        return Settings(_env_file=None)  # type: ignore[call-arg]
     return Settings()

@@ -6,11 +6,16 @@ export interface SpeechInput {
   stop(): void;
 }
 
+export type SpeechInputFailure = "speech_processing_overrun" | "wake_model_error" | "wake_model_timeout" | "microphone_sample_rate_unsupported" | "microphone_audio_graph_error";
+export class SpeechInputError extends Error {
+  constructor(readonly reason: SpeechInputFailure) { super("Local microphone unavailable"); }
+}
+
 export type SpeechInputFactory = (
   context: AudioContext,
   stream: MediaStream,
   onFrame: (frame: Float32Array, probability: number) => void,
-  onFailure: () => void,
+  onFailure: (reason?: SpeechInputFailure) => void,
 ) => Promise<SpeechInput>;
 
 /** Bounded, generation-aware queue between AudioWorklet and neural worker. */
@@ -84,7 +89,7 @@ export class SpeechFrameQueue {
 }
 
 export const createNeuralSpeechInput: SpeechInputFactory = async (context, stream, onFrame, onFailure) => {
-  if (!context.audioWorklet || context.sampleRate !== 16_000) throw new Error("Neural microphone unavailable");
+  if (!context.audioWorklet || context.sampleRate !== 16_000) throw new SpeechInputError("microphone_sample_rate_unsupported");
   const worker = new Worker(new URL("./speech.worker.ts", import.meta.url), { type: "module", name: "sam-local-vad" });
   let node: AudioWorkletNode | undefined;
   let source: MediaStreamAudioSourceNode | undefined;
@@ -99,7 +104,7 @@ export const createNeuralSpeechInput: SpeechInputFactory = async (context, strea
     onFrame,
     (type, epoch) => node?.port.postMessage({ type, epoch }),
     () => worker.postMessage({ type: "reset" }),
-    () => fail(),
+    () => fail("speech_processing_overrun"),
   );
   const stop = () => {
     if (stopped) return;
@@ -110,23 +115,23 @@ export const createNeuralSpeechInput: SpeechInputFactory = async (context, strea
     node?.port.close();
     worker.terminate();
   };
-  const fail = () => {
+  const fail = (reason: SpeechInputFailure) => {
     if (stopped) return;
-    rejectInitialization(new Error("Local speech detector failed"));
+    rejectInitialization(new SpeechInputError(reason));
     stop();
-    if (ready) onFailure();
+    if (ready) onFailure(reason);
   };
-  worker.onerror = fail;
-  worker.onmessageerror = fail;
+  worker.onerror = () => fail("wake_model_error");
+  worker.onmessageerror = () => fail("wake_model_error");
   worker.onmessage = ({ data }: MessageEvent<{ type: string; frame?: Float32Array; epoch?: number; probability?: number }>) => {
     if (stopped) { data.frame?.fill(0); return; }
     if (data.type === "ready") resolveReady();
-    else if (data.type === "failed") fail();
+    else if (data.type === "failed") fail("wake_model_error");
     else if (data.type === "frame" && data.frame && data.epoch !== undefined && data.probability !== undefined) {
       queue.complete(data.frame, data.probability, data.epoch);
     }
   };
-  const timer = window.setTimeout(fail, 15_000);
+  const timer = window.setTimeout(() => fail("wake_model_timeout"), 15_000);
   try {
     const basePath = new URL(`${import.meta.env.BASE_URL}voice/`, window.location.href).href;
     worker.postMessage({ type: "init", basePath });
@@ -134,7 +139,7 @@ export const createNeuralSpeechInput: SpeechInputFactory = async (context, strea
       await Promise.all([modelReady, context.audioWorklet.addModule(workletUrl)]);
       if (stopped) throw new Error("Local speech detector stopped");
       node = new AudioWorkletNode(context, "sam-voice-capture", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
-      node.onprocessorerror = fail;
+      node.onprocessorerror = () => fail("microphone_audio_graph_error");
       node.port.onmessage = ({ data }: MessageEvent<{ type: string; frame?: Float32Array; epoch: number }>) => {
         if (data.type === "overrun") queue.overrun(data.epoch);
         else if (data.type === "frame" && data.frame) queue.capture(data.frame, data.epoch);

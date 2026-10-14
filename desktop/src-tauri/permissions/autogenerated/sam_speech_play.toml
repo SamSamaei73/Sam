@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-speech-play"
+description = "Enables the sam_speech_play command without any pre-configured scope."
+commands.allow = ["sam_speech_play"]
+
+[[permission]]
+identifier = "deny-sam-speech-play"
+description = "Denies the sam_speech_play command without any pre-configured scope."
+commands.deny = ["sam_speech_play"]

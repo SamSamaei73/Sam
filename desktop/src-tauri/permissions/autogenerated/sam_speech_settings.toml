@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-speech-settings"
+description = "Enables the sam_speech_settings command without any pre-configured scope."
+commands.allow = ["sam_speech_settings"]
+
+[[permission]]
+identifier = "deny-sam-speech-settings"
+description = "Denies the sam_speech_settings command without any pre-configured scope."
+commands.deny = ["sam_speech_settings"]

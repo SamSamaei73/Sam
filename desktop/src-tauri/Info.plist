@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Sam uses the microphone only after you press Talk to Sam, and stops when you stop or cancel. Recordings are not saved.</string>
+  <string>Sam uses the microphone when you enable Listen for Sam or press Talk to Sam. Wake detection and owner verification happen on this Mac. Recordings are not saved.</string>
 </dict>
 </plist>

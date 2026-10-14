@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sam-speech-preview"
+description = "Enables the sam_speech_preview command without any pre-configured scope."
+commands.allow = ["sam_speech_preview"]
+
+[[permission]]
+identifier = "deny-sam-speech-preview"
+description = "Denies the sam_speech_preview command without any pre-configured scope."
+commands.deny = ["sam_speech_preview"]

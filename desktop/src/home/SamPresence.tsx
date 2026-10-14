@@ -103,6 +103,8 @@ const STATE_WORDS: Record<VoiceState, string> = {
   idle: "ready",
   sleeping: "waiting for its name",
   waking: "awake",
+  verifying: "verifying the speaker locally",
+  greeting: "speaking a greeting",
   attending: "waiting for you to speak",
   listening: "listening",
   thinking: "thinking",

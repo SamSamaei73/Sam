@@ -17,6 +17,37 @@ from tests.voice_identity_support import OWNER_VOICE, Harness
 np = pytest.importorskip("numpy")
 
 
+@pytest.mark.parametrize("sample_rate", [16_000, 44_100, 48_000])
+def test_enrollment_and_verification_prepare_identical_pcm(
+    sample_rate: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sam.voice.audio import validate_audio
+    from sam.voice.models import AudioFormat, AudioInput
+    from sam.voice_identity.policy import MIN_SAMPLE_SECONDS
+    from sam.voice_local.audio import to_16k_numpy
+    from tests.voice_support import make_wav
+
+    audio = validate_audio(AudioInput(
+        content=make_wav(frames=4 * sample_rate, rate=sample_rate),
+        declared_format=AudioFormat.WAV_PCM16,
+    ))
+    monkeypatch.setattr(
+        speaker_audio, "_speech_regions",
+        lambda _: [{"start": 4_000, "end": 60_000}],
+    )
+    enrollment_input = to_16k_numpy(audio)
+    verification_input = to_16k_numpy(audio)
+    enrollment = speaker_audio.prepare_speaker_waveform(
+        enrollment_input, minimum_speech_seconds=MIN_SAMPLE_SECONDS,
+    )
+    verification = speaker_audio.prepare_speaker_waveform(
+        verification_input, minimum_speech_seconds=MIN_VERIFICATION_SECONDS,
+    )
+    np.testing.assert_array_equal(enrollment_input, verification_input)
+    np.testing.assert_array_equal(enrollment, verification)
+    assert enrollment.dtype == verification.dtype == np.float32
+
+
 def test_edges_trimmed_with_padding_and_internal_pauses_preserved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
